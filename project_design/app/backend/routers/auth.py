@@ -100,7 +100,7 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-    auth_url = f"{cfg['issuer_url']}/oauth2/authorization?{urllib.parse.urlencode(params)}"
+    auth_url = f"{cfg['issuer_url']}/SSOAuth.cgi?{urllib.parse.urlencode(params)}"
     logger.info(f"Redirecting to OIDC: {auth_url[:80]}...")
     return RedirectResponse(url=auth_url)
 
@@ -132,7 +132,7 @@ async def callback(
     await db.flush()
 
     # 시놀로지 token endpoint로 code 교환
-    token_url = f"{cfg['issuer_url']}/oauth2/token"
+    token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # NAS 사설 인증서 허용
             token_resp = await client.post(token_url, data={
