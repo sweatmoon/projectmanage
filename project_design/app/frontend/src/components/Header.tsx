@@ -1,10 +1,19 @@
 import { useNavigate } from 'react-router-dom'
+import { authStore, client } from '@/lib/api'
+import { LogOut, User } from 'lucide-react'
 
 export default function Header() {
   const navigate = useNavigate()
+  const user = authStore.getUser()
+  const isLoggedIn = authStore.isLoggedIn()
+
+  const handleLogout = () => {
+    client.auth.logout()
+  }
+
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center h-14">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
         <button onClick={() => navigate('/')} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -13,6 +22,24 @@ export default function Header() {
           </div>
           <span className="text-base font-bold text-gray-900">감리 공수관리 시스템</span>
         </button>
+
+        {/* 사용자 정보 + 로그아웃 */}
+        {isLoggedIn && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-sm text-gray-600">
+              <User className="h-4 w-4 text-gray-400" />
+              <span className="font-medium">{user?.name || user?.email || '사용자'}</span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
+              title="로그아웃"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>로그아웃</span>
+            </button>
+          </div>
+        )}
       </div>
     </header>
   )

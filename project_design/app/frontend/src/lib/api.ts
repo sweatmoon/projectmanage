@@ -1,15 +1,93 @@
 /**
- * REST API client that replaces @metagptx/web-sdk
- * Maps client.entities.X.method() → REST API calls to /api/v1/entities/X
- * Maps client.apiCall.invoke() → direct axios calls
+ * REST API client
+ * - JWT 토큰 자동 첨부 (localStorage)
+ * - 401 응답 시 자동 로그인 리다이렉트
  */
 import axios from 'axios';
 
 const V1_ENTITIES = '/api/v1/entities';
 
+// ── 토큰 관리 ──────────────────────────────────────────────
+const TOKEN_KEY = 'app_token';
+const USER_KEY = 'app_user';
+
+export interface AppUser {
+  user_id: string;
+  email: string;
+  name: string;
+  role: string;
+}
+
+export const authStore = {
+  getToken(): string | null {
+    return localStorage.getItem(TOKEN_KEY);
+  },
+  setToken(token: string) {
+    localStorage.setItem(TOKEN_KEY, token);
+  },
+  clearToken() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  },
+  getUser(): AppUser | null {
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  },
+  setUser(user: AppUser) {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  },
+  isLoggedIn(): boolean {
+    const token = this.getToken();
+    if (!token) return false;
+    // JWT exp 검사
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  },
+};
+
+// URL에서 토큰 파라미터 처리 (콜백 후)
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search);
+  const tokenFromUrl = urlParams.get('token');
+  if (tokenFromUrl) {
+    authStore.setToken(tokenFromUrl);
+    // URL에서 token 파라미터 제거
+    urlParams.delete('token');
+    const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+    window.history.replaceState({}, '', newUrl);
+  }
+}
+
+// ── Axios 인스턴스 ─────────────────────────────────────────
 const http = axios.create({ baseURL: '/' });
 
-// Generic entity endpoints mapping
+// 요청 인터셉터: 토큰 자동 첨부
+http.interceptors.request.use((config) => {
+  const token = authStore.getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 응답 인터셉터: 401 시 로그인 페이지로
+http.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && error.response?.data?.auth_required) {
+      authStore.clearToken();
+      window.location.href = '/auth/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+// ── Entity 클라이언트 ──────────────────────────────────────
 const ENTITY_PATHS: Record<string, string> = {
   projects: `${V1_ENTITIES}/projects`,
   people: `${V1_ENTITIES}/people`,
@@ -26,10 +104,7 @@ interface QueryOptions {
 }
 
 interface EntityResponse<T = any> {
-  data: {
-    items: T[];
-    total?: number;
-  };
+  data: { items: T[]; total?: number; };
 }
 
 interface SingleEntityResponse<T = any> {
@@ -49,34 +124,24 @@ function createEntityClient(entityName: string) {
       if (options.limit) params.limit = options.limit;
       if (options.sort) params.sort = options.sort;
       if (options.skip) params.skip = options.skip;
-
       const res = await http.get(basePath, { params });
-      // Normalize response: some endpoints return array, some return {items:[]}
       const rawData = res.data;
-      if (Array.isArray(rawData)) {
-        return { data: { items: rawData, total: rawData.length } };
-      }
-      if (rawData && Array.isArray(rawData.items)) {
-        return { data: rawData };
-      }
+      if (Array.isArray(rawData)) return { data: { items: rawData, total: rawData.length } };
+      if (rawData && Array.isArray(rawData.items)) return { data: rawData };
       return { data: { items: rawData || [], total: 0 } };
     },
-
     async get({ id }: { id: string }): Promise<SingleEntityResponse> {
       const res = await http.get(`${basePath}/${id}`);
       return { data: res.data };
     },
-
     async create({ data }: { data: Record<string, any> }): Promise<SingleEntityResponse> {
       const res = await http.post(basePath, data);
       return { data: res.data };
     },
-
     async update({ id, data }: { id: string; data: Record<string, any> }): Promise<SingleEntityResponse> {
       const res = await http.put(`${basePath}/${id}`, data);
       return { data: res.data };
     },
-
     async delete({ id }: { id: string }): Promise<void> {
       await http.delete(`${basePath}/${id}`);
     },
@@ -90,6 +155,30 @@ interface ApiCallOptions {
   params?: Record<string, any>;
 }
 
+// ── Auth 클라이언트 ────────────────────────────────────────
+const authClient = {
+  login() {
+    // 시놀로지 로그인 페이지로 리다이렉트
+    window.location.href = '/auth/login';
+  },
+  logout() {
+    authStore.clearToken();
+    window.location.href = '/auth/logout';
+  },
+  async getMe(): Promise<AppUser | null> {
+    try {
+      const res = await http.get('/auth/me');
+      const user = res.data as AppUser;
+      authStore.setUser(user);
+      return user;
+    } catch {
+      return null;
+    }
+  },
+  isLoggedIn: () => authStore.isLoggedIn(),
+  getUser: () => authStore.getUser(),
+};
+
 export const client = {
   entities: {
     projects: createEntityClient('projects'),
@@ -101,13 +190,10 @@ export const client = {
 
   apiCall: {
     async invoke({ url, method, data, params }: ApiCallOptions) {
-      const res = await http.request({
-        url,
-        method,
-        data,
-        params,
-      });
-      return { data: res.data };
+      const res = await http.request({ url, method, data, params });
+      return res.data;
     },
   },
+
+  auth: authClient,
 };

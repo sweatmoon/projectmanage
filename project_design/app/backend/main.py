@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 # MODULE_IMPORTS_START
 from services.database import initialize_database, close_database
 from services.auth import initialize_admin_user
+from middlewares.auth_middleware import AuthMiddleware
 # MODULE_IMPORTS_END
 
 
@@ -89,6 +90,8 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+# JWT 인증 미들웨어 (OIDC_ISSUER_URL 환경변수 설정 시 활성화)
+app.add_middleware(AuthMiddleware)
 # MODULE_MIDDLEWARE_END
 
 
