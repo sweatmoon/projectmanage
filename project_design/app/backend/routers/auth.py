@@ -164,7 +164,7 @@ async def callback(
         try:
             async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
                 ui_resp = await client.get(
-                    f"{cfg['issuer_url']}/oauth2/userinfo",
+                    f"{cfg['issuer_url']}/SSOUserInfo.cgi",
                     headers={"Authorization": f"Bearer {tokens.get('access_token', '')}"}
                 )
                 user_info = ui_resp.json()
