@@ -1,0 +1,58 @@
+[
+    {
+        "project_id": 4,
+        "phase_name": "착수",
+        "sort_order": 1,
+        "start_date": "2026-03-01",
+        "end_date": "2026-04-30"
+    },
+    {
+        "project_id": 4,
+        "phase_name": "중간",
+        "sort_order": 2,
+        "start_date": "2026-05-01",
+        "end_date": "2026-06-30"
+    },
+    {
+        "project_id": 5,
+        "phase_name": "착수",
+        "sort_order": 1,
+        "start_date": "2026-03-15",
+        "end_date": "2026-05-31"
+    },
+    {
+        "project_id": 5,
+        "phase_name": "중간",
+        "sort_order": 2,
+        "start_date": "2026-06-01",
+        "end_date": "2026-08-31"
+    },
+    {
+        "project_id": 5,
+        "phase_name": "종료",
+        "sort_order": 3,
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30"
+    },
+    {
+        "project_id": 6,
+        "phase_name": "착수",
+        "sort_order": 1,
+        "start_date": "2026-04-01",
+        "end_date": "2026-06-30"
+    },
+    {
+        "project_id": 6,
+        "phase_name": "중간",
+        "sort_order": 2,
+        "start_date": "2026-07-01",
+        "end_date": "2026-10-31"
+    },
+    {
+        "project_id": 6,
+        "phase_name": "종료",
+        "sort_order": 3,
+        "start_date": "2026-11-01",
+        "end_date": "2026-12-31"
+    }
+]

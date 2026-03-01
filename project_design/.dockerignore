@@ -1,0 +1,10 @@
+# .dockerignore
+app/frontend/node_modules/
+app/frontend/.vite/
+app/backend/__pycache__/
+app/backend/**/__pycache__/
+app/backend/*.db
+app/backend/logs/
+app/backend/.env
+**/.git/
+**/*.pyc

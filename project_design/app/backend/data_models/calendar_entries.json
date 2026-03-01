@@ -1,0 +1,28 @@
+{
+    "title": "calendar_entries",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Primary key, auto-increment"
+        },
+        "staffing_id": {
+            "type": "integer",
+            "description": "Foreign key to staffing (assignment) row"
+        },
+        "entry_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Date of the entry (YYYY-MM-DD)"
+        },
+        "status": {
+            "type": "string",
+            "description": "Status code: NULL, A, or other text"
+        }
+    },
+    "required": [
+        "id",
+        "staffing_id",
+        "entry_date"
+    ]
+}

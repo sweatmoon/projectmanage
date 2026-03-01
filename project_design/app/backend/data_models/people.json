@@ -1,0 +1,30 @@
+{
+    "title": "people",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Primary key, auto-increment"
+        },
+        "person_name": {
+            "type": "string",
+            "description": "인력명"
+        },
+        "team": {
+            "type": "string",
+            "description": "팀, optional"
+        },
+        "grade": {
+            "type": "string",
+            "description": "등급, optional"
+        },
+        "employment_status": {
+            "type": "string",
+            "description": "재직여부: 재직, 외부, 퇴사"
+        }
+    },
+    "required": [
+        "id",
+        "person_name"
+    ]
+}

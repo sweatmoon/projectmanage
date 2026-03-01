@@ -1,0 +1,42 @@
+{
+    "title": "projects",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Primary key, auto-increment"
+        },
+        "project_name": {
+            "type": "string",
+            "description": "프로젝트명"
+        },
+        "organization": {
+            "type": "string",
+            "description": "기관명"
+        },
+        "status": {
+            "type": "string",
+            "description": "상태: 작성중, 확정, 제출완료"
+        },
+        "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "제안마감일시, optional"
+        },
+        "notes": {
+            "type": "string",
+            "description": "비고, optional"
+        },
+        "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "수정일시"
+        }
+    },
+    "required": [
+        "id",
+        "project_name",
+        "organization",
+        "status"
+    ]
+}

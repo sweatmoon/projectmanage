@@ -1,0 +1,27 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gantt-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # SQLite DB 영구 저장
+      - gantt_data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/app.db
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  gantt_data:
+    driver: local

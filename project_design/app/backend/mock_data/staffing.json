@@ -1,0 +1,222 @@
+[
+    {
+        "project_id": 4,
+        "phase_id": 6,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 3,
+        "person_name_text": "박민수",
+        "md": 5
+    },
+    {
+        "project_id": 4,
+        "phase_id": 7,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 3,
+        "person_name_text": "박민수",
+        "md": 8
+    },
+    {
+        "project_id": 4,
+        "phase_id": 6,
+        "category": "감리팀",
+        "field": "DB/데이터",
+        "sub_field": "데이터설계",
+        "person_id": 4,
+        "person_name_text": "정수진",
+        "md": 4
+    },
+    {
+        "project_id": 4,
+        "phase_id": 7,
+        "category": "감리팀",
+        "field": "DB/데이터",
+        "sub_field": "데이터설계",
+        "person_id": 4,
+        "person_name_text": "정수진",
+        "md": 6
+    },
+    {
+        "project_id": 4,
+        "phase_id": 6,
+        "category": "전문가팀",
+        "field": "보안",
+        "sub_field": "클라우드보안",
+        "person_id": 11,
+        "person_name_text": "최영수",
+        "md": 3
+    },
+    {
+        "project_id": 4,
+        "phase_id": 7,
+        "category": "전문가팀",
+        "field": "보안",
+        "sub_field": "클라우드보안",
+        "person_id": 11,
+        "person_name_text": "최영수",
+        "md": 5
+    },
+    {
+        "project_id": 5,
+        "phase_id": 8,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 6,
+        "person_name_text": "강미라",
+        "md": 6
+    },
+    {
+        "project_id": 5,
+        "phase_id": 9,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 6,
+        "person_name_text": "강미라",
+        "md": 10
+    },
+    {
+        "project_id": 5,
+        "phase_id": 10,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 6,
+        "person_name_text": "강미라",
+        "md": 4
+    },
+    {
+        "project_id": 5,
+        "phase_id": 8,
+        "category": "감리팀",
+        "field": "인프라",
+        "sub_field": "서버",
+        "person_id": 7,
+        "person_name_text": "윤재호",
+        "md": 5
+    },
+    {
+        "project_id": 5,
+        "phase_id": 9,
+        "category": "감리팀",
+        "field": "인프라",
+        "sub_field": "서버",
+        "person_id": 7,
+        "person_name_text": "윤재호",
+        "md": 8
+    },
+    {
+        "project_id": 5,
+        "phase_id": 8,
+        "category": "전문가팀",
+        "field": "SW개발",
+        "sub_field": "프론트엔드",
+        "person_id": 12,
+        "person_name_text": "정미경",
+        "md": 4
+    },
+    {
+        "project_id": 5,
+        "phase_id": 9,
+        "category": "전문가팀",
+        "field": "SW개발",
+        "sub_field": "프론트엔드",
+        "person_id": 12,
+        "person_name_text": "정미경",
+        "md": 7
+    },
+    {
+        "project_id": 6,
+        "phase_id": 11,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 8,
+        "person_name_text": "한소영",
+        "md": 7
+    },
+    {
+        "project_id": 6,
+        "phase_id": 12,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 8,
+        "person_name_text": "한소영",
+        "md": 12
+    },
+    {
+        "project_id": 6,
+        "phase_id": 13,
+        "category": "감리팀",
+        "field": "사업관리",
+        "sub_field": "PMO",
+        "person_id": 8,
+        "person_name_text": "한소영",
+        "md": 5
+    },
+    {
+        "project_id": 6,
+        "phase_id": 11,
+        "category": "감리팀",
+        "field": "AI/ML",
+        "sub_field": "모델링",
+        "person_id": 9,
+        "person_name_text": "임태준",
+        "md": 6
+    },
+    {
+        "project_id": 6,
+        "phase_id": 12,
+        "category": "감리팀",
+        "field": "AI/ML",
+        "sub_field": "모델링",
+        "person_id": 9,
+        "person_name_text": "임태준",
+        "md": 10
+    },
+    {
+        "project_id": 6,
+        "phase_id": 11,
+        "category": "전문가팀",
+        "field": "보안",
+        "sub_field": "AI보안",
+        "person_id": 13,
+        "person_name_text": "한동훈",
+        "md": 3
+    },
+    {
+        "project_id": 6,
+        "phase_id": 12,
+        "category": "전문가팀",
+        "field": "보안",
+        "sub_field": "AI보안",
+        "person_id": 13,
+        "person_name_text": "한동훈",
+        "md": 6
+    },
+    {
+        "project_id": 6,
+        "phase_id": 11,
+        "category": "전문가팀",
+        "field": "SW개발",
+        "sub_field": "백엔드",
+        "person_id": 14,
+        "person_name_text": "윤서연",
+        "md": 4
+    },
+    {
+        "project_id": 6,
+        "phase_id": 12,
+        "category": "전문가팀",
+        "field": "SW개발",
+        "sub_field": "백엔드",
+        "person_id": 14,
+        "person_name_text": "윤서연",
+        "md": 8
+    }
+]

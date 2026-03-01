@@ -1,0 +1,393 @@
+import { useState, useRef, useMemo } from 'react';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Search, User, Users, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { client } from '@/lib/api';
+import { toast } from 'sonner';
+
+
+interface Person {
+  id: number;
+  person_name: string;
+  team?: string;
+  grade?: string;
+  employment_status?: string;
+}
+
+interface PeopleTabProps {
+  people: Person[];
+  loading: boolean;
+  onSelectPerson: (id: number) => void;
+  onRefresh?: () => void;
+}
+
+const PAGE_SIZE = 40; // 4 columns × 10 rows
+
+const empStatusConfig: Record<string, { className: string }> = {
+  '재직': { className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
+  '외부': { className: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
+  '퇴사': { className: 'bg-red-100 text-red-700 hover:bg-red-100' },
+};
+
+function downloadExcelTemplate() {
+  const BOM = '\uFEFF';
+  const headers = ['인력명', '팀', '등급', '재직여부'];
+  const exampleRows = [
+    ['홍길동', '1팀', '특급', '재직'],
+    ['김철수', '2팀', '고급', '재직'],
+    ['이영희', '', '중급', '외부'],
+  ];
+  const csvContent = BOM + [headers.join(','), ...exampleRows.map((r) => r.join(','))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '인력_일괄등록_양식.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseCSV(text: string): string[][] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  return lines.map((line) => {
+    const cells: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (const ch of line) {
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { cells.push(current.trim()); current = ''; continue; }
+      current += ch;
+    }
+    cells.push(current.trim());
+    return cells;
+  });
+}
+
+export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }: PeopleTabProps) {
+  const [search, setSearch] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter and sort by name ascending
+  const filtered = useMemo(() => {
+    const result = people.filter((p) =>
+      p.person_name?.toLowerCase().includes(search.toLowerCase()) ||
+      (p.team || '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.grade || '').toLowerCase().includes(search.toLowerCase())
+    );
+    result.sort((a, b) => (a.person_name || '').localeCompare(b.person_name || '', 'ko'));
+    return result;
+  }, [people, search]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedPeople = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  // Reset page when search changes
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setCurrentPage(1);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+
+      const headerIdx = rows.findIndex((r) =>
+        r.some((c) => c.includes('인력명') || c.toLowerCase().includes('name'))
+      );
+
+      const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1) : rows;
+
+      if (dataRows.length === 0) {
+        toast.error('업로드할 데이터가 없습니다.');
+        return;
+      }
+
+      let created = 0;
+      let skipped = 0;
+
+      for (const row of dataRows) {
+        const name = row[0]?.trim();
+        if (!name) { skipped++; continue; }
+
+        const exists = people.some((p) => p.person_name === name);
+        if (exists) { skipped++; continue; }
+
+        const team = row[1]?.trim() || '';
+        const grade = row[2]?.trim() || '';
+        const empStatus = row[3]?.trim() || '재직';
+
+        try {
+          await client.entities.people.create({
+            data: {
+              person_name: name,
+              team,
+              grade,
+              employment_status: empStatus,
+            },
+          });
+          created++;
+        } catch (err) {
+          console.error(`Failed to create person ${name}:`, err);
+          skipped++;
+        }
+      }
+
+      toast.success(`${created}명 등록 완료${skipped > 0 ? ` (${skipped}건 건너뜀)` : ''}`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('File upload error:', err);
+      toast.error('파일 처리 중 오류가 발생했습니다.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeletePerson = async (person: Person) => {
+    const confirmed = window.confirm(`"${person.person_name}" 인력을 삭제하시겠습니까?\n\n⚠️ 해당 인력이 배정된 투입공수 정보는 유지되지만, 인력 연결이 해제됩니다.`);
+    if (!confirmed) return;
+
+    setDeletingId(person.id);
+    try {
+      await client.entities.people.delete({ id: String(person.id) });
+      toast.success(`"${person.person_name}" 인력이 삭제되었습니다.`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to delete person:', err);
+      toast.error('인력 삭제에 실패했습니다.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((p) => p.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const confirmed = window.confirm(`선택한 ${selectedIds.size}명의 인력을 삭제하시겠습니까?`);
+    if (!confirmed) return;
+
+    setBulkDeleting(true);
+    let deleted = 0;
+    for (const id of selectedIds) {
+      try {
+        await client.entities.people.delete({ id: String(id) });
+        deleted++;
+      } catch (err) {
+        console.error(`Failed to delete person ${id}:`, err);
+      }
+    }
+    toast.success(`${deleted}명 삭제 완료`);
+    setSelectedIds(new Set());
+    setBulkDeleting(false);
+    if (onRefresh) onRefresh();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Search + Actions */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="인력명/팀/등급으로 검색..."
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button variant="outline" size="sm" onClick={downloadExcelTemplate}>
+          <Download className="h-4 w-4 mr-1" />
+          양식 다운로드
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+          일괄 업로드
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt"
+          className="hidden"
+          onChange={handleFileUpload}
+        />
+        {selectedIds.size > 0 && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+          >
+            {bulkDeleting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
+            선택 삭제 ({selectedIds.size})
+          </Button>
+        )}
+      </div>
+
+      {/* Select all */}
+      {filtered.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <button
+            className="underline hover:text-blue-600"
+            onClick={toggleSelectAll}
+          >
+            {selectedIds.size === filtered.length ? '전체 해제' : '전체 선택'}
+          </button>
+          <span>({filtered.length}명)</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-12 text-muted-foreground">로딩 중...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">인력이 없습니다.</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {paginatedPeople.map((person) => {
+              const esc = empStatusConfig[person.employment_status || ''] || empStatusConfig['재직'];
+              const isSelected = selectedIds.has(person.id);
+              const isDeleting = deletingId === person.id;
+              return (
+                <Card
+                  key={person.id}
+                  className={`cursor-pointer hover:shadow-md transition-shadow ${isSelected ? 'ring-2 ring-blue-400 bg-blue-50/30' : ''}`}
+                >
+                  <CardContent className="p-3">
+                    <div className="flex items-center gap-2">
+                      {/* Checkbox */}
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(person.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                      />
+                      <div
+                        className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0"
+                        onClick={() => onSelectPerson(person.id)}
+                      >
+                        <User className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0" onClick={() => onSelectPerson(person.id)}>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-sm truncate">{person.person_name}</span>
+                          {person.employment_status && (
+                            <Badge className={`text-[10px] px-1.5 py-0 ${esc.className}`}>{person.employment_status}</Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
+                          {person.team && (
+                            <span className="flex items-center gap-0.5">
+                              <Users className="h-3 w-3" />
+                              {person.team}
+                            </span>
+                          )}
+                          {person.grade && <span>· {person.grade}</span>}
+                        </div>
+                      </div>
+                      {/* Delete button */}
+                      <button
+                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+                        onClick={(e) => { e.stopPropagation(); handleDeletePerson(person); }}
+                        disabled={isDeleting}
+                        title="인력 삭제"
+                      >
+                        {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                  // Show first, last, current, and neighbors
+                  const show =
+                    page === 1 ||
+                    page === totalPages ||
+                    Math.abs(page - safePage) <= 1;
+                  const showEllipsis =
+                    !show &&
+                    (page === 2 && safePage > 3) ||
+                    (page === totalPages - 1 && safePage < totalPages - 2);
+
+                  if (!show && !showEllipsis) return null;
+                  if (showEllipsis) {
+                    return <span key={page} className="text-xs text-muted-foreground px-1">…</span>;
+                  }
+                  return (
+                    <Button
+                      key={page}
+                      variant={page === safePage ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-8 w-8 p-0 text-xs"
+                      onClick={() => setCurrentPage(page)}
+                    >
+                      {page}
+                    </Button>
+                  );
+                })}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

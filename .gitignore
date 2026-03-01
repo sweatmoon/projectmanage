@@ -1,0 +1,61 @@
+# Node modules
+node_modules/
+project_design/app/frontend/node_modules/
+
+# Build outputs
+project_design/app/frontend/dist/
+project_design/app/backend/frontend/
+project_design/app/frontend_dist_backup/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+project_design/app/backend/__pycache__/
+
+# Database (SQLite - don't commit the actual DB)
+project_design/app/backend/app.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs/
+project_design/app/backend/logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Alembic versions cache
+project_design/app/backend/alembic/versions/__pycache__/
+
+# Screenshots (optional - remove if you want to include them)
+*.png
+
+# Supervisor / PM2
+supervisord.log
+supervisord.pid
+supervisor.sock
+.pm2/
+
+# Virtual envs
+venv/
+.venv/
+env/

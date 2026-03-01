@@ -1,0 +1,38 @@
+{
+    "title": "phases",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Primary key, auto-increment"
+        },
+        "project_id": {
+            "type": "integer",
+            "description": "프로젝트 FK"
+        },
+        "phase_name": {
+            "type": "string",
+            "description": "단계명"
+        },
+        "start_date": {
+            "type": "string",
+            "format": "date",
+            "description": "시작일"
+        },
+        "end_date": {
+            "type": "string",
+            "format": "date",
+            "description": "종료일"
+        },
+        "sort_order": {
+            "type": "integer",
+            "description": "정렬순서"
+        }
+    },
+    "required": [
+        "id",
+        "project_id",
+        "phase_name",
+        "sort_order"
+    ]
+}

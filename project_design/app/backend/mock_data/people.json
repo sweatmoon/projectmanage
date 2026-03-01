@@ -1,0 +1,26 @@
+[
+    {
+        "person_name": "최영수",
+        "team": "감리1팀",
+        "grade": "수석",
+        "employment_status": "재직"
+    },
+    {
+        "person_name": "정미경",
+        "team": "감리2팀",
+        "grade": "책임",
+        "employment_status": "재직"
+    },
+    {
+        "person_name": "한동훈",
+        "team": "감리1팀",
+        "grade": "선임",
+        "employment_status": "재직"
+    },
+    {
+        "person_name": "윤서연",
+        "team": "감리2팀",
+        "grade": "선임",
+        "employment_status": "재직"
+    }
+]

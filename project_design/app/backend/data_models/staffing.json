@@ -1,0 +1,55 @@
+{
+    "title": "staffing",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "Primary key, auto-increment"
+        },
+        "project_id": {
+            "type": "integer",
+            "description": "프로젝트 FK"
+        },
+        "phase_id": {
+            "type": "integer",
+            "description": "단계 FK"
+        },
+        "category": {
+            "type": "string",
+            "description": "구분 (예: 단계 감리팀, 전문가팀)"
+        },
+        "field": {
+            "type": "string",
+            "description": "담당분야"
+        },
+        "sub_field": {
+            "type": "string",
+            "description": "세부분야"
+        },
+        "person_id": {
+            "type": "integer",
+            "description": "인력 FK, optional"
+        },
+        "person_name_text": {
+            "type": "string",
+            "description": "인력명 텍스트 (조인 안될 때)"
+        },
+        "md": {
+            "type": "integer",
+            "description": "투입공수 MD, NULL 허용"
+        },
+        "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "수정일시"
+        }
+    },
+    "required": [
+        "id",
+        "project_id",
+        "phase_id",
+        "category",
+        "field",
+        "sub_field"
+    ]
+}
