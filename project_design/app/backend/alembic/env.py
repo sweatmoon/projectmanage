@@ -4,6 +4,7 @@
 
 import asyncio
 import importlib
+import os
 import pkgutil
 from logging.config import fileConfig
 
@@ -22,6 +23,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Override sqlalchemy.url from DATABASE_URL environment variable if set
+_db_url = os.environ.get("DATABASE_URL", "sqlite:///./app.db")
+# Ensure async driver for SQLite
+if _db_url.startswith("sqlite:///") and "+aiosqlite" not in _db_url:
+    _db_url = _db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+elif _db_url.startswith("postgresql://") and "+asyncpg" not in _db_url:
+    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+config.set_main_option("sqlalchemy.url", _db_url)
+
 target_metadata = Base.metadata
 
 
@@ -34,7 +44,7 @@ def alembic_include_object(object, name, type_, reflected, compare_to):
 
 
 async def run_migrations_online():
-    connectable = create_async_engine(config.get_main_option("sqlalchemy.url"), poolclass=pool.NullPool)
+    connectable = create_async_engine(_db_url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(
             lambda sync_conn: context.configure(
