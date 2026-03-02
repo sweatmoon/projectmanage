@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { client } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, User, Briefcase, Edit2, Check, X, Save } from 'lucide-react';
+import { ArrowLeft, User, Briefcase, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Person {
@@ -22,22 +22,11 @@ interface Project {
   status: string;
 }
 
-interface Phase {
-  id: number;
-  project_id: number;
-  phase_name: string;
-  sort_order: number;
-}
-
 interface Staffing {
   id: number;
   project_id: number;
   phase_id: number;
-  category: string;
-  field: string;
-  sub_field: string;
   person_id?: number;
-  person_name_text?: string;
   md?: number | null;
 }
 
@@ -46,14 +35,162 @@ interface ProjectSummary {
   total: number;
 }
 
-const empStatusConfig: Record<string, string> = {
-  '재직': 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
-  '외부': 'bg-amber-100 text-amber-700 hover:bg-amber-100',
-  '퇴사': 'bg-red-100 text-red-700 hover:bg-red-100',
-};
+const GRADE_OPTIONS = ['수석감리원', '감리원'];
 
-const gradeOptions = ['수석감리원', '감리원'];
+// ── 클릭 시 인라인 편집되는 필드 컴포넌트 ──────────────────
+interface InlineFieldProps {
+  label: string;
+  value: string;
+  placeholder?: string;
+  type?: 'text' | 'select';
+  options?: string[];
+  onSave: (val: string) => Promise<void>;
+  badge?: boolean;          // 값을 배지 스타일로 표시
+  badgeClass?: string;
+}
 
+function InlineField({ label, value, placeholder = '-', type = 'text', options = [], onSave, badge, badgeClass }: InlineFieldProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
+
+  // 외부 value 동기화
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  const open = () => {
+    setDraft(value);
+    setEditing(true);
+    setTimeout(() => (inputRef.current as HTMLElement)?.focus(), 30);
+  };
+
+  const commit = async () => {
+    if (draft === value) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+  };
+
+  return (
+    <div className="group">
+      <p className="text-xs text-slate-400 mb-1">{label}</p>
+
+      {editing ? (
+        <div className="flex items-center gap-1.5">
+          {type === 'select' ? (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={onKey}
+              className="flex-1 border border-blue-400 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            >
+              <option value="">선택 안 함</option>
+              {options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          ) : (
+            <input
+              ref={inputRef as React.RefObject<HTMLInputElement>}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={onKey}
+              placeholder={placeholder}
+              className="flex-1 border border-blue-400 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          )}
+          {saving
+            ? <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
+            : <Check className="h-3.5 w-3.5 text-blue-500 cursor-pointer flex-shrink-0" onClick={commit} />
+          }
+        </div>
+      ) : (
+        <div
+          onClick={open}
+          title="클릭하여 편집"
+          className="min-h-[28px] flex items-center cursor-pointer rounded-md px-2 py-1 -mx-2 hover:bg-blue-50 transition-colors group-hover:ring-1 group-hover:ring-blue-200"
+        >
+          {value ? (
+            badge
+              ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${badgeClass || 'bg-blue-50 text-blue-700'}`}>{value}</span>
+              : <span className="text-sm font-medium text-slate-700">{value}</span>
+          ) : (
+            <span className="text-sm text-slate-300 italic">{placeholder || '클릭하여 입력'}</span>
+          )}
+          <span className="ml-auto text-[10px] text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pl-2">편집</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 이름 인라인 편집 ─────────────────────────────────────────
+interface InlineNameProps {
+  value: string;
+  onSave: (val: string) => Promise<void>;
+}
+function InlineName({ value, onSave }: InlineNameProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  const open = () => { setDraft(value); setEditing(true); setTimeout(() => ref.current?.focus(), 30); };
+
+  const commit = async () => {
+    if (!draft.trim()) { toast.error('이름은 필수입니다.'); ref.current?.focus(); return; }
+    if (draft === value) { setEditing(false); return; }
+    setSaving(true);
+    try { await onSave(draft); } finally { setSaving(false); setEditing(false); }
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 flex-1">
+        <input
+          ref={ref}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKey}
+          className="text-xl font-bold text-slate-800 border-b-2 border-blue-400 bg-transparent outline-none flex-1"
+        />
+        {saving && <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />}
+      </div>
+    );
+  }
+
+  return (
+    <h2
+      onClick={open}
+      title="클릭하여 이름 편집"
+      className="text-xl font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors flex items-center gap-1.5 group"
+    >
+      {value}
+      <span className="text-xs font-normal text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity">✏︎</span>
+    </h2>
+  );
+}
+
+
+// ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function PersonDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -63,11 +200,6 @@ export default function PersonDetail() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [staffing, setStaffing] = useState<Staffing[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // 인라인 수정 상태
-  const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<Person>>({});
-  const [saving, setSaving] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -87,67 +219,36 @@ export default function PersonDetail() {
     }
   }, [personId]);
 
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // 편집 시작
-  const startEdit = () => {
+  // 단일 필드 저장 헬퍼
+  const saveField = useCallback(async (field: keyof Person, val: string) => {
     if (!person) return;
-    setEditForm({
-      person_name: person.person_name,
-      position: person.position || '',
-      grade: person.grade || '',
-      employment_status: person.employment_status || '재직',
-    });
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    setEditing(false);
-    setEditForm({});
-  };
-
-  // 저장
-  const handleSave = async () => {
-    if (!person) return;
-    if (!editForm.person_name?.trim()) {
-      toast.error('이름은 필수입니다.');
-      return;
-    }
-    setSaving(true);
     try {
       const res = await client.entities.people.update({
         id: String(person.id),
-        data: editForm,
+        data: { [field]: val },
       });
-      setPerson(res?.data || person);
-      setEditing(false);
-      toast.success('인력 정보가 수정되었습니다.');
+      setPerson(res?.data || { ...person, [field]: val });
+      toast.success('저장되었습니다.');
     } catch (err) {
       console.error(err);
-      toast.error('수정에 실패했습니다.');
-    } finally {
-      setSaving(false);
+      toast.error('저장에 실패했습니다.');
+      throw err;
     }
-  };
+  }, [person]);
 
-  // 프로젝트별 MD 합산 (간략 표시)
   const projectSummaries = useMemo((): ProjectSummary[] => {
     const projectIds = [...new Set(staffing.map((s) => s.project_id))];
     return projectIds.map((pid) => {
       const project = projects.find((p) => p.id === pid);
       if (!project) return null;
-      const total = staffing
-        .filter((s) => s.project_id === pid)
-        .reduce((sum, s) => sum + (s.md ?? 0), 0);
+      const total = staffing.filter((s) => s.project_id === pid).reduce((sum, s) => sum + (s.md ?? 0), 0);
       return { project, total };
     }).filter(Boolean) as ProjectSummary[];
   }, [staffing, projects]);
 
-  const totalAllMd = useMemo(() => {
-    return staffing.reduce((sum, s) => sum + (s.md ?? 0), 0);
-  }, [staffing]);
+  const totalAllMd = useMemo(() => staffing.reduce((sum, s) => sum + (s.md ?? 0), 0), [staffing]);
 
   if (loading) {
     return (
@@ -175,12 +276,7 @@ export default function PersonDetail() {
             목록
           </Button>
           <h1 className="text-lg font-bold text-slate-800 flex-1">{person.person_name}</h1>
-          {!editing && (
-            <Button variant="outline" size="sm" onClick={startEdit}>
-              <Edit2 className="h-4 w-4 mr-1" />
-              정보 수정
-            </Button>
-          )}
+          <span className="text-xs text-slate-400 hidden sm:inline">항목을 클릭하면 바로 수정됩니다</span>
         </div>
       </header>
 
@@ -188,109 +284,51 @@ export default function PersonDetail() {
 
         {/* ── 인력 정보 카드 ── */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          {/* 상단 헤더 */}
+          {/* 상단: 아이콘 + 이름 + MD */}
           <div className="bg-gradient-to-r from-blue-50 to-slate-50 px-6 py-4 flex items-center gap-4 border-b border-slate-100">
             <div className="h-14 w-14 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
               <User className="h-7 w-7 text-blue-600" />
             </div>
-            <div className="flex-1">
-              {editing ? (
-                <input
-                  className="text-xl font-bold text-slate-800 border-b-2 border-blue-400 bg-transparent outline-none w-full"
-                  value={editForm.person_name || ''}
-                  onChange={(e) => setEditForm({ ...editForm, person_name: e.target.value })}
-                  placeholder="이름"
-                />
-              ) : (
-                <h2 className="text-xl font-bold text-slate-800">{person.person_name}</h2>
-              )}
+            <div className="flex-1 min-w-0">
+              <InlineName
+                value={person.person_name}
+                onSave={(val) => saveField('person_name', val)}
+              />
             </div>
-            <div className="text-right">
+            <div className="text-right flex-shrink-0">
               <p className="text-xs text-slate-400">총 투입 MD</p>
               <p className="text-3xl font-bold text-blue-600">{totalAllMd}</p>
             </div>
           </div>
 
-          {/* 상세 필드 */}
-          <div className="px-6 py-4">
-            {editing ? (
-              /* ── 편집 모드 ── */
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* 직급 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">직급</label>
-                  <input
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    value={editForm.position || ''}
-                    onChange={(e) => setEditForm({ ...editForm, position: e.target.value })}
-                    placeholder="예: 수석, 책임, 선임, 주임, 사원"
-                  />
-                </div>
-                {/* 감리원 등급 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">감리원 등급</label>
-                  <select
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    value={editForm.grade || ''}
-                    onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
-                  >
-                    <option value="">선택</option>
-                    {gradeOptions.map((g) => (
-                      <option key={g} value={g}>{g}</option>
-                    ))}
-                  </select>
-                </div>
-                {/* 구분 - 자유 텍스트 */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">구분</label>
-                  <input
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    value={editForm.employment_status || ''}
-                    onChange={(e) => setEditForm({ ...editForm, employment_status: e.target.value })}
-                    placeholder="예: 재직, 외부, 퇴사"
-                  />
-                </div>
-              </div>
-            ) : (
-              /* ── 보기 모드 ── */
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">직급</p>
-                  <p className="font-medium text-slate-700">{person.position || <span className="text-slate-300">-</span>}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">감리원 등급</p>
-                  {person.grade
-                    ? <span className="inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium text-xs">{person.grade}</span>
-                    : <span className="text-slate-300">-</span>
-                  }
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">구분</p>
-                  <p className="font-medium text-slate-700">{person.employment_status || <span className="text-slate-300">-</span>}</p>
-                </div>
-              </div>
-            )}
-
-            {/* 수정 모드 버튼 */}
-            {editing && (
-              <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-                <Button variant="outline" size="sm" onClick={cancelEdit} disabled={saving}>
-                  <X className="h-4 w-4 mr-1" />
-                  취소
-                </Button>
-                <Button size="sm" onClick={handleSave} disabled={saving}>
-                  {saving
-                    ? <><Save className="h-4 w-4 mr-1 animate-pulse" />저장 중...</>
-                    : <><Check className="h-4 w-4 mr-1" />저장</>
-                  }
-                </Button>
-              </div>
-            )}
+          {/* 하단: 3개 필드 — 클릭하면 인라인 편집 */}
+          <div className="px-6 py-4 grid grid-cols-3 gap-6">
+            <InlineField
+              label="직급"
+              value={person.position || ''}
+              placeholder="예: 수석, 책임, 선임"
+              onSave={(val) => saveField('position', val)}
+            />
+            <InlineField
+              label="감리원 등급"
+              value={person.grade || ''}
+              placeholder="등급 선택"
+              type="select"
+              options={GRADE_OPTIONS}
+              onSave={(val) => saveField('grade', val)}
+              badge
+              badgeClass="bg-blue-50 text-blue-700"
+            />
+            <InlineField
+              label="구분"
+              value={person.employment_status || ''}
+              placeholder="예: 재직, 외부"
+              onSave={(val) => saveField('employment_status', val)}
+            />
           </div>
         </div>
 
-        {/* ── 참여 프로젝트 (간략) ── */}
+        {/* ── 참여 프로젝트 ── */}
         <div>
           <h3 className="font-semibold flex items-center gap-2 text-slate-700 mb-3">
             <Briefcase className="h-4 w-4" />
