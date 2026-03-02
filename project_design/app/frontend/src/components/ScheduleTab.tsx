@@ -1476,6 +1476,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     setTogglingCell(cellKey);
     const newStatus = currentlySelected ? null : badge.status;
 
+    // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
+    const prevEntries = calendarEntries; // 롤백용 스냅샷
+    if (currentlySelected) {
+      setCalendarEntries((prev) =>
+        prev.filter((e) => !(e.staffing_id === staffingId && e.entry_date === dateStr))
+      );
+    } else {
+      setCalendarEntries((prev) => [
+        ...prev,
+        { id: null, staffing_id: staffingId, entry_date: dateStr, status: newStatus },
+      ]);
+    }
+
     try {
       await client.apiCall.invoke({
         url: '/api/v1/calendar/toggle',
@@ -1484,20 +1497,16 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           cells: [{ staffing_id: staffingId, entry_date: dateStr, status: newStatus }],
         },
       });
-
-      if (currentlySelected) {
-        setCalendarEntries((prev) =>
-          prev.filter((e) => !(e.staffing_id === staffingId && e.entry_date === dateStr))
-        );
-      } else {
-        setCalendarEntries((prev) => [
-          ...prev,
-          { id: null, staffing_id: staffingId, entry_date: dateStr, status: newStatus },
-        ]);
-      }
-    } catch (err) {
+      // 성공 시 낙관적 업데이트를 그대로 유지
+    } catch (err: any) {
+      // 실패 시 이전 상태로 롤백
+      setCalendarEntries(prevEntries);
       console.error('Failed to toggle cell:', err);
-      toast.error('일정 변경에 실패했습니다');
+      if (err?.response?.status === 401) {
+        toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+      } else {
+        toast.error('일정 변경에 실패했습니다');
+      }
     } finally {
       setTogglingCell(null);
     }
@@ -1551,14 +1560,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         }
       }
 
-      // Send batch request
-      await client.apiCall.invoke({
-        url: '/api/v1/calendar/toggle',
-        method: 'POST',
-        data: { cells },
-      });
-
-      // Update local state
+      // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
+      const prevEntries = calendarEntries; // 롤백용 스냅샷
       if (mode === 'fill') {
         setCalendarEntries((prev) => [
           ...prev,
@@ -1569,17 +1572,35 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
             status: c.status,
           })),
         ]);
-        toast.success(`${cells.length}일 일괄 선택 완료`);
       } else {
         const clearDates = new Set(cells.map((c) => c.entry_date));
         setCalendarEntries((prev) =>
           prev.filter((e) => !(e.staffing_id === staffingId && clearDates.has(e.entry_date)))
         );
-        toast.success(`${cells.length}일 일괄 해제 완료`);
       }
-    } catch (err) {
-      console.error('Bulk fill failed:', err);
-      toast.error('일괄 처리에 실패했습니다');
+
+      // Send batch request
+      try {
+        await client.apiCall.invoke({
+          url: '/api/v1/calendar/toggle',
+          method: 'POST',
+          data: { cells },
+        });
+        if (mode === 'fill') {
+          toast.success(`${cells.length}일 일괄 선택 완료`);
+        } else {
+          toast.success(`${cells.length}일 일괄 해제 완료`);
+        }
+      } catch (err: any) {
+        // 실패 시 이전 상태로 롤백
+        setCalendarEntries(prevEntries);
+        console.error('Bulk fill failed:', err);
+        if (err?.response?.status === 401) {
+          toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+        } else {
+          toast.error('일괄 처리에 실패했습니다');
+        }
+      }
     } finally {
       setBulkFilling(false);
     }

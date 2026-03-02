@@ -32,13 +32,21 @@ SKIP_LOG_PREFIXES = ("/assets/", "/favicon", "/vite")
 SKIP_LOG_SUFFIXES = (".js", ".css", ".ico", ".svg", ".png", ".html", ".woff", ".woff2", ".ttf", ".map")
 
 def _is_public(path: str) -> bool:
-    if path.startswith("/assets/") or path.endswith((".js", ".css", ".ico", ".svg", ".png", ".html")):
+    # 정적 파일은 항상 공개
+    if path.startswith("/assets/") or path.endswith((".js", ".css", ".ico", ".svg", ".png", ".html", ".woff", ".woff2", ".ttf", ".map")):
         return True
+    # 명시적 공개 경로
     if path in PUBLIC_PATHS:
         return True
+    # /auth/* 경로는 공개
     if path.startswith("/auth/"):
         return True
+    # /database/* 경로는 공개
     if path.startswith("/database/"):
+        return True
+    # SPA 프론트엔드 라우트: /api/v1 또는 /admin 으로 시작하지 않으면 공개
+    # (프론트엔드는 /logged-out, /project/:id, /person/:id 등의 경로를 사용)
+    if not path.startswith("/api/") and not path.startswith("/admin"):
         return True
     return False
 
