@@ -10,9 +10,11 @@ from pathlib import Path
 from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # MODULE_IMPORTS_START
 from services.database import initialize_database, close_database
@@ -81,7 +83,42 @@ app = FastAPI(
 )
 
 
+# ── 역방향 프록시 헤더 처리 미들웨어 ─────────────────────────
+# NAS DSM 역방향 프록시(Synology Application Portal)를 통해
+# HTTPS 요청이 HTTP로 컨테이너에 전달될 때,
+# X-Forwarded-Proto: https 헤더를 올바르게 반영한다.
+class ReverseProxyMiddleware(BaseHTTPMiddleware):
+    """X-Forwarded-Proto / X-Forwarded-Host 헤더를 신뢰하여
+    FastAPI가 올바른 스킴(https)과 호스트를 인식하게 한다."""
+    async def dispatch(self, request: Request, call_next):
+        # X-Forwarded-Proto 처리
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        forwarded_host  = request.headers.get("x-forwarded-host", "")
+        forwarded_for   = request.headers.get("x-forwarded-for", "")
+
+        if forwarded_proto:
+            request.scope["scheme"] = forwarded_proto.split(",")[0].strip()
+        if forwarded_host:
+            host = forwarded_host.split(",")[0].strip()
+            # scope의 server 튜플을 프록시 호스트로 교체
+            port = 443 if request.scope.get("scheme") == "https" else 80
+            if ":" in host:
+                h, p = host.rsplit(":", 1)
+                try:
+                    port = int(p)
+                    host = h
+                except ValueError:
+                    pass
+            request.scope["server"] = (host, port)
+
+        response = await call_next(request)
+        return response
+
+
 # MODULE_MIDDLEWARE_START
+# 역방향 프록시 헤더 처리 (NAS DSM Application Portal / nginx proxy)
+app.add_middleware(ReverseProxyMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r".*",

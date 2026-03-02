@@ -6,6 +6,25 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # 환경변수는 .env 파일로 관리 (절대 Git에 커밋하지 마세요!)
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ⚠️  포트 설정 안내
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Synology DSM > Application Portal 에서 역방향 프록시를 설정하면
+# 외부 HTTPS 포트(예: 8443) → 내부 HTTP:8080 으로 전달됩니다.
+#
+# [권장 구성]
+#   ① DSM Application Portal 역방향 프록시:
+#      - 원본: HTTPS, activo-no1.synology.me, 포트 8443
+#      - 대상: HTTP, localhost, 포트 8080  ← 컨테이너 내부 포트
+#      - "WebSocket 활성화" 체크
+#
+#   ② 이 파일의 포트 매핑: "8080:8080" (역방향 프록시가 직접 접근)
+#      또는 "8888:8080" 후 DSM에서 8888→8080 역방향 프록시 설정
+#
+#   ③ .env 파일:
+#      OIDC_REDIRECT_URI=https://activo-no1.synology.me:8443/auth/callback
+#      APP_URL=https://activo-no1.synology.me:8443
 # ============================================================
 
 version: '3.9'
@@ -16,7 +35,9 @@ services:
     # 운영: 항상 최신 이미지 pull
     pull_policy: always
     ports:
-      - "8888:8080"          # NAS 외부포트:컨테이너포트
+      # NAS DSM 역방향 프록시 사용 시: 8080:8080 (프록시가 직접 로컬 8080 접근)
+      # NAS에서 직접 포트 개방 시: 8443:8080 (HTTPS 종료는 NAS 방화벽/SSL 처리)
+      - "${APP_HOST_PORT:-8080}:8080"
 
   # ── Watchtower: 자동 이미지 업데이트 (운영 전용) ──────────
   watchtower:

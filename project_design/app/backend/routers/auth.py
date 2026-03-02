@@ -106,6 +106,53 @@ async def dev_login(db: AsyncSession = Depends(get_db)):
     return RedirectResponse(url=f"{app_url}/?token={token}")
 
 
+# ── 0b. 개발환경 전용 일반사용자 로그인 (OIDC 미설정 시만 활성화) ─
+@router.get("/dev-login-user")
+async def dev_login_user(db: AsyncSession = Depends(get_db)):
+    """OIDC 미설정 개발환경에서 일반 사용자(user role) 미리보기 토큰 발급"""
+    cfg = get_oidc_settings()
+    if cfg["issuer_url"]:
+        raise HTTPException(status_code=403, detail="개발 환경에서만 사용 가능합니다.")
+
+    user_id = "dev_user"
+    email = "user@preview.local"
+    name = "일반사용자(미리보기)"
+    role = "user"
+
+    from sqlalchemy import select
+    existing = await db.execute(select(User).where(User.id == user_id))
+    user = existing.scalar_one_or_none()
+    if user:
+        user.last_login = datetime.now(timezone.utc)
+    else:
+        user = User(id=user_id, email=email, name=name, role=role,
+                    last_login=datetime.now(timezone.utc))
+        db.add(user)
+    await db.commit()
+
+    token = create_app_jwt(user_id, email, name, cfg, role=role)
+
+    try:
+        from services.audit_service import write_audit_log, EventType, EntityType
+        await write_audit_log(
+            db,
+            event_type=EventType.LOGIN,
+            entity_type=EntityType.USER,
+            entity_id=user_id,
+            user_id=user_id,
+            user_name=name,
+            user_role=role,
+            request_path="/auth/dev-login-user",
+            description="개발 환경 일반사용자 로그인 (미리보기)",
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Dev login user audit log failed: {e}")
+
+    app_url = cfg["app_url"].rstrip("/")
+    return RedirectResponse(url=f"{app_url}/?token={token}")
+
+
 # ── 1. 로그인 시작: 시놀로지 로그인 페이지로 리다이렉트 ──────
 @router.get("/login")
 async def login(request: Request, db: AsyncSession = Depends(get_db)):
@@ -292,10 +339,11 @@ async def callback(
     # 앱용 JWT 생성 (role 포함)
     app_token = create_app_jwt(user_id, email, name, cfg, role=role)
 
-    # 프론트엔드로 리다이렉트 (토큰을 URL fragment로 전달)
-    app_url = cfg["app_url"].rstrip("/")
+    # 프론트엔드로 리다이렉트 (토큰을 URL 쿼리 파라미터로 전달)
+    # APP_URL 환경변수 우선, 없으면 요청 base_url(역방향 프록시 헤더 반영) 사용
+    app_url = cfg["app_url"].rstrip("/") if cfg["app_url"] else str(request.base_url).rstrip("/")
     redirect_url = f"{app_url}/?token={app_token}"
-    logger.info(f"Login success for user: {name} ({email}) role={role}")
+    logger.info(f"Login success for user: {name} ({email}) role={role} → {app_url}")
     return RedirectResponse(url=redirect_url)
 
 
