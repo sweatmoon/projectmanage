@@ -191,14 +191,14 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         "response_type": "code",
         "client_id": cfg["client_id"],
         "redirect_uri": cfg["redirect_uri"],
-        "scope": "openid profile email",
+        "scope": "openid email",  # Synology SSO: profile 미지원, openid+email만 사용
         "state": state,
         "nonce": nonce,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-    # 시놀로지 SSO는 SSOAuth.cgi 엔드포인트 사용
-    auth_url = f"{cfg['issuer_url']}/SSOAuth.cgi?{urllib.parse.urlencode(params)}"
+    # 시놀로지 SSO 실제 엔드포인트: SSOOauth.cgi (well-known 기준)
+    auth_url = f"{cfg['issuer_url']}/SSOOauth.cgi?{urllib.parse.urlencode(params)}"
     logger.info(f"Redirecting to OIDC: {auth_url[:80]}...")
     return RedirectResponse(url=auth_url)
 
