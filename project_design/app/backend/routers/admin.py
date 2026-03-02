@@ -22,6 +22,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 # ── 관리자 권한 확인 의존성 ────────────────────────────────
 def require_admin(request: Request):
+    # OIDC 미설정(개발 환경)이면 admin 스킵
+    if not os.environ.get("OIDC_ISSUER_URL", ""):
+        return request
     role = getattr(request.state, "user_role", "user")
     if role != "admin":
         raise HTTPException(

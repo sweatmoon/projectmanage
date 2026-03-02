@@ -1,4 +1,5 @@
-import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock } from 'lucide-react';
+import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock, Shield, LogOut } from 'lucide-react';
+import { authStore, client } from '@/lib/api';
 
 interface LandingPageProps {
   onNavigate: (tab: string) => void;
@@ -20,23 +21,18 @@ const menus = [
     bg: 'bg-blue-50',
     border: 'border-blue-200',
     textColor: 'text-blue-600',
-    badgeColor: 'bg-blue-100 text-blue-700',
+    adminOnly: false,
     illustration: (
       <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Background folder */}
         <rect x="10" y="28" width="100" height="55" rx="6" fill="#DBEAFE" />
         <path d="M10 34 Q10 28 16 28 H44 L52 20 H104 Q110 20 110 26 V34 Z" fill="#BFDBFE" />
-        {/* Document lines */}
         <rect x="22" y="42" width="50" height="4" rx="2" fill="#93C5FD" />
         <rect x="22" y="52" width="38" height="4" rx="2" fill="#BFDBFE" />
         <rect x="22" y="62" width="44" height="4" rx="2" fill="#BFDBFE" />
-        {/* Badge A */}
         <rect x="76" y="40" width="24" height="12" rx="6" fill="#2563EB" />
         <text x="88" y="50" textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">A</text>
-        {/* Badge P */}
         <rect x="76" y="58" width="24" height="12" rx="6" fill="#7C3AED" />
         <text x="88" y="68" textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">P</text>
-        {/* Small dots */}
         <circle cx="94" cy="76" r="3" fill="#93C5FD" />
         <circle cx="102" cy="76" r="3" fill="#BFDBFE" />
       </svg>
@@ -51,29 +47,24 @@ const menus = [
     bg: 'bg-emerald-50',
     border: 'border-emerald-200',
     textColor: 'text-emerald-600',
-    badgeColor: 'bg-emerald-100 text-emerald-700',
+    adminOnly: false,
     illustration: (
       <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Person 1 */}
         <circle cx="35" cy="32" r="12" fill="#A7F3D0" />
         <circle cx="35" cy="29" r="7" fill="#6EE7B7" />
         <path d="M18 52 Q18 42 35 42 Q52 42 52 52 V58 H18 Z" fill="#A7F3D0" />
-        {/* Person 2 */}
         <circle cx="65" cy="28" r="14" fill="#D1FAE5" />
         <circle cx="65" cy="25" r="8" fill="#A7F3D0" />
         <path d="M46 52 Q46 40 65 40 Q84 40 84 52 V58 H46 Z" fill="#D1FAE5" />
-        {/* Person 3 */}
         <circle cx="93" cy="32" r="12" fill="#A7F3D0" />
         <circle cx="93" cy="29" r="7" fill="#6EE7B7" />
         <path d="M76 52 Q76 42 93 42 Q110 42 110 52 V58 H76 Z" fill="#A7F3D0" />
-        {/* Grade badges */}
         <rect x="25" y="62" width="20" height="10" rx="5" fill="#059669" />
         <text x="35" y="70" textAnchor="middle" fill="white" fontSize="6" fontWeight="bold">특급</text>
         <rect x="55" y="62" width="20" height="10" rx="5" fill="#10B981" />
         <text x="65" y="70" textAnchor="middle" fill="white" fontSize="6" fontWeight="bold">고급</text>
         <rect x="83" y="62" width="20" height="10" rx="5" fill="#34D399" />
         <text x="93" y="70" textAnchor="middle" fill="white" fontSize="6" fontWeight="bold">중급</text>
-        {/* Connection lines */}
         <line x1="45" y1="58" x2="55" y2="58" stroke="#6EE7B7" strokeWidth="1.5" strokeDasharray="3,2" />
         <line x1="75" y1="58" x2="85" y2="58" stroke="#6EE7B7" strokeWidth="1.5" strokeDasharray="3,2" />
       </svg>
@@ -88,21 +79,17 @@ const menus = [
     bg: 'bg-violet-50',
     border: 'border-violet-200',
     textColor: 'text-violet-600',
-    badgeColor: 'bg-violet-100 text-violet-700',
+    adminOnly: false,
     illustration: (
       <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Calendar frame */}
         <rect x="8" y="16" width="104" height="68" rx="6" fill="#EDE9FE" />
         <rect x="8" y="16" width="104" height="18" rx="6" fill="#8B5CF6" />
-        {/* Header dots */}
         <circle cx="20" cy="25" r="4" fill="#C4B5FD" />
         <circle cx="100" cy="25" r="4" fill="#C4B5FD" />
         <text x="60" y="28" textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">2026. 03</text>
-        {/* Day headers */}
         {['월','화','수','목','금','토','일'].map((d, i) => (
           <text key={d} x={18 + i * 14} y={46} textAnchor="middle" fill="#7C3AED" fontSize="6" fontWeight="600">{d}</text>
         ))}
-        {/* Colored cells */}
         <rect x="12" y="50" width="12" height="10" rx="2" fill="#DDD6FE" />
         <rect x="26" y="50" width="12" height="10" rx="2" fill="#8B5CF6" opacity="0.7" />
         <rect x="40" y="50" width="12" height="10" rx="2" fill="#8B5CF6" opacity="0.9" />
@@ -117,7 +104,6 @@ const menus = [
         <rect x="68" y="63" width="12" height="10" rx="2" fill="#8B5CF6" opacity="0.7" />
         <rect x="82" y="63" width="12" height="10" rx="2" fill="#F3F4F6" />
         <rect x="96" y="63" width="12" height="10" rx="2" fill="#F3F4F6" />
-        {/* Today highlight */}
         <rect x="40" y="50" width="12" height="10" rx="2" fill="none" stroke="#7C3AED" strokeWidth="1.5" />
       </svg>
     ),
@@ -131,28 +117,22 @@ const menus = [
     bg: 'bg-amber-50',
     border: 'border-amber-200',
     textColor: 'text-amber-600',
-    badgeColor: 'bg-amber-100 text-amber-700',
+    adminOnly: false,
     illustration: (
       <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Background */}
         <rect x="8" y="10" width="104" height="70" rx="5" fill="#FFFBEB" />
-        {/* Month header */}
         <rect x="8" y="10" width="104" height="14" rx="5" fill="#FDE68A" />
         <text x="40" y="20" textAnchor="middle" fill="#92400E" fontSize="6" fontWeight="bold">2026.01</text>
         <text x="80" y="20" textAnchor="middle" fill="#92400E" fontSize="6" fontWeight="bold">2026.06</text>
-        {/* Row 1 */}
         <text x="14" y="36" fill="#78350F" fontSize="6">관세청1</text>
         <rect x="36" y="29" width="60" height="8" rx="3" fill="#F59E0B" opacity="0.8" />
         <text x="66" y="35" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="bold">착수 ── 중간 ── 종료</text>
-        {/* Row 2 */}
         <text x="14" y="51" fill="#78350F" fontSize="6">관세청2</text>
         <rect x="44" y="44" width="50" height="8" rx="3" fill="#FBBF24" opacity="0.8" />
         <text x="69" y="50" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="bold">착수 ──── 종료</text>
-        {/* Row 3 */}
         <text x="14" y="66" fill="#78350F" fontSize="6">관세청3</text>
         <rect x="30" y="59" width="70" height="8" rx="3" fill="#F59E0B" opacity="0.6" />
         <text x="65" y="65" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="bold">착수 ───── 중간 ── 종료</text>
-        {/* Grid lines */}
         <line x1="60" y1="24" x2="60" y2="80" stroke="#FDE68A" strokeWidth="0.5" strokeDasharray="2,2" />
         <line x1="85" y1="24" x2="85" y2="80" stroke="#FDE68A" strokeWidth="0.5" strokeDasharray="2,2" />
       </svg>
@@ -167,26 +147,20 @@ const menus = [
     bg: 'bg-rose-50',
     border: 'border-rose-200',
     textColor: 'text-rose-600',
-    badgeColor: 'bg-rose-100 text-rose-700',
+    adminOnly: false,
     illustration: (
       <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Chart background */}
         <rect x="8" y="8" width="104" height="74" rx="6" fill="#FFF1F2" />
-        {/* Y-axis */}
         <line x1="22" y1="15" x2="22" y2="70" stroke="#FECDD3" strokeWidth="1.5" />
-        {/* X-axis */}
         <line x1="22" y1="70" x2="112" y2="70" stroke="#FECDD3" strokeWidth="1.5" />
-        {/* Bars */}
         <rect x="30" y="38" width="14" height="32" rx="3" fill="#FB7185" />
         <rect x="50" y="28" width="14" height="42" rx="3" fill="#F43F5E" />
         <rect x="70" y="45" width="14" height="25" rx="3" fill="#FB7185" opacity="0.8" />
         <rect x="90" y="33" width="14" height="37" rx="3" fill="#F43F5E" opacity="0.9" />
-        {/* Bar labels */}
         <text x="37" y="78" textAnchor="middle" fill="#9F1239" fontSize="5">감리1팀</text>
         <text x="57" y="78" textAnchor="middle" fill="#9F1239" fontSize="5">감리2팀</text>
         <text x="77" y="78" textAnchor="middle" fill="#9F1239" fontSize="5">전문가팀</text>
         <text x="97" y="78" textAnchor="middle" fill="#9F1239" fontSize="5">외부</text>
-        {/* Trend line */}
         <polyline points="37,38 57,28 77,45 97,33" stroke="#FB7185" strokeWidth="1.5" strokeDasharray="3,2" fill="none" />
         <circle cx="37" cy="38" r="2.5" fill="#F43F5E" />
         <circle cx="57" cy="28" r="2.5" fill="#F43F5E" />
@@ -195,11 +169,50 @@ const menus = [
       </svg>
     ),
   },
+  {
+    key: 'admin',
+    label: '관리자',
+    desc: '접속 로그 · 사용자 관리 · 시스템 통계',
+    icon: Shield,
+    color: 'from-purple-600 to-indigo-600',
+    bg: 'bg-purple-50',
+    border: 'border-purple-200',
+    textColor: 'text-purple-600',
+    adminOnly: true,
+    illustration: (
+      <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
+        {/* Background */}
+        <rect x="8" y="8" width="104" height="74" rx="6" fill="#F5F3FF" />
+        {/* Shield */}
+        <path d="M60 18 L82 26 L82 46 Q82 62 60 72 Q38 62 38 46 L38 26 Z" fill="#DDD6FE" />
+        <path d="M60 24 L76 30 L76 46 Q76 58 60 66 Q44 58 44 46 L44 30 Z" fill="#8B5CF6" opacity="0.7"/>
+        {/* Check */}
+        <polyline points="52,46 58,52 70,40" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+        {/* Dots */}
+        <circle cx="25" cy="75" r="4" fill="#C4B5FD" />
+        <circle cx="37" cy="75" r="4" fill="#DDD6FE" />
+        <circle cx="83" cy="75" r="4" fill="#DDD6FE" />
+        <circle cx="95" cy="75" r="4" fill="#C4B5FD" />
+        {/* Lines */}
+        <rect x="14" y="14" width="18" height="3" rx="1.5" fill="#EDE9FE" />
+        <rect x="88" y="14" width="18" height="3" rx="1.5" fill="#EDE9FE" />
+      </svg>
+    ),
+  },
 ];
 
 export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
   const now = new Date();
   const dateStr = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일`;
+  const user = authStore.getUser();
+  const isAdmin = user?.role === 'admin';
+
+  const handleLogout = () => {
+    client.auth.logout();
+  };
+
+  // admin 메뉴는 admin 권한자에게만 표시
+  const visibleMenus = menus.filter(m => !m.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -212,11 +225,39 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
           <div className="absolute bottom-0 right-1/3 w-64 h-64 rounded-full bg-violet-100 opacity-30 blur-3xl" />
         </div>
 
-        <div className="relative max-w-6xl mx-auto px-6 pt-16 pb-12">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 bg-white border border-blue-200 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm mb-6">
-            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-            감리 공수관리 시스템
+        <div className="relative max-w-6xl mx-auto px-6 pt-10 pb-8">
+          {/* 상단 바: 배지 + 로그인 정보 */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="inline-flex items-center gap-2 bg-white border border-blue-200 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              감리 공수관리 시스템
+            </div>
+
+            {/* 로그인 정보 + 로그아웃 */}
+            {user && (
+              <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-full px-4 py-2 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                    {(user.name || user.email || 'U').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-semibold text-slate-800">{user.name || user.email}</span>
+                    {isAdmin && (
+                      <span className="ml-2 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">관리자</span>
+                    )}
+                  </div>
+                </div>
+                <div className="w-px h-4 bg-slate-200" />
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors"
+                  title="로그아웃"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>로그아웃</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Title */}
@@ -226,7 +267,7 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
               일정관리 시스템
             </span>
           </h1>
-          <p className="text-slate-500 text-lg max-w-xl mb-8">
+          <p className="text-slate-500 text-lg max-w-xl mb-6">
             프로젝트 단계별 투입공수를 등록하고,<br />
             인력별 월간 일정을 한눈에 관리하세요.
           </p>
@@ -239,7 +280,7 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
         </div>
 
         {/* Stats Bar */}
-        <div className="relative max-w-6xl mx-auto px-6 pb-12">
+        <div className="relative max-w-6xl mx-auto px-6 pb-10">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: '진행 프로젝트', value: stats.projectCount, unit: '건', icon: FolderOpen, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -267,12 +308,13 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
       <div className="max-w-6xl mx-auto px-6 pb-16">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-6">메뉴</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {menus.map((menu) => {
+          {visibleMenus.map((menu) => {
             const Icon = menu.icon;
+            const isAdminMenu = menu.key === 'admin';
             return (
               <button
                 key={menu.key}
-                onClick={() => onNavigate(menu.key)}
+                onClick={() => isAdminMenu ? window.location.href = '/admin' : onNavigate(menu.key)}
                 className={`group relative bg-white rounded-2xl border ${menu.border} shadow-sm hover:shadow-lg transition-all duration-200 hover:-translate-y-1 text-left overflow-hidden`}
               >
                 {/* Gradient top bar */}
@@ -280,12 +322,13 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
 
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-4">
-                    {/* Icon badge */}
                     <div className={`w-11 h-11 rounded-xl ${menu.bg} flex items-center justify-center`}>
                       <Icon className={`h-5 w-5 ${menu.textColor}`} />
                     </div>
-                    {/* Arrow */}
-                    <div className={`w-8 h-8 rounded-full ${menu.bg} flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-2 group-hover:translate-x-0`}>
+                    {isAdminMenu && (
+                      <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full font-medium">관리자 전용</span>
+                    )}
+                    <div className={`w-8 h-8 rounded-full ${menu.bg} flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-2 group-hover:translate-x-0 ${isAdminMenu ? 'hidden' : ''}`}>
                       <ArrowRight className={`h-4 w-4 ${menu.textColor}`} />
                     </div>
                   </div>

@@ -21,7 +21,19 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
 
   useEffect(() => {
     async function check() {
-      const isDevMode = import.meta.env.DEV || window.location.hostname === 'localhost';
+      // OIDC_ISSUER_URL이 없으면 dev mode → /auth/dev-login으로 토큰 발급
+      // /auth/login에 GET 요청으로 OIDC 설정 여부 확인 (503=미설정=dev mode)
+      let isDevMode = import.meta.env.DEV || window.location.hostname === 'localhost';
+      if (!isDevMode) {
+        try {
+          const res = await fetch('/auth/login', { method: 'GET', redirect: 'manual' });
+          // 503 = OIDC 미설정 = dev mode, 307/302 = OIDC 설정됨 = 프로덕션
+          if (res.status === 503 || res.type === 'opaqueredirect') {
+            // opaqueredirect = manual redirect = OIDC 설정된 리다이렉트
+            isDevMode = res.status === 503;
+          }
+        } catch { isDevMode = true; /* 네트워크 오류면 dev mode 가정 */ }
+      }
 
       if (authStore.isLoggedIn()) {
         if (!authStore.getUser()) {
@@ -35,6 +47,11 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
         }
         setAuthed(true);
       } else if (isDevMode) {
+        // dev mode: 토큰 없으면 dev-login으로 자동 발급
+        if (!authStore.isLoggedIn()) {
+          window.location.href = '/auth/dev-login';
+          return;
+        }
         setAuthed(true);
       } else {
         window.location.href = '/auth/login';

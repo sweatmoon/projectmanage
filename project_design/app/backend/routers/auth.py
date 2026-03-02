@@ -56,6 +56,37 @@ def decode_app_jwt(token: str, cfg: dict) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {e}")
 
 
+# ── 0. 개발환경 전용 로그인 (OIDC 미설정 시만 활성화) ────────
+@router.get("/dev-login")
+async def dev_login(db: AsyncSession = Depends(get_db)):
+    """OIDC 미설정 개발환경에서 미리보기용 admin 토큰 발급"""
+    cfg = get_oidc_settings()
+    # OIDC가 설정된 프로덕션 환경에서는 절대 사용 불가
+    if cfg["issuer_url"]:
+        raise HTTPException(status_code=403, detail="개발 환경에서만 사용 가능합니다.")
+
+    user_id = "dev_admin"
+    email = "dev@localhost"
+    name = "개발자(미리보기)"
+    role = "admin"
+
+    # DB에 dev user upsert
+    from sqlalchemy import select
+    existing = await db.execute(select(User).where(User.id == user_id))
+    user = existing.scalar_one_or_none()
+    if user:
+        user.last_login = datetime.now(timezone.utc)
+    else:
+        user = User(id=user_id, email=email, name=name, role=role,
+                    last_login=datetime.now(timezone.utc))
+        db.add(user)
+    await db.commit()
+
+    token = create_app_jwt(user_id, email, name, cfg, role=role)
+    app_url = cfg["app_url"].rstrip("/")
+    return RedirectResponse(url=f"{app_url}/?token={token}")
+
+
 # ── 1. 로그인 시작: 시놀로지 로그인 페이지로 리다이렉트 ──────
 @router.get("/login")
 async def login(request: Request, db: AsyncSession = Depends(get_db)):
