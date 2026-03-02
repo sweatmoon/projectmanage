@@ -55,25 +55,14 @@ services:
     container_name: gantt-backup
     restart: unless-stopped
     volumes:
-      - postgres_data:/var/lib/postgresql/data:ro
       - backup_data:/backups
     environment:
-      - POSTGRES_DB=ganttdb
-      - POSTGRES_USER=gantt
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ganttpass}
-      - PGPASSWORD=${POSTGRES_PASSWORD:-ganttpass}
+      - PGPASSWORD=ganttpass
       - TZ=Asia/Seoul
-      - BACKUP_KEEP_DAYS=${BACKUP_KEEP_DAYS:-30}
     depends_on:
       db:
         condition: service_healthy
-    command: >
-      sh -c "while true; do
-        pg_dump -h db -U gantt -d ganttdb | gzip > /backups/ganttdb_$$(date +%Y%m%d_%H%M%S).sql.gz
-        && echo backup_ok || echo backup_failed;
-        find /backups -name 'ganttdb_*.sql.gz' -mtime +30 -delete;
-        sleep 86400;
-      done"
+    entrypoint: ["/bin/sh", "-c", "while true; do pg_dump -h db -U gantt -d ganttdb | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz; find /backups -name '*.sql.gz' -mtime +30 -delete; sleep 86400; done"]
 
   # ── 자동 이미지 업데이트 ─────────────────────────────────
   watchtower:
