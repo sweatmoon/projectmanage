@@ -254,23 +254,25 @@ export default function IndexPage() {
       // Step 2: 단계/인력 일괄 입력
       const isProposal = newProject.status === '제안';
 
-      // 제안 입력을 기존 import_phases 형식으로 변환
-      // "단계명, YYYYMMDD, YYYYMMDD, 인력1:분야, 인력2:분야, ..."
+      // buildProposalPhaseData:
+      // - 감리 일정: "단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3, 이름C"
+      // - 섹션: 이름 → 분야 + category 매핑용
+      // → "단계명, YYYYMMDD, YYYYMMDD, 이름A:분야, 이름B:분야:3, 이름C:분야"
       const buildProposalPhaseData = () => {
-        // 섹션별 기본 분야 매핑 (이름만 입력 시 사용)
         const sectionDefaultField: Record<string, string> = {
-          '감리원': '',          // 감리원은 분야가 필수이므로 기본값 없음
+          '감리원': '',
           '핵심기술': '핵심기술',
           '필수기술': '필수기술',
           '보안진단': '보안진단',
-          '테스트': '기능테스트',  // 테스트 이름만 입력 시 "기능테스트"
+          '테스트': '기능테스트',
         };
 
-        const allPeople: string[] = [];
-        const sectionMap: Record<string, string> = {}; // name → section label
+        // 섹션에서 이름 → { field, category } 맵 구성
+        const nameInfo: Record<string, { field: string; category: string }> = {};
         for (const section of proposalSections) {
           if (!section.text.trim()) continue;
           const defaultField = sectionDefaultField[section.label] ?? section.label;
+          const category = section.label === '감리원' ? '단계감리팀' : '전문가팀';
           for (const line of section.text.split('\n')) {
             const l = line.trim();
             if (!l) continue;
@@ -282,22 +284,35 @@ export default function IndexPage() {
             } else {
               name = l.trim();
             }
-            // 분야가 없으면 섹션 기본값 사용
             if (!field) field = defaultField;
-            if (name) {
-              allPeople.push(field ? `${name}:${field}` : name);
-              // DB category: 감리원 → 단계감리팀, 나머지 → 전문가팀
-              sectionMap[name] = section.label === '감리원' ? '단계감리팀' : '전문가팀';
-            }
+            if (name) nameInfo[name] = { field, category };
           }
         }
-        // 각 단계 줄에 인력 합치기
+
+        // 감리 일정 텍스트: 이름 뒤에 분야 삽입, MD 유지
+        const sectionMap: Record<string, string> = {};
         const text = proposalScheduleText.trim().split('\n').map(line => {
           const l = line.trim();
           if (!l) return '';
           const parts = l.split(',').map(s => s.trim());
           if (parts.length < 3) return l;
-          return [...parts.slice(0, 3), ...allPeople].join(', ');
+          const header = parts.slice(0, 3);
+          const people = parts.slice(3).map(entry => {
+            if (!entry) return '';
+            const colonParts = entry.split(':');
+            const name = colonParts[0].trim();
+            const secondPart = colonParts[1]?.trim();
+            const isMd = secondPart !== undefined && /^\d+$/.test(secondPart);
+            const mdStr = isMd ? secondPart : (colonParts[2]?.trim() && /^\d+$/.test(colonParts[2].trim()) ? colonParts[2].trim() : '');
+            const info = nameInfo[name];
+            if (info) sectionMap[name] = info.category;
+            const field = info?.field || (!isMd && secondPart ? secondPart : '');
+            if (field && mdStr) return `${name}:${field}:${mdStr}`;
+            if (field) return `${name}:${field}`;
+            if (mdStr) return `${name}:${mdStr}`;
+            return name;
+          }).filter(Boolean);
+          return [...header, ...people].join(', ');
         }).filter(Boolean).join('\n');
         return { text, sectionMap };
       };
@@ -571,12 +586,12 @@ export default function IndexPage() {
                   <div>
                     <Label className="text-xs font-medium text-slate-700">📅 감리 일정</Label>
                     <p className="text-[10px] text-slate-500 mb-1">
-                      형식: 단계명, YYYYMMDD, YYYYMMDD  (한 줄에 하나씩)
+                      형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3  (이름만=전체기간, 이름:숫자=MD지정)
                     </p>
                     <Textarea
                       value={proposalScheduleText}
                       onChange={(e) => setProposalScheduleText(e.target.value)}
-                      placeholder={`요구정의, 20260323, 20260327\n개략설계, 20260427, 20260501`}
+                      placeholder={`설계-정밀진단, 20260323, 20260327, 강혁, 김현선, 최규택:3\n설계-재검증, 20260427, 20260501, 강혁, 김현선, 최규택, 양권묵:2`}
                       rows={3}
                       className="font-mono text-xs"
                     />

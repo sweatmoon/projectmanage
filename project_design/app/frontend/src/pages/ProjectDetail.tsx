@@ -367,6 +367,11 @@ export default function ProjectDetail() {
   };
 
   // 제안 입력을 기존 형식으로 변환
+  // buildProposalPhaseData:
+  // - 감리 일정 텍스트: "단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3, 이름C"
+  //   (이름만 있으면 전체 기간, 이름:숫자 면 MD 지정)
+  // - 섹션(감리원/전문가): 이름 → 분야 + category 매핑용
+  // → 출력: "단계명, YYYYMMDD, YYYYMMDD, 이름A:분야, 이름B:분야:3, 이름C:분야"
   const buildProposalPhaseData = (scheduleText: string, sections: typeof proposalSections) => {
     const sectionDefaultField: Record<string, string> = {
       '감리원': '',
@@ -375,11 +380,13 @@ export default function ProjectDetail() {
       '보안진단': '보안진단',
       '테스트': '기능테스트',
     };
-    const allPeople: string[] = [];
-    const sectionMap: Record<string, string> = {}; // name → section label
+
+    // 섹션에서 이름 → { field, category } 맵 구성
+    const nameInfo: Record<string, { field: string; category: string }> = {};
     for (const section of sections) {
       if (!section.text.trim()) continue;
       const defaultField = sectionDefaultField[section.label] ?? section.label;
+      const category = section.label === '감리원' ? '단계감리팀' : '전문가팀';
       for (const line of section.text.split('\n')) {
         const l = line.trim();
         if (!l) continue;
@@ -392,35 +399,43 @@ export default function ProjectDetail() {
           name = l.trim();
         }
         if (!field) field = defaultField;
-        if (name) {
-          allPeople.push(field ? `${name}:${field}` : name);
-          // DB category: 감리원 → 단계감리팀, 나머지 → 전문가팀
-          sectionMap[name] = section.label === '감리원' ? '단계감리팀' : '전문가팀';
-        }
+        if (name) nameInfo[name] = { field, category };
       }
     }
+
+    // 감리 일정 텍스트 파싱: 이름 뒤에 분야 삽입, MD 유지
+    const sectionMap: Record<string, string> = {};
     const text = scheduleText.trim().split('\n').map(line => {
       const l = line.trim();
       if (!l) return '';
       const parts = l.split(',').map(s => s.trim());
       if (parts.length < 3) return l;
-      return [...parts.slice(0, 3), ...allPeople].join(', ');
+      const header = parts.slice(0, 3);
+      const people = parts.slice(3).map(entry => {
+        if (!entry) return '';
+        const colonParts = entry.split(':');
+        const name = colonParts[0].trim();
+        const secondPart = colonParts[1]?.trim();
+        const isMd = secondPart !== undefined && /^\d+$/.test(secondPart);
+        const mdStr = isMd ? secondPart : (colonParts[2]?.trim() && /^\d+$/.test(colonParts[2].trim()) ? colonParts[2].trim() : '');
+        const info = nameInfo[name];
+        if (info) sectionMap[name] = info.category;
+        const field = info?.field || (!isMd && secondPart ? secondPart : '');
+        if (field && mdStr) return `${name}:${field}:${mdStr}`;
+        if (field) return `${name}:${field}`;
+        if (mdStr) return `${name}:${mdStr}`;
+        return name;
+      }).filter(Boolean);
+      return [...header, ...people].join(', ');
     }).filter(Boolean).join('\n');
     return { text, sectionMap };
   };
 
-  // 기존 텍스트 → 제안 폼으로 역파싱 (categoryMap: name → section/category from backend)
+  // parseTextToProposalForm:
+  // - 역파싱: "단계명, YYYYMMDD, YYYYMMDD, 이름A:분야, 이름B:분야:3" →
+  //   scheduleText: "단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3" (분야 제거, MD 유지)
+  //   sections: 이름, 분야 (category 기반 섹션 배치)
   const parseTextToProposalForm = (text: string, categoryMap?: Record<string, string>) => {
-    const scheduleLines: string[] = [];
-    const sectionMap: Record<string, Set<string>> = {
-      '감리원': new Set(),
-      '핵심기술': new Set(),
-      '필수기술': new Set(),
-      '보안진단': new Set(),
-      '테스트': new Set(),
-    };
-    // If categoryMap is provided, use it directly (accurate section recovery)
-    // Otherwise, fall back to field-name heuristics
     const defaultFieldToSection: Record<string, string> = {
       '핵심기술': '핵심기술',
       '필수기술': '필수기술',
@@ -428,46 +443,72 @@ export default function ProjectDetail() {
       '기능테스트': '테스트',
     };
 
+    const sectionPeople: Record<string, Set<string>> = {
+      '감리원': new Set(),
+      '핵심기술': new Set(),
+      '필수기술': new Set(),
+      '보안진단': new Set(),
+      '테스트': new Set(),
+    };
+    const nameToField: Record<string, string> = {};
+    const scheduleLines: string[] = [];
+
     for (const line of text.trim().split('\n')) {
       const l = line.trim();
       if (!l) continue;
       const parts = l.split(',').map(s => s.trim());
       if (parts.length < 3) continue;
-      // 날짜 3자리만 뽑아 schedule 라인 생성
-      scheduleLines.push(`${parts[0]}, ${parts[1]}, ${parts[2]}`);
-      // 인력 파싱 (첫 번째 줄 기준으로만 - 모든 단계 동일하다고 가정)
-      if (scheduleLines.length === 1) {
-        for (const entry of parts.slice(3)) {
-          const ep = entry.split(':');
-          const name = ep[0]?.trim();
-          const field = ep[1]?.trim() || '';
-          if (!name) continue;
-          // categoryMap 우선, 없으면 field 이름 패턴으로 섹션 추정
-          // 단계감리팀 → '감리원', 전문가팀 → field 패턴으로 세부 섹션 결정
+
+      const linePeople: string[] = [];
+      for (const entry of parts.slice(3)) {
+        const ep = entry.split(':');
+        const name = ep[0]?.trim();
+        if (!name) continue;
+        const second = ep[1]?.trim() || '';
+        const third = ep[2]?.trim() || '';
+        let field = '', mdStr = '';
+        if (/^\d+$/.test(second)) {
+          mdStr = second; // "이름:숫자"
+        } else if (second) {
+          field = second; // "이름:분야" or "이름:분야:숫자"
+          if (/^\d+$/.test(third)) mdStr = third;
+        }
+        if (field) nameToField[name] = field;
+
+        // 섹션 배정 (중복 방지: 전체 라인 걸쳐 한 번만)
+        if (!Object.values(sectionPeople).some(s => s.has(name))) {
           let targetSection: string;
           if (categoryMap && categoryMap[name]) {
             const cat = categoryMap[name];
-            if (cat === '단계감리팀' || cat === '감리팀') {
-              targetSection = '감리원';
-            } else {
-              // 전문가팀: field 이름으로 세부 섹션 결정 (heuristic)
-              targetSection = defaultFieldToSection[field] || '핵심기술';
-            }
+            targetSection = (cat === '단계감리팀' || cat === '감리팀') ? '감리원'
+                          : (defaultFieldToSection[field] || '핵심기술');
           } else {
             targetSection = defaultFieldToSection[field] || '감리원';
           }
-          sectionMap[targetSection].add(field ? `${name}, ${field}` : name);
+          sectionPeople[targetSection].add(name);
         }
+
+        // scheduleText용: 이름만 or 이름:MD (분야 제거)
+        linePeople.push(mdStr ? `${name}:${mdStr}` : name);
       }
+      scheduleLines.push([parts[0], parts[1], parts[2], ...linePeople].join(', '));
     }
+
+    // 섹션 텍스트: "이름, 분야" (분야 있으면)
+    const makeSectionText = (names: Set<string>, defaultField: string) =>
+      [...names].map(name => {
+        const field = nameToField[name] || defaultField;
+        return field ? `${name}, ${field}` : name;
+      }).join('\n');
+
     return {
       scheduleText: scheduleLines.join('\n'),
       sections: [
-        { label: '감리원', text: [...sectionMap['감리원']].join('\n') },
-        { label: '핵심기술', text: [...sectionMap['핵심기술']].join('\n') },
-        { label: '필수기술', text: [...sectionMap['필수기술']].join('\n') },
-        { label: '보안진단', text: [...sectionMap['보안진단']].join('\n') },
-        { label: '테스트', text: [...sectionMap['테스트']].join('\n') },
+        { label: '감리원', text: makeSectionText(sectionPeople['감리원'], '') },
+        { label: '핵심기술', text: makeSectionText(sectionPeople['핵심기술'], '핵심기술') },
+        { label: '필수기술', text: makeSectionText(sectionPeople['필수기술'], '필수기술') },
+        { label: '보안진단', text: makeSectionText(sectionPeople['보안진단'], '보안진단') },
+        { label: '테스트', text: makeSectionText(sectionPeople['테스트'], '기능테스트') },
       ],
     };
   };
@@ -1727,11 +1768,11 @@ export default function ProjectDetail() {
                   {/* 감리 일정 */}
                   <div>
                     <label className="text-xs font-medium text-slate-700">📅 감리 일정</label>
-                    <p className="text-[10px] text-slate-500 mb-1">형식: 단계명, YYYYMMDD, YYYYMMDD</p>
+                    <p className="text-[10px] text-slate-500 mb-1">형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3  (이름만=전체기간, 이름:숫자=MD지정)</p>
                     <Textarea
                       value={proposalScheduleText}
                       onChange={(e) => setProposalScheduleText(e.target.value)}
-                      placeholder={`요구정의, 20260323, 20260327\n개략설계, 20260427, 20260501`}
+                      placeholder={`설계-정밀진단, 20260323, 20260327, 강혁, 김현선, 최규택:3\n설계-재검증, 20260427, 20260501, 강혁, 김현선, 최규택, 양권묵:2`}
                       rows={3}
                       className="font-mono text-xs"
                     />
