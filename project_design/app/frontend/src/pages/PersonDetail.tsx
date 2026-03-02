@@ -35,25 +35,18 @@ interface ProjectSummary {
   total: number;
 }
 
-const GRADE_OPTIONS = ['수석감리원', '감리원'];
-
 // ── 클릭 시 인라인 편집되는 필드 컴포넌트 ──────────────────
 interface InlineFieldProps {
   label: string;
   value: string;
-  placeholder?: string;
-  type?: 'text' | 'select';
-  options?: string[];
   onSave: (val: string) => Promise<void>;
-  badge?: boolean;          // 값을 배지 스타일로 표시
-  badgeClass?: string;
 }
 
-function InlineField({ label, value, placeholder = '-', type = 'text', options = [], onSave, badge, badgeClass }: InlineFieldProps) {
+function InlineField({ label, value, onSave }: InlineFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // 외부 value 동기화
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
@@ -61,7 +54,7 @@ function InlineField({ label, value, placeholder = '-', type = 'text', options =
   const open = () => {
     setDraft(value);
     setEditing(true);
-    setTimeout(() => (inputRef.current as HTMLElement)?.focus(), 30);
+    setTimeout(() => inputRef.current?.focus(), 30);
   };
 
   const commit = async () => {
@@ -86,29 +79,14 @@ function InlineField({ label, value, placeholder = '-', type = 'text', options =
 
       {editing ? (
         <div className="flex items-center gap-1.5">
-          {type === 'select' ? (
-            <select
-              ref={inputRef as React.RefObject<HTMLSelectElement>}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={onKey}
-              className="flex-1 border border-blue-400 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-            >
-              <option value="">선택 안 함</option>
-              {options.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          ) : (
-            <input
-              ref={inputRef as React.RefObject<HTMLInputElement>}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={onKey}
-              placeholder={placeholder}
-              className="flex-1 border border-blue-400 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          )}
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={onKey}
+            className="flex-1 border border-blue-400 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+          />
           {saving
             ? <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
             : <Check className="h-3.5 w-3.5 text-blue-500 cursor-pointer flex-shrink-0" onClick={commit} />
@@ -120,13 +98,10 @@ function InlineField({ label, value, placeholder = '-', type = 'text', options =
           title="클릭하여 편집"
           className="min-h-[28px] flex items-center cursor-pointer rounded-md px-2 py-1 -mx-2 hover:bg-blue-50 transition-colors group-hover:ring-1 group-hover:ring-blue-200"
         >
-          {value ? (
-            badge
-              ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${badgeClass || 'bg-blue-50 text-blue-700'}`}>{value}</span>
-              : <span className="text-sm font-medium text-slate-700">{value}</span>
-          ) : (
-            <span className="text-sm text-slate-300 italic">{placeholder || '클릭하여 입력'}</span>
-          )}
+          {value
+            ? <span className="text-sm font-medium text-slate-700">{value}</span>
+            : <span className="text-sm text-slate-400">-</span>
+          }
           <span className="ml-auto text-[10px] text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity pl-2">편집</span>
         </div>
       )}
@@ -306,23 +281,16 @@ export default function PersonDetail() {
             <InlineField
               label="직급"
               value={person.position || ''}
-              placeholder="예: 수석, 책임, 선임"
               onSave={(val) => saveField('position', val)}
             />
             <InlineField
               label="감리원 등급"
               value={person.grade || ''}
-              placeholder="등급 선택"
-              type="select"
-              options={GRADE_OPTIONS}
               onSave={(val) => saveField('grade', val)}
-              badge
-              badgeClass="bg-blue-50 text-blue-700"
             />
             <InlineField
               label="구분"
               value={person.employment_status || ''}
-              placeholder="예: 재직, 외부"
               onSave={(val) => saveField('employment_status', val)}
             />
           </div>
