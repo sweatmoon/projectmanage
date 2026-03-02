@@ -453,7 +453,8 @@ export default function ProjectDetail() {
             method: 'POST',
             data: { staffing_ids: staffingIds },
           });
-          setCalendarEntries(calRes?.data?.entries || []);
+          // client.apiCall.invoke는 이미 res.data를 반환
+          setCalendarEntries(calRes?.entries || []);
         } catch {
           setCalendarEntries([]);
         }
@@ -618,7 +619,7 @@ export default function ProjectDetail() {
                 new_end_date: editingPhase.end_date,
               },
             });
-            const preview = previewRes?.data;
+            const preview = previewRes;
 
             if (preview?.exceeding_staffing?.length > 0) {
               // Show confirmation dialog for exceeding staffing
@@ -867,8 +868,8 @@ export default function ProjectDetail() {
         url: `/api/v1/project_import/export/${projectId}`,
         method: 'GET',
       });
-      const data = res?.data;
-      setExportText(data?.text || '');
+      // client.apiCall.invoke는 이미 res.data를 반환하므로 .data 중복 접근 불필요
+      setExportText(res?.text || '');
       setShowExportDialog(true);
     } catch (err) {
       console.error(err);
@@ -907,8 +908,7 @@ export default function ProjectDetail() {
         url: `/api/v1/staffing_cleanup/remap_and_dedup/${projectId}`,
         method: 'POST',
       });
-      const data = res?.data;
-      toast.success(data?.message || '정리가 완료되었습니다.');
+      toast.success(res?.message || '정리가 완료되었습니다.');
       fetchAll();
     } catch (err) {
       console.error(err);
@@ -926,8 +926,8 @@ export default function ProjectDetail() {
         url: `/api/v1/project_import/export/${projectId}`,
         method: 'GET',
       });
-      const data = res?.data;
-      setTextEditContent(data?.text || '');
+      // client.apiCall.invoke는 이미 res.data를 반환하므로 .data 중복 접근 불필요
+      setTextEditContent(res?.text || '');
     } catch (err) {
       console.error(err);
       setTextEditContent('');
@@ -955,8 +955,8 @@ export default function ProjectDetail() {
           text: textEditContent.trim(),
         },
       });
-      const data = res?.data;
-      toast.success(data?.message || '단계가 덮어쓰기되었습니다.');
+      // client.apiCall.invoke는 이미 res.data를 반환
+      toast.success(res?.message || '단계가 덮어쓰기되었습니다.');
       setShowTextEdit(false);
       setTextEditContent('');
       fetchAll();

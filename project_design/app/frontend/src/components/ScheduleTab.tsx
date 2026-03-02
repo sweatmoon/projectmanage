@@ -1742,7 +1742,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               new_end_date: phaseUpdates.end_date,
             },
           });
-          const preview = previewRes?.data;
+          const preview = previewRes;
 
           // ── Case 1: 기간 축소 → 초과 인력 경고 ──
           if (preview?.exceeding_staffing?.length > 0) {

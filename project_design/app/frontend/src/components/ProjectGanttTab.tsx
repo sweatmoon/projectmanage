@@ -1014,7 +1014,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
             method: 'POST',
             data: { phase_id: phase.id, new_start_date: phaseUpdates.start_date, new_end_date: phaseUpdates.end_date },
           });
-          const preview = previewRes?.data;
+          const preview = previewRes;
 
           // ── Case 1: 기간 축소 → 초과 인력 경고 ──
           if (preview?.exceeding_staffing?.length > 0) {

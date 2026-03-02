@@ -202,7 +202,7 @@ export default function IndexPage() {
               text: phaseText.trim(),
             },
           });
-          const importData = importRes?.data;
+          const importData = importRes;
           toast.success(
             `프로젝트 생성 완료! ${importData?.phases_created || 0}개 단계, ${importData?.staffing_created || 0}개 투입공수, ${importData?.calendar_entries_created || 0}개 일정 생성됨`
           );
