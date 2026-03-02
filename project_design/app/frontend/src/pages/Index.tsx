@@ -272,7 +272,7 @@ export default function IndexPage() {
         for (const section of proposalSections) {
           if (!section.text.trim()) continue;
           const defaultField = sectionDefaultField[section.label] ?? section.label;
-          const category = section.label === '감리원' ? '단계감리팀' : '전문가팀';
+          const category = section.label === '감리원' ? '단계감리팀' : section.label; // 세부 섹션명 보존
           for (const line of section.text.split('\n')) {
             const l = line.trim();
             if (!l) continue;

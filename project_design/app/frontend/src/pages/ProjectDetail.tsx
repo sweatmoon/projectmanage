@@ -386,7 +386,7 @@ export default function ProjectDetail() {
     for (const section of sections) {
       if (!section.text.trim()) continue;
       const defaultField = sectionDefaultField[section.label] ?? section.label;
-      const category = section.label === '감리원' ? '단계감리팀' : '전문가팀';
+      const category = section.label === '감리원' ? '단계감리팀' : section.label; // 세부 섹션명 보존
       for (const line of section.text.split('\n')) {
         const l = line.trim();
         if (!l) continue;
@@ -480,8 +480,15 @@ export default function ProjectDetail() {
           let targetSection: string;
           if (categoryMap && categoryMap[name]) {
             const cat = categoryMap[name];
-            targetSection = (cat === '단계감리팀' || cat === '감리팀') ? '감리원'
-                          : (defaultFieldToSection[field] || '핵심기술');
+            if (cat === '단계감리팀' || cat === '감리팀') {
+              targetSection = '감리원';
+            } else if (sectionPeople[cat] !== undefined) {
+              // category가 세부 섹션명과 일치하면 그대로 사용 (핵심기술, 필수기술, 보안진단, 테스트)
+              targetSection = cat;
+            } else {
+              // fallback: field 패턴 또는 핵심기술
+              targetSection = defaultFieldToSection[field] || '핵심기술';
+            }
           } else {
             targetSection = defaultFieldToSection[field] || '감리원';
           }
