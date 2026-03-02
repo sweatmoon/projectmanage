@@ -193,7 +193,9 @@ const authClient = {
   },
   logout() {
     authStore.clearToken();
-    window.location.href = '/auth/login';
+    // /auth/login 으로 바로 보내면 Synology SSO 세션이 살아있어 자동 재로그인됨
+    // → 로그아웃 완료 페이지로 이동 후 사용자가 직접 재로그인 선택
+    window.location.href = '/logged-out';
   },
   async getMe(): Promise<AppUser | null> {
     try {

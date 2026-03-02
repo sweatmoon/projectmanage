@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Project Management API",
-    description="프로젝트 감리 관리 시스템 API",
+    description="악티보 일정관리 시스템 API",
     version="1.0.0",
     lifespan=lifespan,
 )

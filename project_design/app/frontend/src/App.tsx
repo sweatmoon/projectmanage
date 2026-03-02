@@ -11,6 +11,7 @@ import PersonDetail from './pages/PersonDetail';
 import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import AdminPage from './pages/AdminPage';
+import LoggedOut from './pages/LoggedOut';
 import { client, authStore } from './lib/api';
 
 const queryClient = new QueryClient();
@@ -96,8 +97,9 @@ const App = () => (
       <Toaster />
       <BrowserRouter>
         <Routes>
-          {/* 인증 콜백 (공개) */}
+          {/* 인증 콜백 / 로그아웃 (공개) */}
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/logged-out"    element={<LoggedOut />} />
 
           {/* 인증 필요 경로 */}
           <Route path="/" element={<AuthGuard><Index /></AuthGuard>} />

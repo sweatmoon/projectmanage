@@ -191,7 +191,7 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
           <div className="flex items-center mb-6">
             <div className="inline-flex items-center gap-2 bg-white border border-blue-200 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              감리 공수관리 시스템
+              악티보 일정관리 시스템
             </div>
           </div>
 
