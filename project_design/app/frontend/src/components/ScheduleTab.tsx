@@ -1016,6 +1016,17 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
 
+  // ── 15초 폴링: 다른 사용자의 셀 수정을 자동 반영 ──
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // 현재 토글/벌크 작업 중이 아닐 때만 조용히 갱신
+      if (!togglingCell && !bulkFilling) {
+        fetchCalendarEntries();
+      }
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [fetchCalendarEntries, togglingCell, bulkFilling]);
+
   const entryLookup = useMemo(() => {
     const map = new Map<string, CalendarEntry>();
     calendarEntries.forEach((e) => {
