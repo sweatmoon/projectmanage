@@ -1752,6 +1752,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [year, month, daysInMonth]);
 
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
+    if (scheduleIsLocked) {
+      toast.error('다른 사용자가 열람 중입니다. 잠시 후 다시 시도하세요.');
+      return;
+    }
     const proj = projectMap.get(badge.projectId);
     const ph = phaseMapLocal.get(badge.phaseId);
     if (proj && ph) {
