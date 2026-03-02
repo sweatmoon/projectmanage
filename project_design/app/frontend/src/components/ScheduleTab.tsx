@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
+import { useScheduleSocket, CellUpdateMessage } from '@/hooks/useScheduleSocket';
 
 
 /* ───────── Types ───────── */
@@ -1016,16 +1017,36 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
 
-  // ── 15초 폴링: 다른 사용자의 셀 수정을 자동 반영 ──
-  useEffect(() => {
-    const timer = setInterval(() => {
-      // 현재 토글/벌크 작업 중이 아닐 때만 조용히 갱신
-      if (!togglingCell && !bulkFilling) {
-        fetchCalendarEntries();
+  // ── WebSocket: 다른 사용자의 셀 수정 실시간 반영 ──
+  const handleRemoteCellUpdate = useCallback((msg: CellUpdateMessage) => {
+    setCalendarEntries((prev) => {
+      const key = `${msg.staffing_id}_${msg.date}`;
+      if (msg.status === null) {
+        // 삭제
+        return prev.filter(
+          (e) => !(e.staffing_id === msg.staffing_id && String(e.entry_date) === msg.date)
+        );
       }
-    }, 15_000);
-    return () => clearInterval(timer);
-  }, [fetchCalendarEntries, togglingCell, bulkFilling]);
+      // 추가 또는 업데이트
+      const exists = prev.some(
+        (e) => e.staffing_id === msg.staffing_id && String(e.entry_date) === msg.date
+      );
+      if (exists) {
+        return prev.map((e) =>
+          e.staffing_id === msg.staffing_id && String(e.entry_date) === msg.date
+            ? { ...e, status: msg.status! }
+            : e
+        );
+      }
+      // 새 엔트리 추가 (id는 임시 음수값, 다음 fetch 때 정확한 값으로 교체됨)
+      return [
+        ...prev,
+        { id: -Date.now(), staffing_id: msg.staffing_id, entry_date: msg.date, status: msg.status! },
+      ];
+    });
+  }, []);
+
+  useScheduleSocket({ onCellUpdate: handleRemoteCellUpdate });
 
   const entryLookup = useMemo(() => {
     const map = new Map<string, CalendarEntry>();

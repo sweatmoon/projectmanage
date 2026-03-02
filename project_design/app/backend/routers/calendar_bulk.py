@@ -13,6 +13,7 @@ from models.staffing import Staffing
 from models.phases import Phases
 from models.projects import Projects
 from utils.holidays import is_business_day, get_consecutive_business_days
+from routers.ws_schedule import schedule_manager  # WebSocket 브로드캐스트용
 from services.audit_service import write_audit_log, EventType, EntityType
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,18 @@ async def bulk_toggle_cells(
             description=f"캘린더 셀 일괄 토글: {len(request.cells)}개 셀 변경",
         )
         await db.commit()
+
+        # ── WebSocket 브로드캐스트 ──────────────────────────────────────
+        # 변경된 셀을 다른 모든 클라이언트에게 즉시 전송
+        if schedule_manager.connection_count > 0:
+            for cell_result in results:
+                await schedule_manager.broadcast({
+                    "type": "cell_update",
+                    "staffing_id": cell_result.staffing_id,
+                    "date": str(cell_result.entry_date),
+                    "status": cell_result.status,
+                })
+
         return results
     except Exception as e:
         await db.rollback()
