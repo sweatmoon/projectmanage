@@ -1309,32 +1309,39 @@ export default function ProjectDetail() {
                                 const isEditingThisRow = editingPerson?.staffingId === firstStaffingId;
 
                                 if (firstStaffingId && !isLocked) {
-                                  // ── 현재 row의 이 사람이 이 프로젝트에서 투입된 날짜 집합 ──
-                                  const rowStaffingIds = Object.values(row.phaseMds).map((v) => v.staffingId).filter(Boolean);
-                                  const rowDates = new Set<string>();
-                                  for (const sid of rowStaffingIds) {
-                                    const ents = entriesByStaffing.get(sid) || [];
-                                    ents.forEach((e) => { if (e.status) rowDates.add(e.entry_date); });
+                                  // ── row가 속한 phase들의 전체 영업일 합집합 계산 ──
+                                  const rowPhaseIds = Object.keys(row.phaseMds).map(Number);
+                                  const phaseBizDates = new Set<string>();
+                                  for (const phId of rowPhaseIds) {
+                                    const ph = phases.find((p) => p.id === phId);
+                                    if (!ph?.start_date || !ph?.end_date) continue;
+                                    let cur = new Date(ph.start_date + 'T00:00:00');
+                                    const endD = new Date(ph.end_date + 'T00:00:00');
+                                    while (cur <= endD) {
+                                      const y = cur.getFullYear(), m = cur.getMonth() + 1, d = cur.getDate();
+                                      if (!isNonWorkday(y, m, d)) {
+                                        phaseBizDates.add(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+                                      }
+                                      cur.setDate(cur.getDate() + 1);
+                                    }
                                   }
+                                  const totalPhaseDays = phaseBizDates.size;
 
-                                  // ── 투입가능일수 계산: row의 날짜 중 타사업에 이미 투입된 날짜를 제외 ──
+                                  // ── 투입가능일수 계산: phase 영업일 중 타사업에 이미 투입된 날짜를 제외 ──
                                   // partialAvailMap: personId → 투입가능일수
                                   //   - map에 없음 → 전체 가능 (표기 없음)
                                   //   - map에 있고 값>0 → 일부 가능 → "(N일 가능)" 표기
                                   //   - map에 있고 값=0 → 완전 불가 → "(투입 불가)" 표기
-                                  const totalRowDays = rowDates.size;
                                   const partialAvailMap = new Map<number, number>();
-                                  if (totalRowDays > 0) {
+                                  if (totalPhaseDays > 0 && globalPersonDates.size > 0) {
                                     for (const [personId, otherDates] of globalPersonDates.entries()) {
                                       if (otherDates.size === 0) continue;
-                                      // 이 row의 날짜 중 타 사업과 겹치는 날짜 수
                                       let overlapCount = 0;
-                                      for (const d of rowDates) {
+                                      for (const d of phaseBizDates) {
                                         if (otherDates.has(d)) overlapCount++;
                                       }
                                       if (overlapCount > 0) {
-                                        // 투입 가능 = 전체 - 겹치는 날
-                                        const availDays = Math.max(0, totalRowDays - overlapCount);
+                                        const availDays = Math.max(0, totalPhaseDays - overlapCount);
                                         partialAvailMap.set(personId, availDays);
                                       }
                                     }
@@ -1346,7 +1353,7 @@ export default function ProjectDetail() {
                                       currentPersonName={row.personName}
                                       isExternal={!row.personId && !!row.personName}
                                       allPeople={people}
-                                      partialAvailMap={totalRowDays > 0 ? partialAvailMap : undefined}
+                                      partialAvailMap={totalPhaseDays > 0 ? partialAvailMap : undefined}
                                       disabled={savingPerson}
                                       onChange={(pid, pname) => {
                                         const staffingIds = Object.values(row.phaseMds).map((v) => v.staffingId);
