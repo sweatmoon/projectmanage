@@ -318,61 +318,69 @@ async def callback(
     is_admin = user_id in admin_users or email in admin_users
     role = "admin" if is_admin else "user"
 
-    # DB에 사용자 upsert
+    # DB에 사용자 upsert + 마지막 로그인 시간 확인 (중복 로그 방지용)
     existing = await db.execute(select(User).where(User.id == user_id))
     user = existing.scalar_one_or_none()
+    now_utc = datetime.now(timezone.utc)
+
+    # 5분 내 재로그인이면 SSO 자동 재인증으로 판단 → 로그 기록 스킵
+    is_duplicate_login = False
+    if user and user.last_login:
+        last = user.last_login.replace(tzinfo=timezone.utc) if user.last_login.tzinfo is None else user.last_login
+        if (now_utc - last).total_seconds() < 300:
+            is_duplicate_login = True
+            logger.info(f"Duplicate SSO login skipped for {user_id} (last: {last})")
+
     if user:
-        user.last_login = datetime.now(timezone.utc)
+        user.last_login = now_utc
         user.name = name
         user.email = email
-        # admin_users에 포함된 경우 항상 admin으로 유지
         if is_admin:
             user.role = "admin"
     else:
-        user = User(id=user_id, email=email, name=name, role=role,
-                    last_login=datetime.now(timezone.utc))
+        user = User(id=user_id, email=email, name=name, role=role, last_login=now_utc)
         db.add(user)
     await db.commit()
 
-    # 감사 로그 기록
-    try:
-        from services.audit_service import write_audit_log, EventType, EntityType
-        await write_audit_log(
-            db,
-            event_type=EventType.LOGIN,
-            entity_type=EntityType.USER,
-            entity_id=user_id,
-            user_id=user_id,
-            user_name=name,
-            user_role=role,
-            client_ip=_get_client_ip(request),
-            user_agent=request.headers.get("User-Agent", ""),
-            request_path="/auth/callback",
-            description=f"로그인: {name} ({email}) role={role}",
-        )
-        await db.commit()
-    except Exception as e:
-        logger.warning(f"Audit log write failed: {e}")
+    # 중복 로그인이 아닐 때만 감사/접속 로그 기록
+    if not is_duplicate_login:
+        try:
+            from services.audit_service import write_audit_log, EventType, EntityType
+            await write_audit_log(
+                db,
+                event_type=EventType.LOGIN,
+                entity_type=EntityType.USER,
+                entity_id=user_id,
+                user_id=user_id,
+                user_name=name,
+                user_role=role,
+                client_ip=_get_client_ip(request),
+                user_agent=request.headers.get("User-Agent", ""),
+                request_path="/auth/callback",
+                description=f"로그인: {name} ({email}) role={role}",
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"Audit log write failed: {e}")
 
-    # 로그인 로그 기록
-    try:
-        from models.auth import AccessLog
-        from middlewares.auth_middleware import _get_client_ip
-        log = AccessLog(
-            user_id=user_id,
-            user_email=email,
-            user_name=name,
-            action="login",
-            method="GET",
-            path="/auth/callback",
-            status_code=302,
-            ip_address=_get_client_ip(request),
-            user_agent=request.headers.get("User-Agent", ""),
-        )
-        db.add(log)
-        await db.commit()
-    except Exception as e:
-        logger.warning(f"Login log write failed: {e}")
+        try:
+            from models.auth import AccessLog
+            from middlewares.auth_middleware import _get_client_ip
+            log = AccessLog(
+                user_id=user_id,
+                user_email=email,
+                user_name=name,
+                action="login",
+                method="GET",
+                path="/auth/callback",
+                status_code=302,
+                ip_address=_get_client_ip(request),
+                user_agent=request.headers.get("User-Agent", ""),
+            )
+            db.add(log)
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"Login log write failed: {e}")
 
     # 앱용 JWT 생성 (role 포함)
     app_token = create_app_jwt(user_id, email, name, cfg, role=role)

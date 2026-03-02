@@ -68,6 +68,8 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
         window.location.href = '/auth/dev-login';
         return;
       } else {
+        // /logged-out 페이지면 리다이렉트 안 함 (로그아웃 완료 상태)
+        if (window.location.pathname === '/logged-out') return;
         window.location.href = '/auth/login';
         return;
       }
