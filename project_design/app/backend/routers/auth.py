@@ -100,7 +100,7 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-    auth_url = f"{cfg['issuer_url']}/SSOauth.cgi?{urllib.parse.urlencode(params)}"
+    auth_url = f"{cfg['issuer_url']}/SSOOauth.cgi?{urllib.parse.urlencode(params)}"
     logger.info(f"Redirecting to OIDC: {auth_url[:80]}...")
     return RedirectResponse(url=auth_url)
 
