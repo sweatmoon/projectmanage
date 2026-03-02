@@ -1,7 +1,7 @@
-// tab state managed via localStorage
+// tab state managed via localStorage + URL param
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { client } from '@/lib/api';
@@ -64,9 +64,23 @@ const WIDE_MODE_KEY = 'schedule_wide_mode';
 
 export default function IndexPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<string>(() => {
-    try { return localStorage.getItem('activeTab') || 'home'; } catch { return 'home'; }
+    // URL 파라미터가 있으면 우선, 없으면 localStorage
+    try {
+      const p = new URLSearchParams(window.location.search).get('tab');
+      return p || localStorage.getItem('activeTab') || 'home';
+    } catch { return 'home'; }
   });
+
+  // URL ?tab= 파라미터 변화 감지 (로고 클릭 시 홈 이동 등)
+  useEffect(() => {
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (tab) {
+      setActiveTab(tab);
+      try { localStorage.setItem('activeTab', tab); } catch { /* ignore */ }
+    }
+  }, [location.search]);
 
   // 너비 확장 상태 - localStorage에 저장/복원
   const [wideMode, setWideMode] = useState<boolean>(() => {
