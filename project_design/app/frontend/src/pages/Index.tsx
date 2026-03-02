@@ -1,7 +1,7 @@
 // tab state managed via localStorage
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { client } from '@/lib/api';
@@ -62,8 +62,9 @@ const WIDE_MODE_KEY = 'schedule_wide_mode';
 
 export default function IndexPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'home');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try { return localStorage.getItem('activeTab') || 'home'; } catch { return 'home'; }
+  });
 
   // 너비 확장 상태 - localStorage에 저장/복원
   const [wideMode, setWideMode] = useState<boolean>(() => {
@@ -80,7 +81,7 @@ export default function IndexPage() {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    setSearchParams({ tab }, { replace: true });
+    try { localStorage.setItem('activeTab', tab); } catch { /* ignore */ }
   };
   const [projects, setProjects] = useState<Project[]>([]);
   const [people, setPeople] = useState<Person[]>([]);

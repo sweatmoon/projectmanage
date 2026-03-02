@@ -100,7 +100,8 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-    auth_url = f"{cfg['issuer_url']}/SSOOauth.cgi?{urllib.parse.urlencode(params)}"
+    # 시놀로지 SSO는 SSOAuth.cgi 엔드포인트 사용
+    auth_url = f"{cfg['issuer_url']}/SSOAuth.cgi?{urllib.parse.urlencode(params)}"
     logger.info(f"Redirecting to OIDC: {auth_url[:80]}...")
     return RedirectResponse(url=auth_url)
 
@@ -132,6 +133,7 @@ async def callback(
     await db.flush()
 
     # 시놀로지 token endpoint로 code 교환
+    # 시놀로지 SSO는 SSOAccessToken.cgi 엔드포인트 사용
     token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # NAS 사설 인증서 허용
@@ -233,7 +235,7 @@ async def logout():
     cfg = get_oidc_settings()
     app_url = cfg["app_url"].rstrip("/")
     # 시놀로지 로그아웃 URL (선택적)
-    syno_logout = f"{cfg['issuer_url']}/oauth2/logout?redirect_uri={app_url}" if cfg["issuer_url"] else app_url
+    syno_logout = f"{cfg['issuer_url']}/oauth2/logout?post_logout_redirect_uri={app_url}" if cfg["issuer_url"] else app_url
     return RedirectResponse(url=syno_logout)
 
 
