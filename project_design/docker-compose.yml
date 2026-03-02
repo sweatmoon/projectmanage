@@ -67,24 +67,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    entrypoint: |
-      sh -c '
-        echo "백업 서비스 시작 (매일 새벽 2시 실행)"
-        while true; do
-          BACKUP_FILE="/backups/ganttdb_$$(date +%Y%m%d_%H%M%S).sql.gz"
-          echo "[$(date)] DB 백업 시작: $$BACKUP_FILE"
-          pg_dump -h db -U gantt -d ganttdb | gzip > $$BACKUP_FILE
-          if [ $$? -eq 0 ]; then
-            echo "[$(date)] 백업 완료: $$BACKUP_FILE"
-          else
-            echo "[$(date)] 백업 실패!"
-          fi
-          # 오래된 백업 삭제 (기본 30일 보관)
-          find /backups -name "ganttdb_*.sql.gz" -mtime +${BACKUP_KEEP_DAYS:-30} -delete
-          echo "[$(date)] 다음 백업까지 24시간 대기..."
-          sleep 86400
-        done
-      '
+    command: >
+      sh -c "while true; do
+        pg_dump -h db -U gantt -d ganttdb | gzip > /backups/ganttdb_$$(date +%Y%m%d_%H%M%S).sql.gz
+        && echo backup_ok || echo backup_failed;
+        find /backups -name 'ganttdb_*.sql.gz' -mtime +30 -delete;
+        sleep 86400;
+      done"
 
   # ── 자동 이미지 업데이트 ─────────────────────────────────
   watchtower:
