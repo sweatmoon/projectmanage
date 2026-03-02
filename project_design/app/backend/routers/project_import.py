@@ -501,3 +501,189 @@ async def export_project_to_text(
     except Exception as e:
         logger.error(f"Error exporting project: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+# ── 제안서 형식 파싱 ────────────────────────────────────────────────────────────
+
+class ProposalSection(BaseModel):
+    """각 인력 섹션 (감리원 / 전문가 영역별)"""
+    label: str          # 예: "감리원", "핵심기술", "필수기술", "보안진단", "테스트"
+    text: str           # 줄바꿈으로 구분된 "이름, 분야" 텍스트
+
+
+class ProposalImportRequest(BaseModel):
+    project_id: int
+    schedule_text: str          # 3. 감리 일정 텍스트 (단계명, YYYYMMDD, YYYYMMDD)
+    sections: List[ProposalSection]  # 4-1 감리원, 4-2 전문가 영역들
+
+
+class ProposalImportResponse(BaseModel):
+    phases_created: int
+    staffing_created: int
+    calendar_entries_created: int
+    message: str
+
+
+def parse_proposal_people(text: str) -> List[dict]:
+    """
+    "이름, 분야" 또는 "이름: 분야" 형식의 텍스트를 파싱
+    반환: [{"name": str, "field": str}, ...]
+    """
+    results = []
+    for line in text.strip().split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        # "이름, 분야" 또는 "이름: 분야" 형식 지원
+        if ',' in line:
+            parts = line.split(',', 1)
+        elif ':' in line:
+            parts = line.split(':', 1)
+        else:
+            # 이름만 있는 경우
+            parts = [line, '']
+        name = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else ''
+        if name:
+            results.append({"name": name, "field": field})
+    return results
+
+
+@router.post("/import_proposal", response_model=ProposalImportResponse)
+async def import_proposal(
+    request: ProposalImportRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    제안서 형식 텍스트로 단계 + 인력 일괄 생성.
+
+    schedule_text: 감리 일정 텍스트
+      형식: 단계명, YYYYMMDD, YYYYMMDD  (한 줄에 하나씩, 인력 없이 날짜만)
+
+    sections: 감리원 / 전문가 영역별 인력 텍스트
+      각 section의 text: "이름, 분야" 줄바꿈 구분
+      → 모든 단계에 동일하게 배정됨
+    """
+    try:
+        # 프로젝트 확인
+        proj_stmt = select(Projects).where(Projects.id == request.project_id)
+        proj_result = await db.execute(proj_stmt)
+        project = proj_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # 기존 인력 목록 로드
+        people_stmt = select(People)
+        people_result = await db.execute(people_stmt)
+        all_people = people_result.scalars().all()
+        people_by_name = {p.person_name.strip(): p for p in all_people}
+
+        # sort_order 시작값
+        existing_phases_stmt = select(Phases).where(
+            Phases.project_id == request.project_id
+        ).order_by(Phases.sort_order)
+        existing_result = await db.execute(existing_phases_stmt)
+        existing_phases = existing_result.scalars().all()
+        next_sort_order = max((p.sort_order for p in existing_phases), default=0) + 1
+
+        # 모든 섹션의 인력 파싱
+        all_people_entries = []  # [{"name": str, "field": str, "label": str}, ...]
+        for section in request.sections:
+            parsed = parse_proposal_people(section.text)
+            for p in parsed:
+                all_people_entries.append({
+                    "name": p["name"],
+                    "field": p["field"],
+                    "label": section.label,
+                })
+
+        # 감리 일정 텍스트 파싱 → 단계 생성
+        phases_created = 0
+        staffing_created = 0
+        calendar_entries_created = 0
+
+        status_code = 'P' if project.status == '제안' else 'A'
+
+        for line in request.schedule_text.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) < 3:
+                continue
+
+            phase_name = parts[0].strip()
+            start_date_str = parts[1].strip()
+            end_date_str = parts[2].strip()
+
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y%m%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y%m%d').date()
+            except ValueError:
+                logger.warning(f"Invalid date in proposal line: {line}")
+                continue
+
+            total_biz_days = count_business_days(start_date, end_date)
+
+            # 단계 생성
+            new_phase = Phases(
+                project_id=project.id,
+                phase_name=phase_name,
+                start_date=start_date,
+                end_date=end_date,
+                sort_order=next_sort_order,
+            )
+            db.add(new_phase)
+            await db.flush()
+            await db.refresh(new_phase)
+            phases_created += 1
+            next_sort_order += 1
+
+            # 각 인력을 이 단계에 배정
+            for entry in all_people_entries:
+                person = people_by_name.get(entry["name"].strip())
+                person_id = person.id if person else None
+                md_value = total_biz_days
+
+                new_staffing = Staffing(
+                    project_id=project.id,
+                    phase_id=new_phase.id,
+                    category=entry["label"],
+                    field=entry["field"],
+                    sub_field=entry["field"],
+                    person_id=person_id,
+                    person_name_text=entry["name"],
+                    md=md_value,
+                )
+                db.add(new_staffing)
+                await db.flush()
+                await db.refresh(new_staffing)
+                staffing_created += 1
+
+                # 기본 calendar entries (첫 N 영업일)
+                default_days = get_first_n_business_days(start_date, end_date, md_value)
+                for day in default_days:
+                    new_entry = Calendar_entries(
+                        staffing_id=new_staffing.id,
+                        entry_date=day,
+                        status=status_code,
+                    )
+                    db.add(new_entry)
+                    calendar_entries_created += 1
+
+        await db.commit()
+
+        return ProposalImportResponse(
+            phases_created=phases_created,
+            staffing_created=staffing_created,
+            calendar_entries_created=calendar_entries_created,
+            message=f"제안 프로젝트 생성 완료: {phases_created}개 단계, {staffing_created}개 투입공수, {calendar_entries_created}개 일정 생성됨",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error importing proposal: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Proposal import failed: {str(e)}")

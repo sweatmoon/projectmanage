@@ -112,6 +112,19 @@ export default function IndexPage() {
   const [phaseText, setPhaseText] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
 
+  // 제안 모드 인력 섹션 상태
+  const [proposalScheduleText, setProposalScheduleText] = useState('');
+  const [proposalSections, setProposalSections] = useState([
+    { label: '감리원', text: '' },
+    { label: '핵심기술', text: '' },
+    { label: '필수기술', text: '' },
+    { label: '보안진단', text: '' },
+    { label: '테스트', text: '' },
+  ]);
+  const updateProposalSection = (idx: number, text: string) => {
+    setProposalSections(prev => prev.map((s, i) => i === idx ? { ...s, text } : s));
+  };
+
   // New person dialog
   const [showNewPerson, setShowNewPerson] = useState(false);
   const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '' });
@@ -238,8 +251,30 @@ export default function IndexPage() {
         return;
       }
 
-      // Step 2: If phase text is provided, import phases via backend API
-      if (phaseText.trim()) {
+      // Step 2: 단계/인력 일괄 입력
+      const isProposal = newProject.status === '제안';
+
+      if (isProposal && proposalScheduleText.trim()) {
+        // 제안 모드: 감리 일정 + 인력 섹션 파싱
+        try {
+          const importRes = await client.apiCall.invoke({
+            url: '/api/v1/project_import/import_proposal',
+            method: 'POST',
+            data: {
+              project_id: createdProject.id,
+              schedule_text: proposalScheduleText.trim(),
+              sections: proposalSections.filter(s => s.text.trim()),
+            },
+          });
+          toast.success(
+            `프로젝트 생성 완료! ${importRes?.phases_created || 0}개 단계, ${importRes?.staffing_created || 0}개 투입공수, ${importRes?.calendar_entries_created || 0}개 일정 생성됨`
+          );
+        } catch (importErr) {
+          console.error('Proposal import error:', importErr);
+          toast.warning('프로젝트는 생성되었으나 제안 데이터 가져오기 중 오류가 발생했습니다.');
+        }
+      } else if (!isProposal && phaseText.trim()) {
+        // 감리 모드: 기존 형식
         try {
           const importRes = await client.apiCall.invoke({
             url: '/api/v1/project_import/import_phases',
@@ -249,9 +284,8 @@ export default function IndexPage() {
               text: phaseText.trim(),
             },
           });
-          const importData = importRes;
           toast.success(
-            `프로젝트 생성 완료! ${importData?.phases_created || 0}개 단계, ${importData?.staffing_created || 0}개 투입공수, ${importData?.calendar_entries_created || 0}개 일정 생성됨`
+            `프로젝트 생성 완료! ${importRes?.phases_created || 0}개 단계, ${importRes?.staffing_created || 0}개 투입공수, ${importRes?.calendar_entries_created || 0}개 일정 생성됨`
           );
         } catch (importErr) {
           console.error('Phase import error:', importErr);
@@ -264,6 +298,14 @@ export default function IndexPage() {
       setShowNewProject(false);
       setNewProject({ project_name: '', organization: '', status: '감리', notes: '' });
       setPhaseText('');
+      setProposalScheduleText('');
+      setProposalSections([
+        { label: '감리원', text: '' },
+        { label: '핵심기술', text: '' },
+        { label: '필수기술', text: '' },
+        { label: '보안진단', text: '' },
+        { label: '테스트', text: '' },
+      ]);
       fetchProjects();
       fetchPhases();
       fetchStaffing();
@@ -481,30 +523,88 @@ export default function IndexPage() {
               </div>
             </div>
 
-            {/* Phase Text Import */}
+            {/* Phase Text Import - 감리/제안 모드 분기 */}
             <div className="border-t pt-4">
-              <Label className="text-sm font-semibold">단계/투입공수 일괄 입력 (선택사항)</Label>
-              <p className="text-xs text-muted-foreground mt-1 mb-2">
-                아래 형식으로 단계 정보를 입력하면 프로젝트 생성 시 자동으로 단계, 투입공수, 기본 일정이 생성됩니다.
-              </p>
-              <div className="bg-slate-50 rounded-md p-3 mb-2">
-                <p className="text-[11px] text-slate-600 font-mono leading-relaxed">
-                  <strong>형식:</strong> 단계명, 시작일(YYYYMMDD), 종료일(YYYYMMDD), 인력1:분야[:MD], 인력2:분야[:MD], ...
-                </p>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  • <strong>이현우:사업관리 및 품질보증</strong> → MD 미지정 시 해당 단계 전체 영업일 투입
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
-                </p>
-              </div>
-              <Textarea
-                value={phaseText}
-                onChange={(e) => setPhaseText(e.target.value)}
-                placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
-                rows={8}
-                className="font-mono text-xs"
-              />
+              {newProject.status === '제안' ? (
+                /* ── 제안 모드 ── */
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">제안서 일정/인력 입력 (선택사항)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    감리 일정과 인력 영역을 입력하면 단계·투입공수·기본 일정이 자동 생성됩니다.
+                  </p>
+
+                  {/* 감리 일정 */}
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">📅 감리 일정</Label>
+                    <p className="text-[10px] text-slate-500 mb-1">
+                      형식: 단계명, YYYYMMDD, YYYYMMDD  (한 줄에 하나씩)
+                    </p>
+                    <Textarea
+                      value={proposalScheduleText}
+                      onChange={(e) => setProposalScheduleText(e.target.value)}
+                      placeholder={`요구정의, 20260323, 20260327\n개략설계, 20260427, 20260501`}
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+
+                  {/* 인력 섹션들 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* 감리원 - 전체 너비 */}
+                    <div className="col-span-2">
+                      <Label className="text-xs font-medium text-slate-700">👤 감리원</Label>
+                      <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야  (한 줄에 한 명)</p>
+                      <Textarea
+                        value={proposalSections[0].text}
+                        onChange={(e) => updateProposalSection(0, e.target.value)}
+                        placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
+                        rows={4}
+                        className="font-mono text-xs"
+                      />
+                    </div>
+
+                    {/* 전문가 영역별 */}
+                    {proposalSections.slice(1).map((section, i) => (
+                      <div key={section.label}>
+                        <Label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</Label>
+                        <Textarea
+                          value={section.text}
+                          onChange={(e) => updateProposalSection(i + 1, e.target.value)}
+                          placeholder={`이름, 분야`}
+                          rows={3}
+                          className="font-mono text-xs mt-1"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                /* ── 감리 모드 (기존) ── */
+                <div>
+                  <Label className="text-sm font-semibold">단계/투입공수 일괄 입력 (선택사항)</Label>
+                  <p className="text-xs text-muted-foreground mt-1 mb-2">
+                    아래 형식으로 단계 정보를 입력하면 프로젝트 생성 시 자동으로 단계, 투입공수, 기본 일정이 생성됩니다.
+                  </p>
+                  <div className="bg-slate-50 rounded-md p-3 mb-2">
+                    <p className="text-[11px] text-slate-600 font-mono leading-relaxed">
+                      <strong>형식:</strong> 단계명, 시작일(YYYYMMDD), 종료일(YYYYMMDD), 인력1:분야[:MD], 인력2:분야[:MD], ...
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      • <strong>이현우:사업관리 및 품질보증</strong> → MD 미지정 시 해당 단계 전체 영업일 투입
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
+                    </p>
+                  </div>
+                  <Textarea
+                    value={phaseText}
+                    onChange={(e) => setPhaseText(e.target.value)}
+                    placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
+                    rows={8}
+                    className="font-mono text-xs"
+                  />
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
