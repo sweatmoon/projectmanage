@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { client, authStore } from '@/lib/api';
+import { client } from '@/lib/api';
 import ProjectTab from '@/components/ProjectTab';
 import PeopleTab from '@/components/PeopleTab';
 import ReportTab from '@/components/ReportTab';

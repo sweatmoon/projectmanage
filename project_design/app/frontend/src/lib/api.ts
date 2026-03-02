@@ -163,7 +163,8 @@ const authClient = {
   },
   logout() {
     authStore.clearToken();
-    window.location.href = '/auth/logout';
+    // 토큰 삭제 후 바로 로그인 페이지로 (서버 /auth/logout 불필요)
+    window.location.href = '/auth/login';
   },
   async getMe(): Promise<AppUser | null> {
     try {

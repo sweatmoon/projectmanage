@@ -37,27 +37,32 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
 
   useEffect(() => {
     async function check() {
-      // /auth/login 에 GET 요청으로 OIDC 설정 여부 확인
-      // 503 = OIDC 미설정 = dev mode, opaqueredirect = OIDC 설정됨 = 프로덕션
-      let isDevMode = import.meta.env.DEV || window.location.hostname === 'localhost';
-      if (!isDevMode) {
-        try {
-          const res = await fetch('/auth/login', { method: 'GET', redirect: 'manual' });
-          isDevMode = res.status === 503;
-        } catch { isDevMode = true; }
-      }
+      // localhost/DEV 빌드가 아니면 무조건 프로덕션 OIDC 사용
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isDevBuild  = import.meta.env.DEV === true;
+      const isDevMode   = isLocalhost && isDevBuild;
 
       if (authStore.isLoggedIn()) {
-        if (!authStore.getUser()) {
+        // 토큰 유효성 서버에서 재확인
+        try {
           const user = await client.auth.getMe();
-          if (user) authStore.setUser(user);
-        }
-        const user = authStore.getUser();
-        if (requireAdmin && user?.role !== 'admin') {
-          window.location.href = '/';
+          if (!user) {
+            // 서버가 토큰 거부 → 강제 로그아웃
+            authStore.clearToken();
+            window.location.href = isDevMode ? '/auth/dev-login' : '/auth/login';
+            return;
+          }
+          authStore.setUser(user);
+          if (requireAdmin && user.role !== 'admin') {
+            window.location.href = '/';
+            return;
+          }
+          setAuthed(true);
+        } catch {
+          authStore.clearToken();
+          window.location.href = isDevMode ? '/auth/dev-login' : '/auth/login';
           return;
         }
-        setAuthed(true);
       } else if (isDevMode) {
         window.location.href = '/auth/dev-login';
         return;
@@ -68,7 +73,7 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
       setChecking(false);
     }
     check();
-  }, []);
+  }, [requireAdmin]);
 
   if (checking) {
     return (
