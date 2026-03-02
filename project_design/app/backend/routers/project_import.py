@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,11 +24,13 @@ router = APIRouter(prefix="/api/v1/project_import", tags=["project_import"])
 class PhaseTextImportRequest(BaseModel):
     project_id: int
     text: str  # Multi-line text in the specified format
+    section_map: Optional[Dict[str, str]] = None  # name → section label (e.g. '핵심기술')
 
 
 class PhaseTextOverwriteRequest(BaseModel):
     project_id: int
     text: str  # Multi-line text - will replace ALL existing phases
+    section_map: Optional[Dict[str, str]] = None  # name → section label
 
 
 class PhaseTextImportResponse(BaseModel):
@@ -46,6 +48,7 @@ class ProjectExportResponse(BaseModel):
     project_name: str
     organization: str
     status: str
+    section_map: Dict[str, str] = {}  # name → section/category
 
 
 def get_first_n_business_days(start_date: date, end_date: date, n: int) -> List[date]:
@@ -58,6 +61,7 @@ async def _import_phases_logic(
     project: Projects,
     text: str,
     next_sort_order: int,
+    section_map: Optional[Dict[str, str]] = None,
 ) -> dict:
     """Shared logic for importing phases from text."""
     # Get existing people for name matching (strip whitespace for robust matching)
@@ -139,11 +143,17 @@ async def _import_phases_logic(
             person = people_by_name.get(person_name.strip())
             person_id = person.id if person else None
 
+            # Determine category from section_map (for proposal mode)
+            if section_map and person_name in section_map:
+                category_val = section_map[person_name]
+            else:
+                category_val = '감리팀'
+
             # Create staffing entry
             new_staffing = Staffing(
                 project_id=project.id,
                 phase_id=new_phase.id,
-                category='감리팀',
+                category=category_val,
                 field=field_name,
                 sub_field=field_name,
                 person_id=person_id,
@@ -203,7 +213,7 @@ async def import_phases_from_text(
         existing_phases = existing_result.scalars().all()
         next_sort_order = max((p.sort_order for p in existing_phases), default=0) + 1
 
-        result = await _import_phases_logic(db, project, request.text, next_sort_order)
+        result = await _import_phases_logic(db, project, request.text, next_sort_order, section_map=request.section_map)
         await write_audit_log(
             db,
             event_type=EventType.BULK_IMPORT,
@@ -297,7 +307,7 @@ async def overwrite_phases_from_text(
         await db.flush()
 
         # Import new data
-        result = await _import_phases_logic(db, project, request.text, 1)
+        result = await _import_phases_logic(db, project, request.text, 1, section_map=request.section_map)
 
         # Post-import: re-map any staffing where person_name_text matches people table
         # This ensures robust matching even with slight whitespace differences
@@ -489,11 +499,21 @@ async def export_project_to_text(
             parts = [phase.phase_name, start_str, end_str] + person_entries
             lines.append(', '.join(parts))
 
+        # Build section_map: person_name -> category (from first occurrence per person)
+        section_map_out: Dict[str, str] = {}
+        for s in all_staffing:
+            person_name = s.person_name_text or ''
+            if not person_name and s.person_id:
+                person_name = people_by_id.get(s.person_id, '')
+            if person_name and person_name not in section_map_out:
+                section_map_out[person_name] = s.category or '감리팀'
+
         return ProjectExportResponse(
             text='\n'.join(lines),
             project_name=project.project_name,
             organization=project.organization or '',
             status=project.status or '',
+            section_map=section_map_out,
         )
 
     except HTTPException:

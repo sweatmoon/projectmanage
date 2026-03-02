@@ -353,6 +353,114 @@ export default function ProjectDetail() {
   const [textEditLoading, setTextEditLoading] = useState(false);
   const [textEditSaving, setTextEditSaving] = useState(false);
 
+  // 제안 모드 텍스트 편집 섹션 상태
+  const [proposalScheduleText, setProposalScheduleText] = useState('');
+  const [proposalSections, setProposalSections] = useState([
+    { label: '감리원', text: '' },
+    { label: '핵심기술', text: '' },
+    { label: '필수기술', text: '' },
+    { label: '보안진단', text: '' },
+    { label: '테스트', text: '' },
+  ]);
+  const updateProposalSection = (idx: number, text: string) => {
+    setProposalSections(prev => prev.map((s, i) => i === idx ? { ...s, text } : s));
+  };
+
+  // 제안 입력을 기존 형식으로 변환
+  const buildProposalPhaseData = (scheduleText: string, sections: typeof proposalSections) => {
+    const sectionDefaultField: Record<string, string> = {
+      '감리원': '',
+      '핵심기술': '핵심기술',
+      '필수기술': '필수기술',
+      '보안진단': '보안진단',
+      '테스트': '기능테스트',
+    };
+    const allPeople: string[] = [];
+    const sectionMap: Record<string, string> = {}; // name → section label
+    for (const section of sections) {
+      if (!section.text.trim()) continue;
+      const defaultField = sectionDefaultField[section.label] ?? section.label;
+      for (const line of section.text.split('\n')) {
+        const l = line.trim();
+        if (!l) continue;
+        let name = '', field = '';
+        if (l.includes(',')) {
+          [name, field] = l.split(',', 2).map(s => s.trim());
+        } else if (l.includes(':')) {
+          [name, field] = l.split(':', 2).map(s => s.trim());
+        } else {
+          name = l.trim();
+        }
+        if (!field) field = defaultField;
+        if (name) {
+          allPeople.push(field ? `${name}:${field}` : name);
+          sectionMap[name] = section.label; // 섹션 정보 보존
+        }
+      }
+    }
+    const text = scheduleText.trim().split('\n').map(line => {
+      const l = line.trim();
+      if (!l) return '';
+      const parts = l.split(',').map(s => s.trim());
+      if (parts.length < 3) return l;
+      return [...parts.slice(0, 3), ...allPeople].join(', ');
+    }).filter(Boolean).join('\n');
+    return { text, sectionMap };
+  };
+
+  // 기존 텍스트 → 제안 폼으로 역파싱 (categoryMap: name → section/category from backend)
+  const parseTextToProposalForm = (text: string, categoryMap?: Record<string, string>) => {
+    const scheduleLines: string[] = [];
+    const sectionMap: Record<string, Set<string>> = {
+      '감리원': new Set(),
+      '핵심기술': new Set(),
+      '필수기술': new Set(),
+      '보안진단': new Set(),
+      '테스트': new Set(),
+    };
+    // If categoryMap is provided, use it directly (accurate section recovery)
+    // Otherwise, fall back to field-name heuristics
+    const defaultFieldToSection: Record<string, string> = {
+      '핵심기술': '핵심기술',
+      '필수기술': '필수기술',
+      '보안진단': '보안진단',
+      '기능테스트': '테스트',
+    };
+
+    for (const line of text.trim().split('\n')) {
+      const l = line.trim();
+      if (!l) continue;
+      const parts = l.split(',').map(s => s.trim());
+      if (parts.length < 3) continue;
+      // 날짜 3자리만 뽑아 schedule 라인 생성
+      scheduleLines.push(`${parts[0]}, ${parts[1]}, ${parts[2]}`);
+      // 인력 파싱 (첫 번째 줄 기준으로만 - 모든 단계 동일하다고 가정)
+      if (scheduleLines.length === 1) {
+        for (const entry of parts.slice(3)) {
+          const ep = entry.split(':');
+          const name = ep[0]?.trim();
+          const field = ep[1]?.trim() || '';
+          if (!name) continue;
+          // categoryMap 우선, 없으면 field 이름 패턴으로 섹션 추정
+          const targetSection = (categoryMap && categoryMap[name]) ||
+                                defaultFieldToSection[field] ||
+                                '감리원';
+          sectionMap[targetSection].add(field ? `${name}, ${field}` : name);
+        }
+      }
+    }
+    return {
+      scheduleText: scheduleLines.join('\n'),
+      sections: [
+        { label: '감리원', text: [...sectionMap['감리원']].join('\n') },
+        { label: '핵심기술', text: [...sectionMap['핵심기술']].join('\n') },
+        { label: '필수기술', text: [...sectionMap['필수기술']].join('\n') },
+        { label: '보안진단', text: [...sectionMap['보안진단']].join('\n') },
+        { label: '테스트', text: [...sectionMap['테스트']].join('\n') },
+      ],
+    };
+  };
+
   // Inline MD editing
   const [editingMd, setEditingMd] = useState<{ staffingId: number; value: string } | null>(null);
   const [savingMd, setSavingMd] = useState(false);
@@ -926,8 +1034,15 @@ export default function ProjectDetail() {
         url: `/api/v1/project_import/export/${projectId}`,
         method: 'GET',
       });
-      // client.apiCall.invoke는 이미 res.data를 반환하므로 .data 중복 접근 불필요
-      setTextEditContent(res?.text || '');
+      const text = res?.text || '';
+      setTextEditContent(text);
+      // 제안 모드이면 폼으로 역파싱 (section_map 활용으로 정확한 섹션 복원)
+      if (project?.status === '제안' && text) {
+        const categoryMap: Record<string, string> = res?.section_map || {};
+        const parsed = parseTextToProposalForm(text, categoryMap);
+        setProposalScheduleText(parsed.scheduleText);
+        setProposalSections(parsed.sections);
+      }
     } catch (err) {
       console.error(err);
       setTextEditContent('');
@@ -938,7 +1053,16 @@ export default function ProjectDetail() {
   };
 
   const handleTextEditSave = async () => {
-    if (!textEditContent.trim()) {
+    // 제안 모드: proposalScheduleText + sections → 변환
+    const isProposal = project?.status === '제안';
+    const proposalData = isProposal
+      ? buildProposalPhaseData(proposalScheduleText, proposalSections)
+      : null;
+    const finalText = isProposal
+      ? (proposalData?.text ?? '')
+      : textEditContent.trim();
+
+    if (!finalText) {
       toast.error('텍스트를 입력해주세요.');
       return;
     }
@@ -952,13 +1076,21 @@ export default function ProjectDetail() {
         method: 'POST',
         data: {
           project_id: projectId,
-          text: textEditContent.trim(),
+          text: finalText,
+          ...(isProposal && proposalData?.sectionMap ? { section_map: proposalData.sectionMap } : {}),
         },
       });
-      // client.apiCall.invoke는 이미 res.data를 반환
       toast.success(res?.message || '단계가 덮어쓰기되었습니다.');
       setShowTextEdit(false);
       setTextEditContent('');
+      setProposalScheduleText('');
+      setProposalSections([
+        { label: '감리원', text: '' },
+        { label: '핵심기술', text: '' },
+        { label: '필수기술', text: '' },
+        { label: '보안진단', text: '' },
+        { label: '테스트', text: '' },
+      ]);
       fetchAll();
     } catch (err) {
       console.error(err);
@@ -1571,30 +1703,77 @@ export default function ProjectDetail() {
                   ⚠️ 저장 시 기존 모든 단계, 투입공수, 일정 데이터가 삭제되고 아래 텍스트 기준으로 새로 생성됩니다.
                 </p>
               </div>
-              <div className="bg-slate-50 rounded-md p-3">
-                <p className="text-[11px] text-slate-600 font-mono leading-relaxed">
-                  <strong>형식:</strong> 단계명, 시작일(YYYYMMDD), 종료일(YYYYMMDD), 인력1:분야[:MD], 인력2:분야[:MD], ...
-                </p>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  • <strong>이현우:사업관리</strong> → MD 미지정 시 해당 단계 전체 영업일 투입
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
-                </p>
-              </div>
+
               {textEditLoading ? (
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                   <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                   현재 단계 정보를 불러오는 중...
                 </div>
+              ) : project?.status === '제안' ? (
+                /* ── 제안 모드 ── */
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">제안서 일정과 인력을 수정하세요.</p>
+                  {/* 감리 일정 */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700">📅 감리 일정</label>
+                    <p className="text-[10px] text-slate-500 mb-1">형식: 단계명, YYYYMMDD, YYYYMMDD</p>
+                    <Textarea
+                      value={proposalScheduleText}
+                      onChange={(e) => setProposalScheduleText(e.target.value)}
+                      placeholder={`요구정의, 20260323, 20260327\n개략설계, 20260427, 20260501`}
+                      rows={3}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  {/* 인력 섹션 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="text-xs font-medium text-slate-700">👤 감리원</label>
+                      <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야</p>
+                      <Textarea
+                        value={proposalSections[0].text}
+                        onChange={(e) => updateProposalSection(0, e.target.value)}
+                        placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
+                        rows={4}
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    {proposalSections.slice(1).map((section, i) => (
+                      <div key={section.label}>
+                        <label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</label>
+                        <Textarea
+                          value={section.text}
+                          onChange={(e) => updateProposalSection(i + 1, e.target.value)}
+                          placeholder="이름, 분야"
+                          rows={3}
+                          className="font-mono text-xs mt-1"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : (
-                <Textarea
-                  value={textEditContent}
-                  onChange={(e) => setTextEditContent(e.target.value)}
-                  placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
-                  rows={14}
-                  className="font-mono text-xs"
-                />
+                /* ── 감리 모드 ── */
+                <>
+                  <div className="bg-slate-50 rounded-md p-3">
+                    <p className="text-[11px] text-slate-600 font-mono leading-relaxed">
+                      <strong>형식:</strong> 단계명, 시작일(YYYYMMDD), 종료일(YYYYMMDD), 인력1:분야[:MD], 인력2:분야[:MD], ...
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      • <strong>이현우:사업관리</strong> → MD 미지정 시 해당 단계 전체 영업일 투입
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
+                    </p>
+                  </div>
+                  <Textarea
+                    value={textEditContent}
+                    onChange={(e) => setTextEditContent(e.target.value)}
+                    placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
+                    rows={14}
+                    className="font-mono text-xs"
+                  />
+                </>
               )}
             </div>
             <DialogFooter>

@@ -256,7 +256,7 @@ export default function IndexPage() {
 
       // 제안 입력을 기존 import_phases 형식으로 변환
       // "단계명, YYYYMMDD, YYYYMMDD, 인력1:분야, 인력2:분야, ..."
-      const buildProposalPhaseText = () => {
+      const buildProposalPhaseData = () => {
         // 섹션별 기본 분야 매핑 (이름만 입력 시 사용)
         const sectionDefaultField: Record<string, string> = {
           '감리원': '',          // 감리원은 분야가 필수이므로 기본값 없음
@@ -267,6 +267,7 @@ export default function IndexPage() {
         };
 
         const allPeople: string[] = [];
+        const sectionMap: Record<string, string> = {}; // name → section label
         for (const section of proposalSections) {
           if (!section.text.trim()) continue;
           const defaultField = sectionDefaultField[section.label] ?? section.label;
@@ -283,21 +284,26 @@ export default function IndexPage() {
             }
             // 분야가 없으면 섹션 기본값 사용
             if (!field) field = defaultField;
-            if (name) allPeople.push(field ? `${name}:${field}` : name);
+            if (name) {
+              allPeople.push(field ? `${name}:${field}` : name);
+              sectionMap[name] = section.label; // 섹션 정보 보존
+            }
           }
         }
         // 각 단계 줄에 인력 합치기
-        return proposalScheduleText.trim().split('\n').map(line => {
+        const text = proposalScheduleText.trim().split('\n').map(line => {
           const l = line.trim();
           if (!l) return '';
           const parts = l.split(',').map(s => s.trim());
           if (parts.length < 3) return l;
           return [...parts.slice(0, 3), ...allPeople].join(', ');
         }).filter(Boolean).join('\n');
+        return { text, sectionMap };
       };
 
+      const proposalData = isProposal ? buildProposalPhaseData() : null;
       const finalPhaseText = isProposal
-        ? buildProposalPhaseText()
+        ? (proposalData?.text ?? '')
         : phaseText.trim();
 
       if (finalPhaseText) {
@@ -308,6 +314,7 @@ export default function IndexPage() {
             data: {
               project_id: createdProject.id,
               text: finalPhaseText,
+              ...(isProposal && proposalData?.sectionMap ? { section_map: proposalData.sectionMap } : {}),
             },
           });
           toast.success(
