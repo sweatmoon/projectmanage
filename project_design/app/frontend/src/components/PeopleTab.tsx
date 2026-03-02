@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Search, User, Users, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -11,9 +11,10 @@ import { toast } from 'sonner';
 interface Person {
   id: number;
   person_name: string;
-  team?: string;
-  grade?: string;
-  employment_status?: string;
+  position?: string;        // 직급
+  team?: string;            // 팀 (레거시)
+  grade?: string;           // 감리원 등급
+  employment_status?: string; // 구분
 }
 
 interface PeopleTabProps {
@@ -31,13 +32,14 @@ const empStatusConfig: Record<string, { className: string }> = {
   '퇴사': { className: 'bg-red-100 text-red-700 hover:bg-red-100' },
 };
 
-function downloadExcelTemplate() {
+// ── 엑셀(CSV) 양식 다운로드 ─────────────────────────────────
+function downloadImportTemplate() {
   const BOM = '\uFEFF';
-  const headers = ['인력명', '팀', '등급', '재직여부'];
+  const headers = ['이름', '직급', '감리원등급', '구분'];
   const exampleRows = [
-    ['홍길동', '1팀', '특급', '재직'],
-    ['김철수', '2팀', '고급', '재직'],
-    ['이영희', '', '중급', '외부'],
+    ['홍길동', '수석', '특급', '재직'],
+    ['김철수', '책임', '고급', '재직'],
+    ['이영희', '선임', '중급', '외부'],
   ];
   const csvContent = BOM + [headers.join(','), ...exampleRows.map((r) => r.join(','))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -45,6 +47,30 @@ function downloadExcelTemplate() {
   const a = document.createElement('a');
   a.href = url;
   a.download = '인력_일괄등록_양식.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── 전체 인력 현황 엑셀 다운로드 ────────────────────────────
+function downloadPeopleExcel(people: Person[]) {
+  const BOM = '\uFEFF';
+  const headers = ['이름', '직급', '감리원등급', '구분'];
+  const sorted = [...people].sort((a, b) =>
+    (a.person_name || '').localeCompare(b.person_name || '', 'ko')
+  );
+  const rows = sorted.map((p) => [
+    p.person_name || '',
+    p.position || '',
+    p.grade || '',
+    p.employment_status || '',
+  ]);
+  const csvContent = BOM + [headers.join(','), ...rows.map((r) => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  a.download = `인력현황_${today}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -74,12 +100,14 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
   const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filter and sort by name ascending
+  // 필터: 이름·직급·등급으로 검색
   const filtered = useMemo(() => {
+    const q = search.toLowerCase();
     const result = people.filter((p) =>
-      p.person_name?.toLowerCase().includes(search.toLowerCase()) ||
-      (p.team || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.grade || '').toLowerCase().includes(search.toLowerCase())
+      (p.person_name || '').toLowerCase().includes(q) ||
+      (p.position || '').toLowerCase().includes(q) ||
+      (p.grade || '').toLowerCase().includes(q) ||
+      (p.employment_status || '').toLowerCase().includes(q)
     );
     result.sort((a, b) => (a.person_name || '').localeCompare(b.person_name || '', 'ko'));
     return result;
@@ -90,12 +118,12 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
   const safePage = Math.min(currentPage, totalPages);
   const paginatedPeople = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  // Reset page when search changes
   const handleSearchChange = (value: string) => {
     setSearch(value);
     setCurrentPage(1);
   };
 
+  // ── CSV 업로드: 이름, 직급, 감리원등급, 구분 ──────────────
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -106,7 +134,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
       const rows = parseCSV(text);
 
       const headerIdx = rows.findIndex((r) =>
-        r.some((c) => c.includes('인력명') || c.toLowerCase().includes('name'))
+        r.some((c) => c.includes('이름') || c.includes('인력명') || c.toLowerCase().includes('name'))
       );
 
       const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1) : rows;
@@ -126,15 +154,15 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         const exists = people.some((p) => p.person_name === name);
         if (exists) { skipped++; continue; }
 
-        const team = row[1]?.trim() || '';
-        const grade = row[2]?.trim() || '';
+        const position = row[1]?.trim() || '';
+        const grade    = row[2]?.trim() || '';
         const empStatus = row[3]?.trim() || '재직';
 
         try {
           await client.entities.people.create({
             data: {
               person_name: name,
-              team,
+              position,
               grade,
               employment_status: empStatus,
             },
@@ -219,13 +247,23 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="인력명/팀/등급으로 검색..."
+            placeholder="이름/직급/등급/구분으로 검색..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10"
           />
         </div>
-        <Button variant="outline" size="sm" onClick={downloadExcelTemplate}>
+        {/* 전체 인력 현황 다운로드 */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => downloadPeopleExcel(filtered)}
+          title="현재 목록을 CSV로 다운로드"
+        >
+          <FileSpreadsheet className="h-4 w-4 mr-1" />
+          현황 다운로드
+        </Button>
+        <Button variant="outline" size="sm" onClick={downloadImportTemplate}>
           <Download className="h-4 w-4 mr-1" />
           양식 다운로드
         </Button>
@@ -311,13 +349,8 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                          {person.team && (
-                            <span className="flex items-center gap-0.5">
-                              <Users className="h-3 w-3" />
-                              {person.team}
-                            </span>
-                          )}
-                          {person.grade && <span>· {person.grade}</span>}
+                          {person.position && <span>{person.position}</span>}
+                          {person.grade && <span className="text-blue-500">· {person.grade}</span>}
                         </div>
                       </div>
                       {/* Delete button */}
@@ -349,15 +382,14 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
               </Button>
               <div className="flex items-center gap-1">
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                  // Show first, last, current, and neighbors
                   const show =
                     page === 1 ||
                     page === totalPages ||
                     Math.abs(page - safePage) <= 1;
                   const showEllipsis =
                     !show &&
-                    (page === 2 && safePage > 3) ||
-                    (page === totalPages - 1 && safePage < totalPages - 2);
+                    ((page === 2 && safePage > 3) ||
+                    (page === totalPages - 1 && safePage < totalPages - 2));
 
                   if (!show && !showEllipsis) return null;
                   if (showEllipsis) {

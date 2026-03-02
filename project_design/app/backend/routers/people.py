@@ -21,13 +21,15 @@ router = APIRouter(prefix="/api/v1/entities/people", tags=["people"])
 # ── Pydantic Schemas ──────────────────────────────────────────
 class PeopleData(BaseModel):
     person_name: str
-    team: Optional[str] = None
-    grade: Optional[str] = None
-    employment_status: Optional[str] = None
+    position: Optional[str] = None          # 직급
+    team: Optional[str] = None              # 팀 (레거시)
+    grade: Optional[str] = None             # 감리원 등급
+    employment_status: Optional[str] = None  # 구분
 
 
 class PeopleUpdateData(BaseModel):
     person_name: Optional[str] = None
+    position: Optional[str] = None
     team: Optional[str] = None
     grade: Optional[str] = None
     employment_status: Optional[str] = None
@@ -36,6 +38,7 @@ class PeopleUpdateData(BaseModel):
 class PeopleResponse(BaseModel):
     id: int
     person_name: str
+    position: Optional[str] = None
     team: Optional[str] = None
     grade: Optional[str] = None
     employment_status: Optional[str] = None

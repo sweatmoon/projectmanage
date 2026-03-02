@@ -33,9 +33,10 @@ interface Project {
 interface Person {
   id: number;
   person_name: string;
-  team?: string;
-  grade?: string;
-  employment_status?: string;
+  position?: string;        // 직급
+  team?: string;            // 팀 (레거시)
+  grade?: string;           // 감리원 등급
+  employment_status?: string; // 구분
 }
 
 interface Phase {
@@ -99,7 +100,7 @@ export default function IndexPage() {
 
   // New person dialog
   const [showNewPerson, setShowNewPerson] = useState(false);
-  const [newPerson, setNewPerson] = useState({ person_name: '', team: '', grade: '', employment_status: '재직' });
+  const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '재직' });
   const [creatingPerson, setCreatingPerson] = useState(false);
 
   const fetchProjects = useCallback(async () => {
@@ -236,11 +237,11 @@ export default function IndexPage() {
     setCreatingPerson(true);
     try {
       await client.entities.people.create({
-        data: newPerson,
+        data: { ...newPerson, team: '' },
       });
       toast.success('인력이 등록되었습니다.');
       setShowNewPerson(false);
-      setNewPerson({ person_name: '', team: '', grade: '', employment_status: '재직' });
+      setNewPerson({ person_name: '', position: '', grade: '', employment_status: '재직' });
       fetchPeople();
     } catch (err) {
       console.error(err);
@@ -477,31 +478,42 @@ export default function IndexPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>인력명 *</Label>
+              <Label>이름 *</Label>
               <Input
                 value={newPerson.person_name}
                 onChange={(e) => setNewPerson({ ...newPerson, person_name: e.target.value })}
-                placeholder="인력명 입력"
+                placeholder="이름 입력"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && document.getElementById('btn-create-person')?.click()}
               />
             </div>
             <div>
-              <Label>팀</Label>
+              <Label>직급</Label>
               <Input
-                value={newPerson.team}
-                onChange={(e) => setNewPerson({ ...newPerson, team: e.target.value })}
-                placeholder="팀명"
+                value={newPerson.position}
+                onChange={(e) => setNewPerson({ ...newPerson, position: e.target.value })}
+                placeholder="예: 수석, 책임, 선임, 주임, 사원"
               />
             </div>
             <div>
-              <Label>등급</Label>
-              <Input
-                value={newPerson.grade}
-                onChange={(e) => setNewPerson({ ...newPerson, grade: e.target.value })}
-                placeholder="특급/고급/중급/초급"
-              />
+              <Label>감리원 등급</Label>
+              <Select
+                value={newPerson.grade || ''}
+                onValueChange={(v) => setNewPerson({ ...newPerson, grade: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="등급 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="특급">특급</SelectItem>
+                  <SelectItem value="고급">고급</SelectItem>
+                  <SelectItem value="중급">중급</SelectItem>
+                  <SelectItem value="초급">초급</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <Label>재직여부</Label>
+              <Label>구분</Label>
               <Select
                 value={newPerson.employment_status}
                 onValueChange={(v) => setNewPerson({ ...newPerson, employment_status: v })}
@@ -519,7 +531,7 @@ export default function IndexPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewPerson(false)}>취소</Button>
-            <Button onClick={handleCreatePerson} disabled={creatingPerson}>
+            <Button id="btn-create-person" onClick={handleCreatePerson} disabled={creatingPerson}>
               {creatingPerson ? '등록 중...' : '등록'}
             </Button>
           </DialogFooter>
