@@ -6,7 +6,7 @@ import logging
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from models.staffing import Staffing
 from models.calendar_entries import Calendar_entries
 from models.projects import Projects
 from utils.holidays import count_business_days, get_consecutive_business_days
+from services.audit_service import write_audit_log, EventType, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class MdSyncResponse(BaseModel):
 @router.post("/sync_md", response_model=MdSyncResponse)
 async def sync_md_calendar(
     request: MdSyncRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -114,6 +116,19 @@ async def sync_md_calendar(
                 db.add(new_entry)
             entries_created = len(business_days)
 
+        await write_audit_log(
+            db,
+            event_type=EventType.SYNC,
+            entity_type=EntityType.STAFFING,
+            entity_id=staffing.id,
+            project_id=phase.project_id,
+            before_obj={"md": old_md, "staffing_id": staffing.id},
+            after_obj={"md": request.new_md, "staffing_id": staffing.id,
+                       "entries_deleted": entries_deleted, "entries_created": entries_created},
+            request=http_request,
+            is_system_action=False,
+            description=f"MD 동기화: {old_md}일→{request.new_md}일, 일정 {entries_deleted}개 삭제 → {entries_created}개 생성",
+        )
         await db.commit()
 
         return MdSyncResponse(

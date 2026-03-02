@@ -1,35 +1,34 @@
+"""
+Projects 라우터 — Audit Log 통합
+CREATE/UPDATE/DELETE(soft) 이벤트 자동 기록
+"""
 import json
 import logging
+from datetime import datetime
 from typing import List, Optional
 
-from datetime import datetime, date
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from services.projects import ProjectsService
+from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
 
-# Set up logging
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/v1/entities/projects", tags=["projects"])
 
 
-# ---------- Pydantic Schemas ----------
+# ── Pydantic Schemas ──────────────────────────────────────────
 class ProjectsData(BaseModel):
-    """Entity data schema (for create/update)"""
     project_name: str
     organization: str
     status: str
     deadline: Optional[datetime] = None
-    notes: str = None
+    notes: Optional[str] = None
     updated_at: Optional[datetime] = None
 
-
 class ProjectsUpdateData(BaseModel):
-    """Update entity data (partial updates allowed)"""
     project_name: Optional[str] = None
     organization: Optional[str] = None
     status: Optional[str] = None
@@ -37,9 +36,7 @@ class ProjectsUpdateData(BaseModel):
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
 
-
 class ProjectsResponse(BaseModel):
-    """Entity response schema"""
     id: int
     project_name: str
     organization: str
@@ -47,289 +44,182 @@ class ProjectsResponse(BaseModel):
     deadline: Optional[datetime] = None
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
-
     class Config:
         from_attributes = True
 
-
 class ProjectsListResponse(BaseModel):
-    """List response schema"""
     items: List[ProjectsResponse]
-    total: int
-    skip: int
-    limit: int
-
+    total: int; skip: int; limit: int
 
 class ProjectsBatchCreateRequest(BaseModel):
-    """Batch create request"""
     items: List[ProjectsData]
 
-
 class ProjectsBatchUpdateItem(BaseModel):
-    """Batch update item"""
-    id: int
-    updates: ProjectsUpdateData
-
+    id: int; updates: ProjectsUpdateData
 
 class ProjectsBatchUpdateRequest(BaseModel):
-    """Batch update request"""
     items: List[ProjectsBatchUpdateItem]
 
-
 class ProjectsBatchDeleteRequest(BaseModel):
-    """Batch delete request"""
     ids: List[int]
 
 
-# ---------- Routes ----------
+# ── Routes ────────────────────────────────────────────────────
 @router.get("", response_model=ProjectsListResponse)
 async def query_projectss(
-    query: str = Query(None, description="Query conditions (JSON string)"),
-    sort: str = Query(None, description="Sort field (prefix with '-' for descending)"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=2000, description="Max number of records to return"),
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
+    query: str = Query(None), sort: str = Query(None),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
-    """Query projectss with filtering, sorting, and pagination"""
-    logger.debug(f"Querying projectss: query={query}, sort={sort}, skip={skip}, limit={limit}, fields={fields}")
-    
     service = ProjectsService(db)
-    try:
-        # Parse query JSON if provided
-        query_dict = None
-        if query:
-            try:
-                query_dict = json.loads(query)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid query JSON format")
-        
-        result = await service.get_list(
-            skip=skip, 
-            limit=limit,
-            query_dict=query_dict,
-            sort=sort,
-        )
-        logger.debug(f"Found {result['total']} projectss")
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error querying projectss: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    query_dict = json.loads(query) if query else None
+    return await service.get_list(skip=skip, limit=limit, query_dict=query_dict, sort=sort)
 
 
 @router.get("/all", response_model=ProjectsListResponse)
 async def query_projectss_all(
-    query: str = Query(None, description="Query conditions (JSON string)"),
-    sort: str = Query(None, description="Sort field (prefix with '-' for descending)"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=2000, description="Max number of records to return"),
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
+    query: str = Query(None), sort: str = Query(None),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
-    # Query projectss with filtering, sorting, and pagination without user limitation
-    logger.debug(f"Querying projectss: query={query}, sort={sort}, skip={skip}, limit={limit}, fields={fields}")
-
     service = ProjectsService(db)
-    try:
-        # Parse query JSON if provided
-        query_dict = None
-        if query:
-            try:
-                query_dict = json.loads(query)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid query JSON format")
-
-        result = await service.get_list(
-            skip=skip,
-            limit=limit,
-            query_dict=query_dict,
-            sort=sort
-        )
-        logger.debug(f"Found {result['total']} projectss")
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error querying projectss: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    query_dict = json.loads(query) if query else None
+    return await service.get_list(skip=skip, limit=limit, query_dict=query_dict, sort=sort)
 
 
 @router.get("/{id}", response_model=ProjectsResponse)
-async def get_projects(
-    id: int,
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get a single projects by ID"""
-    logger.debug(f"Fetching projects with id: {id}, fields={fields}")
-    
+async def get_projects(id: int, db: AsyncSession = Depends(get_db)):
     service = ProjectsService(db)
-    try:
-        result = await service.get_by_id(id)
-        if not result:
-            logger.warning(f"Projects with id {id} not found")
-            raise HTTPException(status_code=404, detail="Projects not found")
-        
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching projects {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    result = await service.get_by_id(id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Projects not found")
+    return result
 
 
 @router.post("", response_model=ProjectsResponse, status_code=201)
 async def create_projects(
-    data: ProjectsData,
-    db: AsyncSession = Depends(get_db),
+    data: ProjectsData, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Create a new projects"""
-    logger.debug(f"Creating new projects with data: {data}")
-    
     service = ProjectsService(db)
-    try:
-        result = await service.create(data.model_dump())
-        if not result:
-            raise HTTPException(status_code=400, detail="Failed to create projects")
-        
-        logger.info(f"Projects created successfully with id: {result.id}")
-        return result
-    except ValueError as e:
-        logger.error(f"Validation error creating projects: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error creating projects: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    result = await service.create(data.model_dump())
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to create projects")
+    await write_audit_log(
+        db, event_type=EventType.CREATE, entity_type=EntityType.PROJECT,
+        entity_id=result.id, after_obj=result, request=request,
+    )
+    await db.commit()
+    logger.info(f"[AUDIT] Project {result.id} created")
+    return result
 
 
 @router.post("/batch", response_model=List[ProjectsResponse], status_code=201)
 async def create_projectss_batch(
-    request: ProjectsBatchCreateRequest,
-    db: AsyncSession = Depends(get_db),
+    req: ProjectsBatchCreateRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Create multiple projectss in a single request"""
-    logger.debug(f"Batch creating {len(request.items)} projectss")
-    
     service = ProjectsService(db)
     results = []
-    
-    try:
-        for item_data in request.items:
-            result = await service.create(item_data.model_dump())
-            if result:
-                results.append(result)
-        
-        logger.info(f"Batch created {len(results)} projectss successfully")
-        return results
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch create: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch create failed: {str(e)}")
+    for item_data in req.items:
+        r = await service.create(item_data.model_dump())
+        if r:
+            results.append(r)
+            await write_audit_log(
+                db, event_type=EventType.CREATE, entity_type=EntityType.PROJECT,
+                entity_id=r.id, after_obj=r, request=request,
+            )
+    await db.commit()
+    return results
 
 
 @router.put("/batch", response_model=List[ProjectsResponse])
 async def update_projectss_batch(
-    request: ProjectsBatchUpdateRequest,
-    db: AsyncSession = Depends(get_db),
+    req: ProjectsBatchUpdateRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Update multiple projectss in a single request"""
-    logger.debug(f"Batch updating {len(request.items)} projectss")
-    
     service = ProjectsService(db)
     results = []
-    
-    try:
-        for item in request.items:
-            # Only include non-None values for partial updates
-            update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
-            result = await service.update(item.id, update_dict)
-            if result:
-                results.append(result)
-        
-        logger.info(f"Batch updated {len(results)} projectss successfully")
-        return results
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch update: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch update failed: {str(e)}")
+    for item in req.items:
+        before = await service.get_by_id(item.id)
+        update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
+        r = await service.update(item.id, update_dict)
+        if r:
+            results.append(r)
+            et = EventType.STATUS_CHANGE if "status" in update_dict else EventType.UPDATE
+            await write_audit_log(
+                db, event_type=et, entity_type=EntityType.PROJECT,
+                entity_id=r.id, before_obj=before, after_obj=r, request=request,
+            )
+    await db.commit()
+    return results
 
 
 @router.put("/{id}", response_model=ProjectsResponse)
 async def update_projects(
-    id: int,
-    data: ProjectsUpdateData,
-    db: AsyncSession = Depends(get_db),
+    id: int, data: ProjectsUpdateData, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Update an existing projects"""
-    logger.debug(f"Updating projects {id} with data: {data}")
-
     service = ProjectsService(db)
-    try:
-        # Only include non-None values for partial updates
-        update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
-        result = await service.update(id, update_dict)
-        if not result:
-            logger.warning(f"Projects with id {id} not found for update")
-            raise HTTPException(status_code=404, detail="Projects not found")
-        
-        logger.info(f"Projects {id} updated successfully")
-        return result
-    except HTTPException:
-        raise
-    except ValueError as e:
-        logger.error(f"Validation error updating projects {id}: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error updating projects {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    before = await service.get_by_id(id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Projects not found")
+    update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
+    result = await service.update(id, update_dict)
+    event_type = EventType.STATUS_CHANGE if "status" in update_dict else EventType.UPDATE
+    await write_audit_log(
+        db, event_type=event_type, entity_type=EntityType.PROJECT,
+        entity_id=id, before_obj=before, after_obj=result, request=request,
+    )
+    await db.commit()
+    return result
 
 
 @router.delete("/batch")
 async def delete_projectss_batch(
-    request: ProjectsBatchDeleteRequest,
-    db: AsyncSession = Depends(get_db),
+    req: ProjectsBatchDeleteRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Delete multiple projectss by their IDs"""
-    logger.debug(f"Batch deleting {len(request.ids)} projectss")
-    
     service = ProjectsService(db)
     deleted_count = 0
-    
-    try:
-        for item_id in request.ids:
-            success = await service.delete(item_id)
-            if success:
-                deleted_count += 1
-        
-        logger.info(f"Batch deleted {deleted_count} projectss successfully")
-        return {"message": f"Successfully deleted {deleted_count} projectss", "deleted_count": deleted_count}
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch delete: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch delete failed: {str(e)}")
+    for item_id in req.ids:
+        obj = await service.get_by_id(item_id)
+        if obj:
+            soft_delete(obj)
+            deleted_count += 1
+            await write_audit_log(
+                db, event_type=EventType.DELETE, entity_type=EntityType.PROJECT,
+                entity_id=item_id, before_obj=obj, request=request,
+            )
+    await db.commit()
+    return {"message": f"Deleted {deleted_count} projects", "deleted_count": deleted_count}
 
 
 @router.delete("/{id}")
-async def delete_projects(
-    id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete a single projects by ID"""
-    logger.debug(f"Deleting projects with id: {id}")
-    
+async def delete_projects(id: int, request: Request, db: AsyncSession = Depends(get_db)):
     service = ProjectsService(db)
-    try:
-        success = await service.delete(id)
-        if not success:
-            logger.warning(f"Projects with id {id} not found for deletion")
-            raise HTTPException(status_code=404, detail="Projects not found")
-        
-        logger.info(f"Projects {id} deleted successfully")
-        return {"message": "Projects deleted successfully", "id": id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting projects {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    obj = await service.get_by_id(id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Projects not found")
+    soft_delete(obj)
+    await write_audit_log(
+        db, event_type=EventType.DELETE, entity_type=EntityType.PROJECT,
+        entity_id=id, before_obj=obj, request=request,
+    )
+    await db.commit()
+    return {"message": "Projects deleted", "id": id}
+
+
+# ── Restore (soft-delete 복원) ────────────────────────────────
+@router.post("/{id}/restore")
+async def restore_projects(id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from models.projects import Projects
+    from sqlalchemy import select
+    result = await db.execute(select(Projects).where(Projects.id == id))
+    obj = result.scalar_one_or_none()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Projects not found")
+    if obj.deleted_at is None:
+        raise HTTPException(status_code=400, detail="이미 활성 상태입니다.")
+    obj.deleted_at = None
+    await write_audit_log(
+        db, event_type=EventType.RESTORE, entity_type=EntityType.PROJECT,
+        entity_id=id, after_obj=obj, request=request,
+    )
+    await db.commit()
+    return {"message": "Projects restored", "id": id}

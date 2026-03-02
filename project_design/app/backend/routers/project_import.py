@@ -2,10 +2,11 @@ import logging
 from typing import List, Optional
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from services.audit_service import write_audit_log, EventType, EntityType
 
 from core.database import get_db
 from models.projects import Projects
@@ -177,6 +178,7 @@ async def _import_phases_logic(
 @router.post("/import_phases", response_model=PhaseTextImportResponse)
 async def import_phases_from_text(
     request: PhaseTextImportRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -202,6 +204,21 @@ async def import_phases_from_text(
         next_sort_order = max((p.sort_order for p in existing_phases), default=0) + 1
 
         result = await _import_phases_logic(db, project, request.text, next_sort_order)
+        await write_audit_log(
+            db,
+            event_type=EventType.BULK_IMPORT,
+            entity_type=EntityType.PROJECT,
+            entity_id=request.project_id,
+            project_id=request.project_id,
+            after_obj={
+                "phases_created": result["phases_created"],
+                "staffing_created": result["staffing_created"],
+                "calendar_entries_created": result["calendar_entries_created"],
+                "import_text_length": len(request.text),
+            },
+            request=http_request,
+            description=f"TSV 일괄 가져오기: {result['phases_created']}개 단계, {result['staffing_created']}개 투입공수 생성",
+        )
         await db.commit()
 
         return PhaseTextImportResponse(
@@ -220,6 +237,7 @@ async def import_phases_from_text(
 @router.post("/overwrite_phases", response_model=PhaseTextImportResponse)
 async def overwrite_phases_from_text(
     request: PhaseTextOverwriteRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -330,6 +348,29 @@ async def overwrite_phases_from_text(
                 delete(Staffing).where(Staffing.id.in_(dup_ids))
             )
 
+        await write_audit_log(
+            db,
+            event_type=EventType.BULK_OVERWRITE,
+            entity_type=EntityType.PROJECT,
+            entity_id=request.project_id,
+            project_id=request.project_id,
+            before_obj={
+                "phases_deleted": phases_deleted,
+                "staffing_deleted": staffing_deleted,
+                "calendar_entries_deleted": calendar_entries_deleted,
+            },
+            after_obj={
+                "phases_created": result["phases_created"],
+                "staffing_created": result["staffing_created"],
+                "calendar_entries_created": result["calendar_entries_created"],
+                "import_text_length": len(request.text),
+            },
+            request=http_request,
+            description=(
+                f"TSV 덮어쓰기: 승인 {phases_deleted}개 단계 삭제 → {result['phases_created']}개 단계 생성, "
+                f"{result['staffing_created']}개 투입공수 생성"
+            ),
+        )
         await db.commit()
 
         extra_msg = ""

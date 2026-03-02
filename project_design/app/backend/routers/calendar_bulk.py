@@ -2,7 +2,7 @@ import logging
 from typing import List, Optional
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, delete, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from models.staffing import Staffing
 from models.phases import Phases
 from models.projects import Projects
 from utils.holidays import is_business_day, get_consecutive_business_days
+from services.audit_service import write_audit_log, EventType, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class CellResponse(BaseModel):
 @router.post("/toggle", response_model=List[CellResponse])
 async def bulk_toggle_cells(
     request: BulkCellToggleRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk upsert/delete calendar entries. If status is None or empty, delete the entry."""
@@ -110,6 +112,31 @@ async def bulk_toggle_cells(
                         status=new_entry.status,
                     ))
 
+        # Collect unique staffing project_ids for audit
+        staffing_ids_affected = list({c.staffing_id for c in request.cells})
+        # Fetch project_id for the first staffing for context
+        project_id_for_log = None
+        if staffing_ids_affected:
+            s_res = await db.execute(
+                select(Staffing).where(Staffing.id == staffing_ids_affected[0])
+            )
+            s_obj = s_res.scalar_one_or_none()
+            if s_obj:
+                project_id_for_log = s_obj.project_id
+
+        await write_audit_log(
+            db,
+            event_type=EventType.UPDATE,
+            entity_type=EntityType.CALENDAR_ENTRY,
+            entity_id=None,
+            project_id=project_id_for_log,
+            after_obj={
+                "cells_count": len(request.cells),
+                "staffing_ids": staffing_ids_affected[:20],  # limit for readability
+            },
+            request=http_request,
+            description=f"캘린더 셀 일괄 토글: {len(request.cells)}개 셀 변경",
+        )
         await db.commit()
         return results
     except Exception as e:

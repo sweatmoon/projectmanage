@@ -214,5 +214,44 @@ export const client = {
       const res = await http.put(`/admin/users/${userId}/role`, { role });
       return res.data;
     },
+    async getAuditLogs(params?: {
+      event_type?: string;
+      entity_type?: string;
+      project_id?: number;
+      user_id?: string;
+      entity_id?: string;
+      is_system_action?: boolean;
+      date_from?: string;
+      date_to?: string;
+      search?: string;
+      skip?: number;
+      limit?: number;
+    }) {
+      const res = await http.get('/admin/audit', { params });
+      return res.data;
+    },
+    async getAuditLogDetail(eventId: string) {
+      const res = await http.get(`/admin/audit/${eventId}`);
+      return res.data;
+    },
+    async getEntityTimeline(entityType: string, entityId: string) {
+      const res = await http.get(`/admin/audit/timeline/${entityType}/${entityId}`);
+      return res.data;
+    },
+    getAuditExportUrl(params?: Record<string, string | number | boolean | undefined>) {
+      const token = localStorage.getItem('token') ?? '';
+      const base = http.defaults.baseURL ?? '';
+      const qs = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== '') qs.append(k, String(v));
+        });
+      }
+      return `${base}/admin/audit/export/csv?${qs.toString()}&_token=${token}`;
+    },
+    async triggerArchive(months = 6) {
+      const res = await http.post('/admin/audit/archive', null, { params: { months } });
+      return res.data;
+    },
   },
 };

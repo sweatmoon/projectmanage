@@ -31,9 +31,9 @@ class StaffingService:
             raise
 
     async def get_by_id(self, obj_id: int) -> Optional[Staffing]:
-        """Get staffing by ID"""
+        """Get staffing by ID (excludes soft-deleted)"""
         try:
-            query = select(Staffing).where(Staffing.id == obj_id)
+            query = select(Staffing).where(Staffing.id == obj_id, Staffing.deleted_at.is_(None))
             result = await self.db.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
@@ -47,10 +47,10 @@ class StaffingService:
         query_dict: Optional[Dict[str, Any]] = None,
         sort: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get paginated list of staffings"""
+        """Get paginated list of staffings (excludes soft-deleted)"""
         try:
-            query = select(Staffing)
-            count_query = select(func.count(Staffing.id))
+            query = select(Staffing).where(Staffing.deleted_at.is_(None))
+            count_query = select(func.count(Staffing.id)).where(Staffing.deleted_at.is_(None))
             
             if query_dict:
                 for field, value in query_dict.items():

@@ -1,32 +1,32 @@
+"""
+People 라우터 — Audit Log 통합
+인력 생성/수정/삭제/복원 이벤트 기록, soft-delete 적용
+"""
 import json
 import logging
 from typing import List, Optional
 
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from services.people import PeopleService
+from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
 
-# Set up logging
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/v1/entities/people", tags=["people"])
 
 
-# ---------- Pydantic Schemas ----------
+# ── Pydantic Schemas ──────────────────────────────────────────
 class PeopleData(BaseModel):
-    """Entity data schema (for create/update)"""
     person_name: str
-    team: str = None
-    grade: str = None
-    employment_status: str = None
+    team: Optional[str] = None
+    grade: Optional[str] = None
+    employment_status: Optional[str] = None
 
 
 class PeopleUpdateData(BaseModel):
-    """Update entity data (partial updates allowed)"""
     person_name: Optional[str] = None
     team: Optional[str] = None
     grade: Optional[str] = None
@@ -34,7 +34,6 @@ class PeopleUpdateData(BaseModel):
 
 
 class PeopleResponse(BaseModel):
-    """Entity response schema"""
     id: int
     person_name: str
     team: Optional[str] = None
@@ -46,7 +45,6 @@ class PeopleResponse(BaseModel):
 
 
 class PeopleListResponse(BaseModel):
-    """List response schema"""
     items: List[PeopleResponse]
     total: int
     skip: int
@@ -54,275 +52,177 @@ class PeopleListResponse(BaseModel):
 
 
 class PeopleBatchCreateRequest(BaseModel):
-    """Batch create request"""
     items: List[PeopleData]
 
 
 class PeopleBatchUpdateItem(BaseModel):
-    """Batch update item"""
     id: int
     updates: PeopleUpdateData
 
 
 class PeopleBatchUpdateRequest(BaseModel):
-    """Batch update request"""
     items: List[PeopleBatchUpdateItem]
 
 
 class PeopleBatchDeleteRequest(BaseModel):
-    """Batch delete request"""
     ids: List[int]
 
 
-# ---------- Routes ----------
+# ── Routes ────────────────────────────────────────────────────
 @router.get("", response_model=PeopleListResponse)
 async def query_peoples(
-    query: str = Query(None, description="Query conditions (JSON string)"),
-    sort: str = Query(None, description="Sort field (prefix with '-' for descending)"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=2000, description="Max number of records to return"),
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
+    query: str = Query(None), sort: str = Query(None),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
-    """Query peoples with filtering, sorting, and pagination"""
-    logger.debug(f"Querying peoples: query={query}, sort={sort}, skip={skip}, limit={limit}, fields={fields}")
-    
     service = PeopleService(db)
-    try:
-        # Parse query JSON if provided
-        query_dict = None
-        if query:
-            try:
-                query_dict = json.loads(query)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid query JSON format")
-        
-        result = await service.get_list(
-            skip=skip, 
-            limit=limit,
-            query_dict=query_dict,
-            sort=sort,
-        )
-        logger.debug(f"Found {result['total']} peoples")
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error querying peoples: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    query_dict = json.loads(query) if query else None
+    return await service.get_list(skip=skip, limit=limit, query_dict=query_dict, sort=sort)
 
 
 @router.get("/all", response_model=PeopleListResponse)
 async def query_peoples_all(
-    query: str = Query(None, description="Query conditions (JSON string)"),
-    sort: str = Query(None, description="Sort field (prefix with '-' for descending)"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=2000, description="Max number of records to return"),
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
+    query: str = Query(None), sort: str = Query(None),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
-    # Query peoples with filtering, sorting, and pagination without user limitation
-    logger.debug(f"Querying peoples: query={query}, sort={sort}, skip={skip}, limit={limit}, fields={fields}")
-
     service = PeopleService(db)
-    try:
-        # Parse query JSON if provided
-        query_dict = None
-        if query:
-            try:
-                query_dict = json.loads(query)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid query JSON format")
-
-        result = await service.get_list(
-            skip=skip,
-            limit=limit,
-            query_dict=query_dict,
-            sort=sort
-        )
-        logger.debug(f"Found {result['total']} peoples")
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error querying peoples: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    query_dict = json.loads(query) if query else None
+    return await service.get_list(skip=skip, limit=limit, query_dict=query_dict, sort=sort)
 
 
 @router.get("/{id}", response_model=PeopleResponse)
-async def get_people(
-    id: int,
-    fields: str = Query(None, description="Comma-separated list of fields to return"),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get a single people by ID"""
-    logger.debug(f"Fetching people with id: {id}, fields={fields}")
-    
+async def get_people(id: int, db: AsyncSession = Depends(get_db)):
     service = PeopleService(db)
-    try:
-        result = await service.get_by_id(id)
-        if not result:
-            logger.warning(f"People with id {id} not found")
-            raise HTTPException(status_code=404, detail="People not found")
-        
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching people {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    result = await service.get_by_id(id)
+    if not result:
+        raise HTTPException(status_code=404, detail="People not found")
+    return result
 
 
 @router.post("", response_model=PeopleResponse, status_code=201)
 async def create_people(
-    data: PeopleData,
-    db: AsyncSession = Depends(get_db),
+    data: PeopleData, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Create a new people"""
-    logger.debug(f"Creating new people with data: {data}")
-    
     service = PeopleService(db)
-    try:
-        result = await service.create(data.model_dump())
-        if not result:
-            raise HTTPException(status_code=400, detail="Failed to create people")
-        
-        logger.info(f"People created successfully with id: {result.id}")
-        return result
-    except ValueError as e:
-        logger.error(f"Validation error creating people: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error creating people: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    result = await service.create(data.model_dump())
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to create people")
+    await write_audit_log(
+        db, event_type=EventType.CREATE, entity_type=EntityType.PEOPLE,
+        entity_id=result.id, after_obj=result, request=request,
+    )
+    await db.commit()
+    logger.info(f"[AUDIT] People {result.id} created")
+    return result
 
 
 @router.post("/batch", response_model=List[PeopleResponse], status_code=201)
 async def create_peoples_batch(
-    request: PeopleBatchCreateRequest,
-    db: AsyncSession = Depends(get_db),
+    req: PeopleBatchCreateRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Create multiple peoples in a single request"""
-    logger.debug(f"Batch creating {len(request.items)} peoples")
-    
     service = PeopleService(db)
     results = []
-    
-    try:
-        for item_data in request.items:
-            result = await service.create(item_data.model_dump())
-            if result:
-                results.append(result)
-        
-        logger.info(f"Batch created {len(results)} peoples successfully")
-        return results
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch create: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch create failed: {str(e)}")
+    for item_data in req.items:
+        r = await service.create(item_data.model_dump())
+        if r:
+            results.append(r)
+            await write_audit_log(
+                db, event_type=EventType.CREATE, entity_type=EntityType.PEOPLE,
+                entity_id=r.id, after_obj=r, request=request,
+            )
+    await db.commit()
+    return results
 
 
 @router.put("/batch", response_model=List[PeopleResponse])
 async def update_peoples_batch(
-    request: PeopleBatchUpdateRequest,
-    db: AsyncSession = Depends(get_db),
+    req: PeopleBatchUpdateRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Update multiple peoples in a single request"""
-    logger.debug(f"Batch updating {len(request.items)} peoples")
-    
     service = PeopleService(db)
     results = []
-    
-    try:
-        for item in request.items:
-            # Only include non-None values for partial updates
-            update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
-            result = await service.update(item.id, update_dict)
-            if result:
-                results.append(result)
-        
-        logger.info(f"Batch updated {len(results)} peoples successfully")
-        return results
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch update: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch update failed: {str(e)}")
+    for item in req.items:
+        before = await service.get_by_id(item.id)
+        update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
+        r = await service.update(item.id, update_dict)
+        if r:
+            results.append(r)
+            await write_audit_log(
+                db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,
+                entity_id=r.id, before_obj=before, after_obj=r, request=request,
+            )
+    await db.commit()
+    return results
 
 
 @router.put("/{id}", response_model=PeopleResponse)
 async def update_people(
-    id: int,
-    data: PeopleUpdateData,
-    db: AsyncSession = Depends(get_db),
+    id: int, data: PeopleUpdateData, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Update an existing people"""
-    logger.debug(f"Updating people {id} with data: {data}")
-
     service = PeopleService(db)
-    try:
-        # Only include non-None values for partial updates
-        update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
-        result = await service.update(id, update_dict)
-        if not result:
-            logger.warning(f"People with id {id} not found for update")
-            raise HTTPException(status_code=404, detail="People not found")
-        
-        logger.info(f"People {id} updated successfully")
-        return result
-    except HTTPException:
-        raise
-    except ValueError as e:
-        logger.error(f"Validation error updating people {id}: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error updating people {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    before = await service.get_by_id(id)
+    if not before:
+        raise HTTPException(status_code=404, detail="People not found")
+    update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
+    result = await service.update(id, update_dict)
+    await write_audit_log(
+        db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,
+        entity_id=id, before_obj=before, after_obj=result, request=request,
+    )
+    await db.commit()
+    return result
 
 
 @router.delete("/batch")
 async def delete_peoples_batch(
-    request: PeopleBatchDeleteRequest,
-    db: AsyncSession = Depends(get_db),
+    req: PeopleBatchDeleteRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Delete multiple peoples by their IDs"""
-    logger.debug(f"Batch deleting {len(request.ids)} peoples")
-    
     service = PeopleService(db)
     deleted_count = 0
-    
-    try:
-        for item_id in request.ids:
-            success = await service.delete(item_id)
-            if success:
-                deleted_count += 1
-        
-        logger.info(f"Batch deleted {deleted_count} peoples successfully")
-        return {"message": f"Successfully deleted {deleted_count} peoples", "deleted_count": deleted_count}
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error in batch delete: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch delete failed: {str(e)}")
+    for item_id in req.ids:
+        obj = await service.get_by_id(item_id)
+        if obj:
+            soft_delete(obj)
+            deleted_count += 1
+            await write_audit_log(
+                db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
+                entity_id=item_id, before_obj=obj, request=request,
+            )
+    await db.commit()
+    return {"message": f"Deleted {deleted_count} people", "deleted_count": deleted_count}
 
 
 @router.delete("/{id}")
 async def delete_people(
-    id: int,
-    db: AsyncSession = Depends(get_db),
+    id: int, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Delete a single people by ID"""
-    logger.debug(f"Deleting people with id: {id}")
-    
     service = PeopleService(db)
-    try:
-        success = await service.delete(id)
-        if not success:
-            logger.warning(f"People with id {id} not found for deletion")
-            raise HTTPException(status_code=404, detail="People not found")
-        
-        logger.info(f"People {id} deleted successfully")
-        return {"message": "People deleted successfully", "id": id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting people {id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    obj = await service.get_by_id(id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="People not found")
+    soft_delete(obj)
+    await write_audit_log(
+        db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
+        entity_id=id, before_obj=obj, request=request,
+    )
+    await db.commit()
+    return {"message": "People deleted", "id": id}
+
+
+@router.post("/{id}/restore")
+async def restore_people(id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from models.people import People
+    from sqlalchemy import select
+    result = await db.execute(select(People).where(People.id == id))
+    obj = result.scalar_one_or_none()
+    if not obj:
+        raise HTTPException(status_code=404, detail="People not found")
+    if obj.deleted_at is None:
+        raise HTTPException(status_code=400, detail="이미 활성 상태입니다.")
+    obj.deleted_at = None
+    await write_audit_log(
+        db, event_type=EventType.RESTORE, entity_type=EntityType.PEOPLE,
+        entity_id=id, after_obj=obj, request=request,
+    )
+    await db.commit()
+    return {"message": "People restored", "id": id}

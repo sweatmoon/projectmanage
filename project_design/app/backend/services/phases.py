@@ -31,9 +31,9 @@ class PhasesService:
             raise
 
     async def get_by_id(self, obj_id: int) -> Optional[Phases]:
-        """Get phases by ID"""
+        """Get phases by ID (excludes soft-deleted)"""
         try:
-            query = select(Phases).where(Phases.id == obj_id)
+            query = select(Phases).where(Phases.id == obj_id, Phases.deleted_at.is_(None))
             result = await self.db.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
@@ -47,10 +47,10 @@ class PhasesService:
         query_dict: Optional[Dict[str, Any]] = None,
         sort: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get paginated list of phasess"""
+        """Get paginated list of phasess (excludes soft-deleted)"""
         try:
-            query = select(Phases)
-            count_query = select(func.count(Phases.id))
+            query = select(Phases).where(Phases.deleted_at.is_(None))
+            count_query = select(func.count(Phases.id)).where(Phases.deleted_at.is_(None))
             
             if query_dict:
                 for field, value in query_dict.items():

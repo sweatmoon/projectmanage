@@ -83,6 +83,25 @@ async def dev_login(db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     token = create_app_jwt(user_id, email, name, cfg, role=role)
+
+    # 개발환경 로그인 감사 로그
+    try:
+        from services.audit_service import write_audit_log, EventType, EntityType
+        await write_audit_log(
+            db,
+            event_type=EventType.LOGIN,
+            entity_type=EntityType.USER,
+            entity_id=user_id,
+            user_id=user_id,
+            user_name=name,
+            user_role=role,
+            request_path="/auth/dev-login",
+            description="개발 환경 로그인 (auto admin)",
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Dev login audit log failed: {e}")
+
     app_url = cfg["app_url"].rstrip("/")
     return RedirectResponse(url=f"{app_url}/?token={token}")
 
@@ -230,6 +249,26 @@ async def callback(
         db.add(user)
     await db.commit()
 
+    # 감사 로그 기록
+    try:
+        from services.audit_service import write_audit_log, EventType, EntityType
+        await write_audit_log(
+            db,
+            event_type=EventType.LOGIN,
+            entity_type=EntityType.USER,
+            entity_id=user_id,
+            user_id=user_id,
+            user_name=name,
+            user_role=role,
+            client_ip=_get_client_ip(request),
+            user_agent=request.headers.get("User-Agent", ""),
+            request_path="/auth/callback",
+            description=f"로그인: {name} ({email}) role={role}",
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Audit log write failed: {e}")
+
     # 로그인 로그 기록
     try:
         from models.auth import AccessLog
@@ -291,10 +330,38 @@ async def verify_token(request: Request):
 
 # ── 4. 로그아웃 ───────────────────────────────────────────
 @router.get("/logout")
-async def logout():
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
     cfg = get_oidc_settings()
+    # 감사 로그 기록 (토큰에서 사용자 정보 추출)
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+        from services.audit_service import write_audit_log, EventType, EntityType
+        if token:
+            payload = decode_app_jwt(token, cfg)
+            user_id = payload.get("sub", "unknown")
+            user_name = payload.get("name", "")
+            user_role = payload.get("role", "user")
+        else:
+            user_id, user_name, user_role = "unknown", "", "user"
+        await write_audit_log(
+            db,
+            event_type=EventType.LOGOUT,
+            entity_type=EntityType.USER,
+            entity_id=user_id,
+            user_id=user_id,
+            user_name=user_name,
+            user_role=user_role,
+            client_ip=request.client.host if request.client else "unknown",
+            user_agent=request.headers.get("User-Agent", ""),
+            request_path="/auth/logout",
+            description=f"로그아웃: {user_name}",
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Logout audit log failed: {e}")
+
     app_url = cfg["app_url"].rstrip("/")
-    # 시놀로지 로그아웃 URL (선택적)
     syno_logout = f"{cfg['issuer_url']}/oauth2/logout?post_logout_redirect_uri={app_url}" if cfg["issuer_url"] else app_url
     return RedirectResponse(url=syno_logout)
 
