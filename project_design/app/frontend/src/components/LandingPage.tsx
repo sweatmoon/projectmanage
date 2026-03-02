@@ -1,4 +1,4 @@
-import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock, Shield } from 'lucide-react';
+import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock } from 'lucide-react';
 
 interface LandingPageProps {
   onNavigate: (tab: string) => void;
@@ -168,44 +168,11 @@ const menus = [
       </svg>
     ),
   },
-  {
-    key: 'admin',
-    label: '관리자',
-    desc: '접속 로그 · 사용자 관리 · 시스템 통계',
-    icon: Shield,
-    color: 'from-purple-600 to-indigo-600',
-    bg: 'bg-purple-50',
-    border: 'border-purple-200',
-    textColor: 'text-purple-600',
-    adminOnly: true,
-    illustration: (
-      <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
-        {/* Background */}
-        <rect x="8" y="8" width="104" height="74" rx="6" fill="#F5F3FF" />
-        {/* Shield */}
-        <path d="M60 18 L82 26 L82 46 Q82 62 60 72 Q38 62 38 46 L38 26 Z" fill="#DDD6FE" />
-        <path d="M60 24 L76 30 L76 46 Q76 58 60 66 Q44 58 44 46 L44 30 Z" fill="#8B5CF6" opacity="0.7"/>
-        {/* Check */}
-        <polyline points="52,46 58,52 70,40" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-        {/* Dots */}
-        <circle cx="25" cy="75" r="4" fill="#C4B5FD" />
-        <circle cx="37" cy="75" r="4" fill="#DDD6FE" />
-        <circle cx="83" cy="75" r="4" fill="#DDD6FE" />
-        <circle cx="95" cy="75" r="4" fill="#C4B5FD" />
-        {/* Lines */}
-        <rect x="14" y="14" width="18" height="3" rx="1.5" fill="#EDE9FE" />
-        <rect x="88" y="14" width="18" height="3" rx="1.5" fill="#EDE9FE" />
-      </svg>
-    ),
-  },
 ];
 
 export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
   const now = new Date();
   const dateStr = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일`;
-  const isAdmin = false; // 상단 Header에서 관리
-
-  // admin 메뉴는 admin 권한자에게만 표시 (Header와 중복 방지 위해 항상 노출)
   const visibleMenus = menus;
 
   return (
@@ -278,11 +245,10 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {visibleMenus.map((menu) => {
             const Icon = menu.icon;
-            const isAdminMenu = menu.key === 'admin';
             return (
               <button
                 key={menu.key}
-                onClick={() => isAdminMenu ? window.location.href = '/admin' : onNavigate(menu.key)}
+                onClick={() => onNavigate(menu.key)}
                 className={`group relative bg-white rounded-2xl border ${menu.border} shadow-sm hover:shadow-lg transition-all duration-200 hover:-translate-y-1 text-left overflow-hidden`}
               >
                 {/* Gradient top bar */}
@@ -293,10 +259,7 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
                     <div className={`w-11 h-11 rounded-xl ${menu.bg} flex items-center justify-center`}>
                       <Icon className={`h-5 w-5 ${menu.textColor}`} />
                     </div>
-                    {isAdminMenu && (
-                      <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full font-medium">관리자 전용</span>
-                    )}
-                    <div className={`w-8 h-8 rounded-full ${menu.bg} flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-2 group-hover:translate-x-0 ${isAdminMenu ? 'hidden' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full ${menu.bg} flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-2 group-hover:translate-x-0`}>
                       <ArrowRight className={`h-4 w-4 ${menu.textColor}`} />
                     </div>
                   </div>
