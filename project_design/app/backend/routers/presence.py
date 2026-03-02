@@ -62,12 +62,15 @@ async def heartbeat(
     - 같은 page의 현재 접속자 목록(자신 포함)을 반환한다.
     """
     # 현재 사용자 정보를 Request state에서 가져옴 (AuthMiddleware가 주입)
-    user = getattr(http_request.state, "user", None)
-    if not user:
+    # auth_middleware는 request.state.user_id / user_name / user_email 로 저장함
+    user_id = str(getattr(http_request.state, "user_id", None) or "unknown")
+    if user_id == "unknown":
         return PresenceResponse(users=[])
-
-    user_id   = str(user.get("user_id") or user.get("sub") or "unknown")
-    user_name = str(user.get("name") or user.get("email") or user_id)
+    user_name = str(
+        getattr(http_request.state, "user_name", None)
+        or getattr(http_request.state, "user_email", None)
+        or user_id
+    )
 
     now = _now_utc()
 
@@ -135,11 +138,9 @@ async def leave(
     db: AsyncSession = Depends(get_db),
 ):
     """페이지 이탈 시 즉시 presence 제거."""
-    user = getattr(http_request.state, "user", None)
-    if not user:
+    user_id = str(getattr(http_request.state, "user_id", None) or "unknown")
+    if user_id == "unknown":
         return {"ok": True}
-
-    user_id = str(user.get("user_id") or user.get("sub") or "unknown")
 
     await db.execute(
         delete(PagePresence).where(
