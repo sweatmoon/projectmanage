@@ -1,5 +1,4 @@
-import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock, Shield, LogOut } from 'lucide-react';
-import { authStore, client } from '@/lib/api';
+import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock, Shield } from 'lucide-react';
 
 interface LandingPageProps {
   onNavigate: (tab: string) => void;
@@ -204,15 +203,10 @@ const menus = [
 export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
   const now = new Date();
   const dateStr = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일`;
-  const user = authStore.getUser();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = false; // 상단 Header에서 관리
 
-  const handleLogout = () => {
-    client.auth.logout();
-  };
-
-  // admin 메뉴는 admin 권한자에게만 표시
-  const visibleMenus = menus.filter(m => !m.adminOnly || isAdmin);
+  // admin 메뉴는 admin 권한자에게만 표시 (Header와 중복 방지 위해 항상 노출)
+  const visibleMenus = menus;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -226,38 +220,12 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
         </div>
 
         <div className="relative max-w-6xl mx-auto px-6 pt-10 pb-8">
-          {/* 상단 바: 배지 + 로그인 정보 */}
-          <div className="flex items-center justify-between mb-6">
+          {/* 상단 배지 */}
+          <div className="flex items-center mb-6">
             <div className="inline-flex items-center gap-2 bg-white border border-blue-200 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
               감리 공수관리 시스템
             </div>
-
-            {/* 로그인 정보 + 로그아웃 */}
-            {user && (
-              <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-full px-4 py-2 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                    {(user.name || user.email || 'U').charAt(0).toUpperCase()}
-                  </div>
-                  <div className="text-sm">
-                    <span className="font-semibold text-slate-800">{user.name || user.email}</span>
-                    {isAdmin && (
-                      <span className="ml-2 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">관리자</span>
-                    )}
-                  </div>
-                </div>
-                <div className="w-px h-4 bg-slate-200" />
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors"
-                  title="로그아웃"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>로그아웃</span>
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Title */}

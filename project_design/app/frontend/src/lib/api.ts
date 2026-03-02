@@ -8,8 +8,8 @@ import axios from 'axios';
 const V1_ENTITIES = '/api/v1/entities';
 
 // ── 토큰 관리 ──────────────────────────────────────────────
-const TOKEN_KEY = 'app_token';
-const USER_KEY = 'app_user';
+const TOKEN_KEY = 'gantt_token_v2';  // v2: 기존 app_token 세션 강제 만료
+const USER_KEY  = 'gantt_user_v2';
 
 export interface AppUser {
   user_id: string;
