@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from models.auth import OIDCState, User
+from models.auth import OIDCState, User, AllowedUser
 
 logger = logging.getLogger(__name__)
 
@@ -313,10 +313,40 @@ async def callback(
              or user_info.get("display_name") or user_id)
     logger.info(f"Resolved user → id={user_id!r}, name={name!r}, email={email!r}")
 
-    # ADMIN_USERS 환경변수로 admin 역할 자동 지정
+    # ── 접속 허용 목록 체크 ────────────────────────────────────
+    # AllowedUser 테이블에 등록된 사용자만 접근 허용
+    # (테이블이 비어있으면 모든 사용자 허용 - 초기 설정 편의를 위해)
+    allowed_count_result = await db.execute(select(AllowedUser).limit(1))
+    has_allowlist = allowed_count_result.scalar_one_or_none() is not None
+
+    if has_allowlist:
+        allowed_result = await db.execute(
+            select(AllowedUser).where(
+                AllowedUser.user_id == user_id,
+                AllowedUser.is_active == True,
+            )
+        )
+        allowed_entry = allowed_result.scalar_one_or_none()
+        if not allowed_entry:
+            logger.warning(f"Access denied for user {user_id!r} - not in allowlist")
+            app_url = get_oidc_settings()["app_url"].rstrip("/")
+            return RedirectResponse(
+                url=f"{app_url}/logged-out?reason=not_allowed"
+            )
+        # 허용 목록의 role을 우선 사용 (admin 환경변수보다 DB 설정 우선)
+        role = allowed_entry.role
+        is_admin = role == "admin"
+    else:
+        # 허용 목록이 비어있으면 ADMIN_USERS 환경변수로 폴백
+        admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
+        is_admin = user_id in admin_users or email in admin_users
+        role = "admin" if is_admin else "user"
+
+    # ADMIN_USERS 환경변수로 admin 역할 자동 지정 (허용 목록 없을 때 폴백)
     admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
-    is_admin = user_id in admin_users or email in admin_users
-    role = "admin" if is_admin else "user"
+    if not has_allowlist:
+        is_admin = user_id in admin_users or email in admin_users
+        role = "admin" if is_admin else "user"
 
     # DB에 사용자 upsert + 마지막 로그인 시간 확인 (중복 로그 방지용)
     existing = await db.execute(select(User).where(User.id == user_id))

@@ -277,5 +277,22 @@ export const client = {
       const res = await http.post('/admin/audit/archive', null, { params: { months } });
       return res.data;
     },
+    // ── 접속 허용 사용자 관리 ──────────────────────────────────
+    async getAllowedUsers() {
+      const res = await http.get('/admin/allowed-users');
+      return res.data;
+    },
+    async addAllowedUser(body: { user_id: string; display_name?: string; role: string; note?: string }) {
+      const res = await http.post('/admin/allowed-users', body);
+      return res.data;
+    },
+    async updateAllowedUser(userId: string, body: { role?: string; display_name?: string; is_active?: boolean; note?: string }) {
+      const res = await http.put(`/admin/allowed-users/${encodeURIComponent(userId)}`, body);
+      return res.data;
+    },
+    async deleteAllowedUser(userId: string) {
+      const res = await http.delete(`/admin/allowed-users/${encodeURIComponent(userId)}`);
+      return res.data;
+    },
   },
 };

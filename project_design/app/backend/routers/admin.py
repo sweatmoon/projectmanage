@@ -24,7 +24,7 @@ from sqlalchemy import desc, func, or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from models.auth import AccessLog, User
+from models.auth import AccessLog, User, AllowedUser
 from models.audit import AuditLog, AuditLogArchive
 from services.audit_service import write_audit_log, archive_old_logs, EventType, EntityType
 
@@ -499,3 +499,139 @@ async def get_entity_timeline(
     )
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 8. 접속 허용 사용자 관리 ──────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+class AllowedUserItem(BaseModel):
+    id: int
+    user_id: str
+    display_name: Optional[str]
+    role: str
+    is_active: bool
+    created_at: Optional[datetime]
+    created_by: Optional[str]
+    note: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class AllowedUserCreate(BaseModel):
+    user_id: str
+    display_name: Optional[str] = None
+    role: str = "user"          # user / admin
+    note: Optional[str] = None
+
+
+class AllowedUserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    note: Optional[str] = None
+
+
+@router.get("/allowed-users", response_model=List[AllowedUserItem])
+async def list_allowed_users(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin),
+):
+    """허용 사용자 목록 조회"""
+    result = await db.execute(
+        select(AllowedUser).order_by(AllowedUser.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/allowed-users", response_model=AllowedUserItem)
+async def create_allowed_user(
+    body: AllowedUserCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """허용 사용자 추가"""
+    # 중복 체크
+    existing = await db.execute(
+        select(AllowedUser).where(AllowedUser.user_id == body.user_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"이미 등록된 사용자입니다: {body.user_id}")
+
+    if body.role not in ("user", "admin"):
+        raise HTTPException(status_code=400, detail="role은 user 또는 admin 만 허용됩니다.")
+
+    admin_id = getattr(request.state, "user_id", "system")
+    new_entry = AllowedUser(
+        user_id=body.user_id,
+        display_name=body.display_name,
+        role=body.role,
+        is_active=True,
+        created_by=admin_id,
+        note=body.note,
+    )
+    db.add(new_entry)
+    await db.flush()
+    await db.refresh(new_entry)
+    await db.commit()
+    logger.info(f"AllowedUser added: {body.user_id} role={body.role} by {admin_id}")
+    return new_entry
+
+
+@router.put("/allowed-users/{user_id}", response_model=AllowedUserItem)
+async def update_allowed_user(
+    user_id: str,
+    body: AllowedUserUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """허용 사용자 수정 (역할/활성화/메모)"""
+    result = await db.execute(
+        select(AllowedUser).where(AllowedUser.user_id == user_id)
+    )
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    if body.role is not None:
+        if body.role not in ("user", "admin"):
+            raise HTTPException(status_code=400, detail="role은 user 또는 admin 만 허용됩니다.")
+        entry.role = body.role
+    if body.display_name is not None:
+        entry.display_name = body.display_name
+    if body.is_active is not None:
+        entry.is_active = body.is_active
+    if body.note is not None:
+        entry.note = body.note
+
+    await db.commit()
+    await db.refresh(entry)
+    admin_id = getattr(request.state, "user_id", "system")
+    logger.info(f"AllowedUser updated: {user_id} by {admin_id}")
+    return entry
+
+
+@router.delete("/allowed-users/{user_id}")
+async def delete_allowed_user(
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """허용 사용자 삭제"""
+    result = await db.execute(
+        select(AllowedUser).where(AllowedUser.user_id == user_id)
+    )
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    await db.delete(entry)
+    await db.commit()
+    admin_id = getattr(request.state, "user_id", "system")
+    logger.info(f"AllowedUser deleted: {user_id} by {admin_id}")
+    return {"ok": True, "deleted": user_id}

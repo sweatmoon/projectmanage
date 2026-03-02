@@ -1,5 +1,5 @@
 from models.base import Base
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text, Boolean
 from sqlalchemy.sql import func
 
 
@@ -12,6 +12,20 @@ class User(Base):
     role = Column(String(50), default="user", nullable=False)  # user/admin
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
+
+
+class AllowedUser(Base):
+    """접속 허용 사용자 목록 - 여기 등록된 사용자만 앱에 접근 가능"""
+    __tablename__ = "allowed_users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(255), unique=True, index=True, nullable=False)  # Synology 계정 ID
+    display_name = Column(String(255), nullable=True)   # 표시 이름 (메모용)
+    role = Column(String(50), default="user", nullable=False)  # user / admin
+    is_active = Column(Boolean, default=True, nullable=False)   # 활성/비활성
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(255), nullable=True)     # 등록한 관리자 ID
+    note = Column(String(500), nullable=True)           # 메모
 
 
 class OIDCState(Base):
