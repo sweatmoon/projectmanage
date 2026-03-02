@@ -1273,6 +1273,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const badgeByPhase = new Map<number, PhaseBadgeInfo>();
     phaseBadges.forEach((b) => badgeByPhase.set(b.phaseId, b));
 
+    // staffing_id → set of months (YYYY-MM) with selected entries, for phantom badge fallback
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const staffingHasEntryThisMonth = new Set<number>();
+    for (const entry of calendarEntries) {
+      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
+        staffingHasEntryThisMonth.add(entry.staffing_id);
+      }
+    }
+
     for (const person of allPeople) {
       const items: StaffingWithBadge[] = [];
       for (const s of localStaffing) {
@@ -1280,7 +1289,25 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           ? (!s.person_id && s.person_name_text?.trim() === person.name)
           : (s.person_id === person.id);
         if (!matches) continue;
-        const badge = badgeByPhase.get(s.phase_id);
+        let badge = badgeByPhase.get(s.phase_id);
+        // Phantom badge: phase가 visiblePhases에 없어도 이 월에 선택된 entry가 있으면 표시
+        if (!badge && staffingHasEntryThisMonth.has(s.id)) {
+          const ph = phaseMapLocal.get(s.phase_id);
+          const proj = projectMap.get(s.project_id);
+          const projName = proj?.project_name || '미정';
+          const status = proj?.status === '제안' ? 'P' : 'A';
+          badge = {
+            phaseId: s.phase_id,
+            projectId: s.project_id,
+            projectName: projName,
+            phaseName: ph?.phase_name || '',
+            label: `${projName}_${ph?.phase_name || ''}`,
+            color: projectColorMap.get(s.project_id) || PROJECT_COLORS[0],
+            status,
+            startDate: ph?.start_date,
+            endDate: ph?.end_date,
+          } as PhaseBadgeInfo;
+        }
         if (badge) {
           items.push({ staffing: s, badge });
         }
@@ -1345,7 +1372,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       map.set(person.id, items);
     }
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, calendarEntries, year, month, projectMap, projectColorMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
