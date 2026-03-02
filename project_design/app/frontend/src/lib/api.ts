@@ -196,4 +196,23 @@ export const client = {
   },
 
   auth: authClient,
+
+  admin: {
+    async getStats() {
+      const res = await http.get('/admin/stats');
+      return res.data;
+    },
+    async getLogs(params?: { action?: string; user_id?: string; limit?: number; offset?: number }) {
+      const res = await http.get('/admin/logs', { params });
+      return res.data;
+    },
+    async getUsers() {
+      const res = await http.get('/admin/users');
+      return res.data;
+    },
+    async updateUserRole(userId: string, role: string) {
+      const res = await http.put(`/admin/users/${userId}/role`, { role });
+      return res.data;
+    },
+  },
 };

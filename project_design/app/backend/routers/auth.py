@@ -36,13 +36,13 @@ def get_oidc_settings():
 
 
 # ── 내부 JWT 생성 ─────────────────────────────────────────
-def create_app_jwt(user_id: str, email: str, name: str, cfg: dict) -> str:
+def create_app_jwt(user_id: str, email: str, name: str, cfg: dict, role: str = "user") -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "email": email,
         "name": name,
-        "role": "user",
+        "role": role,
         "iat": now,
         "exp": now + timedelta(hours=cfg["jwt_expire_hours"]),
     }
@@ -109,6 +109,7 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
 # ── 2. 콜백: 시놀로지에서 code 받아 토큰 교환 ────────────────
 @router.get("/callback")
 async def callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -177,6 +178,11 @@ async def callback(
     email = user_info.get("email") or f"{user_id}@synology.local"
     name = user_info.get("name") or user_info.get("preferred_username") or user_id
 
+    # ADMIN_USERS 환경변수로 admin 역할 자동 지정
+    admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
+    is_admin = user_id in admin_users or email in admin_users
+    role = "admin" if is_admin else "user"
+
     # DB에 사용자 upsert
     existing = await db.execute(select(User).where(User.id == user_id))
     user = existing.scalar_one_or_none()
@@ -184,19 +190,42 @@ async def callback(
         user.last_login = datetime.now(timezone.utc)
         user.name = name
         user.email = email
+        # admin_users에 포함된 경우 항상 admin으로 유지
+        if is_admin:
+            user.role = "admin"
     else:
-        user = User(id=user_id, email=email, name=name, role="user",
+        user = User(id=user_id, email=email, name=name, role=role,
                     last_login=datetime.now(timezone.utc))
         db.add(user)
     await db.commit()
 
-    # 앱용 JWT 생성
-    app_token = create_app_jwt(user_id, email, name, cfg)
+    # 로그인 로그 기록
+    try:
+        from models.auth import AccessLog
+        from middlewares.auth_middleware import _get_client_ip
+        log = AccessLog(
+            user_id=user_id,
+            user_email=email,
+            user_name=name,
+            action="login",
+            method="GET",
+            path="/auth/callback",
+            status_code=302,
+            ip_address=_get_client_ip(request),
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+        db.add(log)
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Login log write failed: {e}")
+
+    # 앱용 JWT 생성 (role 포함)
+    app_token = create_app_jwt(user_id, email, name, cfg, role=role)
 
     # 프론트엔드로 리다이렉트 (토큰을 URL fragment로 전달)
     app_url = cfg["app_url"].rstrip("/")
     redirect_url = f"{app_url}/?token={app_token}"
-    logger.info(f"Login success for user: {name} ({email})")
+    logger.info(f"Login success for user: {name} ({email}) role={role}")
     return RedirectResponse(url=redirect_url)
 
 

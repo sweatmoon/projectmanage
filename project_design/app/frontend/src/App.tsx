@@ -9,32 +9,34 @@ import StaffingRowDetail from './pages/StaffingRowDetail';
 import PersonDetail from './pages/PersonDetail';
 import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
+import AdminPage from './pages/AdminPage';
 import { client, authStore } from './lib/api';
 
 const queryClient = new QueryClient();
 
 // ── 인증 가드 ───────────────────────────────────────────────
-function AuthGuard({ children }: { children: React.ReactNode }) {
+function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
   const [checking, setChecking] = useState(true);
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     async function check() {
-      // OIDC 미설정 환경(개발)이면 바로 통과
       const isDevMode = import.meta.env.DEV || window.location.hostname === 'localhost';
 
       if (authStore.isLoggedIn()) {
-        // 토큰은 있지만 유저 정보가 없으면 /auth/me 호출
         if (!authStore.getUser()) {
           const user = await client.auth.getMe();
           if (user) authStore.setUser(user);
         }
+        const user = authStore.getUser();
+        if (requireAdmin && user?.role !== 'admin') {
+          window.location.href = '/';
+          return;
+        }
         setAuthed(true);
       } else if (isDevMode) {
-        // 개발환경: 인증 스킵 (백엔드 OIDC 미설정)
         setAuthed(true);
       } else {
-        // 프로덕션: 로그인 페이지로
         window.location.href = '/auth/login';
         return;
       }
@@ -72,6 +74,10 @@ const App = () => (
           <Route path="/project/:id" element={<AuthGuard><ProjectDetail /></AuthGuard>} />
           <Route path="/project/:id/staffing" element={<AuthGuard><StaffingRowDetail /></AuthGuard>} />
           <Route path="/person/:id" element={<AuthGuard><PersonDetail /></AuthGuard>} />
+
+          {/* 관리자 전용 */}
+          <Route path="/admin" element={<AuthGuard requireAdmin><AdminPage /></AuthGuard>} />
+
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

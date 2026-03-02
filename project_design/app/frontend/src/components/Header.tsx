@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom'
 import { authStore, client } from '@/lib/api'
-import { LogOut, User } from 'lucide-react'
+import { LogOut, User, Shield } from 'lucide-react'
 
 export default function Header() {
   const navigate = useNavigate()
   const user = authStore.getUser()
   const isLoggedIn = authStore.isLoggedIn()
+  const isAdmin = user?.role === 'admin'
 
   const handleLogout = () => {
     client.auth.logout()
@@ -23,13 +24,26 @@ export default function Header() {
           <span className="text-base font-bold text-gray-900">감리 공수관리 시스템</span>
         </button>
 
-        {/* 사용자 정보 + 로그아웃 */}
+        {/* 사용자 정보 + 관리자 + 로그아웃 */}
         {isLoggedIn && (
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-sm text-gray-600">
               <User className="h-4 w-4 text-gray-400" />
               <span className="font-medium">{user?.name || user?.email || '사용자'}</span>
+              {isAdmin && (
+                <span className="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">관리자</span>
+              )}
             </div>
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-700 transition-colors px-2 py-1 rounded hover:bg-purple-50"
+                title="관리자 페이지"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                <span>관리</span>
+              </button>
+            )}
             <button
               onClick={handleLogout}
               className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
