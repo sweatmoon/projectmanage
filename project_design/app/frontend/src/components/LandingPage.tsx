@@ -1,12 +1,16 @@
-import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, CheckCircle2, Clock } from 'lucide-react';
+import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, Activity, Clock, FileText } from 'lucide-react';
 
 interface LandingPageProps {
   onNavigate: (tab: string) => void;
   stats: {
-    projectCount: number;
-    peopleCount: number;
-    activePhaseCount: number;
-    totalMd: number;
+    activeProjectCount: number;   // 진행중인 사업 (감리, 올해 일정 포함)
+    proposalCount: number;        // 제안중인 사업
+    peopleCount: number;          // 등록 인력
+    utilizationRate: number;      // 가동률 (0~1)
+    utilizationNumerator: number;
+    utilizationDenominator: number;
+    auditorCount: number;
+    bizDaysYtd: number;
   };
 }
 
@@ -217,24 +221,59 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
         {/* Stats Bar */}
         <div className="relative max-w-6xl mx-auto px-6 pb-10">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: '진행 프로젝트', value: stats.projectCount, unit: '건', icon: FolderOpen, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: '등록 인력', value: stats.peopleCount, unit: '명', icon: Users, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { label: '진행 단계', value: stats.activePhaseCount, unit: '개', icon: CheckCircle2, color: 'text-violet-600', bg: 'bg-violet-50' },
-              { label: '총 투입공수', value: stats.totalMd, unit: 'MD', icon: TrendingUp, color: 'text-amber-600', bg: 'bg-amber-50' },
-            ].map(({ label, value, unit, icon: Icon, color, bg }) => (
-              <div key={label} className="bg-white rounded-2xl p-4 shadow-sm border border-white/80 flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
-                  <Icon className={`h-5 w-5 ${color}`} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">{label}</p>
-                  <p className="text-2xl font-extrabold text-slate-800 leading-tight">
-                    {value}<span className="text-sm font-normal text-slate-400 ml-1">{unit}</span>
-                  </p>
-                </div>
+            {/* 진행중인 사업 */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-white/80 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+                <FolderOpen className="h-5 w-5 text-blue-600" />
               </div>
-            ))}
+              <div>
+                <p className="text-xs text-slate-400 font-medium">진행중인 사업</p>
+                <p className="text-2xl font-extrabold text-slate-800 leading-tight">
+                  {stats.activeProjectCount}<span className="text-sm font-normal text-slate-400 ml-1">건</span>
+                </p>
+              </div>
+            </div>
+            {/* 제안중인 사업 */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-white/80 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center flex-shrink-0">
+                <FileText className="h-5 w-5 text-violet-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 font-medium">제안중인 사업</p>
+                <p className="text-2xl font-extrabold text-slate-800 leading-tight">
+                  {stats.proposalCount}<span className="text-sm font-normal text-slate-400 ml-1">건</span>
+                </p>
+              </div>
+            </div>
+            {/* 등록 인력 */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-white/80 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                <Users className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 font-medium">등록 인력</p>
+                <p className="text-2xl font-extrabold text-slate-800 leading-tight">
+                  {stats.peopleCount}<span className="text-sm font-normal text-slate-400 ml-1">명</span>
+                </p>
+              </div>
+            </div>
+            {/* 가동률 */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-white/80 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+                <Activity className="h-5 w-5 text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-400 font-medium">감리원 가동률</p>
+                <p className="text-2xl font-extrabold text-slate-800 leading-tight">
+                  {(stats.utilizationRate * 100).toFixed(1)}<span className="text-sm font-normal text-slate-400 ml-0.5">%</span>
+                </p>
+                {stats.auditorCount > 0 && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {stats.utilizationNumerator}일 / ({stats.bizDaysYtd}일×{stats.auditorCount}명)
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

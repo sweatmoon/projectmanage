@@ -164,23 +164,55 @@ export default function IndexPage() {
     fetchPeople();
     fetchPhases();
     fetchStaffing();
+    fetchHomeStats();
   }, []);
 
-  // Stats for landing page
+  // Stats for landing page (API 기반)
+  const [homeStats, setHomeStats] = useState<{
+    active_project_count: number;
+    proposal_count: number;
+    people_count: number;
+    utilization_rate: number;
+    utilization_numerator: number;
+    utilization_denominator: number;
+    auditor_count: number;
+    biz_days_ytd: number;
+  } | null>(null);
+
+  const fetchHomeStats = useCallback(async () => {
+    try {
+      const s = await client.home.getStats();
+      setHomeStats(s);
+    } catch (err) {
+      console.error('Failed to fetch home stats:', err);
+    }
+  }, []);
+
   const landingStats = useMemo(() => {
-    const now = new Date();
-    const activePhaseCount = phases.filter(ph => {
-      if (!ph.start_date || !ph.end_date) return false;
-      return new Date(ph.start_date) <= now && new Date(ph.end_date) >= now;
-    }).length;
-    const totalMd = staffing.reduce((sum, s) => sum + (s.md || 0), 0);
+    if (homeStats) {
+      return {
+        activeProjectCount: homeStats.active_project_count,
+        proposalCount: homeStats.proposal_count,
+        peopleCount: homeStats.people_count,
+        utilizationRate: homeStats.utilization_rate,
+        utilizationNumerator: homeStats.utilization_numerator,
+        utilizationDenominator: homeStats.utilization_denominator,
+        auditorCount: homeStats.auditor_count,
+        bizDaysYtd: homeStats.biz_days_ytd,
+      };
+    }
+    // 로딩 중 기본값
     return {
-      projectCount: projects.length,
+      activeProjectCount: 0,
+      proposalCount: 0,
       peopleCount: people.length,
-      activePhaseCount,
-      totalMd,
+      utilizationRate: 0,
+      utilizationNumerator: 0,
+      utilizationDenominator: 0,
+      auditorCount: 0,
+      bizDaysYtd: 0,
     };
-  }, [projects, people, phases, staffing]);
+  }, [homeStats, people.length]);
 
   const handleCreateProject = async () => {
     if (!newProject.project_name.trim() || !newProject.organization.trim()) {

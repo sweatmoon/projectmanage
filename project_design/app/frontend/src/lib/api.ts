@@ -228,6 +228,22 @@ export const client = {
     },
   },
 
+  home: {
+    async getStats() {
+      const res = await http.get('/api/v1/home/stats');
+      return res.data as {
+        active_project_count: number;
+        proposal_count: number;
+        people_count: number;
+        utilization_rate: number;
+        utilization_numerator: number;
+        utilization_denominator: number;
+        auditor_count: number;
+        biz_days_ytd: number;
+      };
+    },
+  },
+
   auth: authClient,
 
   admin: {
