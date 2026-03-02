@@ -257,10 +257,19 @@ export default function IndexPage() {
       // 제안 입력을 기존 import_phases 형식으로 변환
       // "단계명, YYYYMMDD, YYYYMMDD, 인력1:분야, 인력2:분야, ..."
       const buildProposalPhaseText = () => {
-        // 인력 섹션 파싱: "이름, 분야" or "이름: 분야" → "이름:분야"
+        // 섹션별 기본 분야 매핑 (이름만 입력 시 사용)
+        const sectionDefaultField: Record<string, string> = {
+          '감리원': '',          // 감리원은 분야가 필수이므로 기본값 없음
+          '핵심기술': '핵심기술',
+          '필수기술': '필수기술',
+          '보안진단': '보안진단',
+          '테스트': '기능테스트',  // 테스트 이름만 입력 시 "기능테스트"
+        };
+
         const allPeople: string[] = [];
         for (const section of proposalSections) {
           if (!section.text.trim()) continue;
+          const defaultField = sectionDefaultField[section.label] ?? section.label;
           for (const line of section.text.split('\n')) {
             const l = line.trim();
             if (!l) continue;
@@ -272,6 +281,8 @@ export default function IndexPage() {
             } else {
               name = l.trim();
             }
+            // 분야가 없으면 섹션 기본값 사용
+            if (!field) field = defaultField;
             if (name) allPeople.push(field ? `${name}:${field}` : name);
           }
         }
