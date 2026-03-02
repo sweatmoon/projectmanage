@@ -977,7 +977,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [localStaffing]);
 
   const fetchCalendarEntries = useCallback(async () => {
-    // person 미배정 staffing도 포함 — DB에 entry가 있을 수 있음(phantom badge 동작에 필요)
+    // person 미배정 staffing도 포함 — DB에 entry가 있을 수 있음
     const relevantStaffingIds = localStaffing.map((s) => s.id);
 
     if (relevantStaffingIds.length === 0) {
@@ -1272,7 +1272,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const badgeByPhase = new Map<number, PhaseBadgeInfo>();
     phaseBadges.forEach((b) => badgeByPhase.set(b.phaseId, b));
 
-    // staffing_id → set of months (YYYY-MM) with selected entries, for phantom badge fallback
+    // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
     const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
     const staffingHasEntryThisMonth = new Set<number>();
     for (const entry of calendarEntries) {
@@ -1463,26 +1463,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const isHol = !isWe && getHolidayName(dateStr) !== null;
       const isNonW = isWe || isHol;
 
-      // 1순위: 슬롯 인덱스 + 날짜범위 모두 일치하는 item (정상 케이스)
-      let item = items.find(
-        (it) =>
-          (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx &&
-          dayInRange(dateStr, it.badge.startDate, it.badge.endDate)
+      // 슬롯 인덱스가 일치하는 item 탐색
+      // dayInRange 조건 없음 → phase 기간 외 날짜도 entry가 있으면 표시 (비연속 선택 지원)
+      const item = items.find(
+        (it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx
       );
-
-      // 2순위: phase 기간은 지났지만 이 날짜에 선택된 entry가 DB에 있는 경우
-      //        → 일정 매핑 복구를 위해 슬롯만 일치하면 표시
-      if (!item) {
-        const candidate = items.find(
-          (it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx
-        );
-        if (candidate) {
-          const entryKey = `${candidate.staffing.id}_${dateStr}`;
-          if (entryLookup.has(entryKey) && entryLookup.get(entryKey)?.status) {
-            item = candidate;
-          }
-        }
-      }
 
       if (!item) return null;
 
@@ -1692,24 +1677,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   };
 
   const [rebuildingCalendar, setRebuildingCalendar] = useState(false);
-  const [repairingSchedule, setRepairingSchedule] = useState(false);
-
-  const handleRepairSchedule = async () => {
-    if (!confirm('DB에 저장된 일정 데이터를 기준으로\n• 삭제된 staffing에 연결된 고아 entries 정리\n• 인력별 일정 표시 매핑 복구\n를 실행합니다. 계속하시겠습니까?')) return;
-    setRepairingSchedule(true);
-    try {
-      const result = await client.calendar.repairSchedule();
-      toast.success(
-        `일정 복구 완료: 고아 ${result.orphan_deleted}개 삭제\n${result.detail.join('\n')}`
-      );
-      await fetchCalendarEntries();
-    } catch (err) {
-      console.error('Repair failed:', err);
-      toast.error('일정 복구 중 오류가 발생했습니다.');
-    } finally {
-      setRepairingSchedule(false);
-    }
-  };
 
   const handleRebuildCalendar = async () => {
     if (!confirm('모든 투입일정을 공휴일/주말 제외 영업일 기준으로 재생성합니다.\n기존 수동 수정 내역이 모두 초기화됩니다. 계속하시겠습니까?')) return;
@@ -2136,23 +2103,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
             variant="outline"
             size="sm"
             onClick={handleRebuildCalendar}
-            disabled={rebuildingCalendar || bulkFilling || repairingSchedule}
+            disabled={rebuildingCalendar || bulkFilling}
             className="text-[10px] h-6 px-2 border-orange-300 text-orange-700 hover:bg-orange-50 whitespace-nowrap"
             title="공휴일/주말에 잘못 생성된 일정을 삭제하고 영업일 기준으로 재생성합니다"
           >
             {rebuildingCalendar ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : '🗓️'}
             공휴일 일정 재생성
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRepairSchedule}
-            disabled={rebuildingCalendar || bulkFilling || repairingSchedule}
-            className="text-[10px] h-6 px-2 border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
-            title="선택된 일정이 있는데 화면에 표시 안 될 때: DB 기반으로 일정 매핑을 복구합니다"
-          >
-            {repairingSchedule ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : '🔧'}
-            일정 매핑 복구
           </Button>
         </div>
       </div>

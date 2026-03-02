@@ -244,21 +244,6 @@ export const client = {
     },
   },
 
-  calendar: {
-    async repairSchedule(projectId?: number) {
-      const res = await http.post('/api/v1/calendar/repair_schedule', {
-        project_id: projectId ?? null,
-      });
-      return res.data as {
-        checked_staffings: number;
-        missing_mapped: number;
-        orphan_entries: number;
-        orphan_deleted: number;
-        detail: string[];
-      };
-    },
-  },
-
   auth: authClient,
 
   admin: {
