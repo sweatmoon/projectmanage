@@ -993,7 +993,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         method: 'POST',
         data: { year, month, staffing_ids: relevantStaffingIds },
       });
-      setCalendarEntries(res?.data?.entries || []);
+      setCalendarEntries(res?.entries || []);
     } catch (err) {
       console.error('Failed to fetch calendar entries:', err);
       setCalendarEntries([]);
