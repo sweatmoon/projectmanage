@@ -448,8 +448,8 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
         logger.warning(f"Logout audit log failed: {e}")
 
     app_url = cfg["app_url"].rstrip("/")
-    syno_logout = f"{cfg['issuer_url']}/oauth2/logout?post_logout_redirect_uri={app_url}" if cfg["issuer_url"] else app_url
-    return RedirectResponse(url=syno_logout)
+    # Synology SSO는 oauth2/logout 미지원 → 앱 로그인 페이지로 이동
+    return RedirectResponse(url=f"{app_url}/auth/login")
 
 
 # ── 5. 현재 사용자 정보 ───────────────────────────────────

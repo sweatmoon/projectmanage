@@ -11,7 +11,8 @@ import ReportTab from '@/components/ReportTab';
 import ScheduleTab from '@/components/ScheduleTab';
 import ProjectGanttTab from '@/components/ProjectGanttTab';
 import LandingPage from '@/components/LandingPage';
-import { FolderOpen, Users, BarChart3, CalendarDays, GanttChart, Plus, Home, Maximize2, Minimize2, LogOut, Shield, User } from 'lucide-react';
+import Header from '@/components/Header';
+import { FolderOpen, Users, BarChart3, CalendarDays, GanttChart, Plus, Home, Maximize2, Minimize2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -258,55 +259,7 @@ export default function IndexPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-white border-b shadow-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button
-            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-            onClick={() => handleTabChange('home')}
-          >
-            <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <BarChart3 className="h-5 w-5 text-white" />
-            </div>
-            <h1 className="text-lg font-bold text-slate-800">악티보 일정관리 시스템</h1>
-          </button>
-
-          {/* 사용자 정보 + 관리자 + 로그아웃 */}
-          {authStore.isLoggedIn() && (() => {
-            const user = authStore.getUser();
-            const isAdmin = user?.role === 'admin';
-            return (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 text-sm text-gray-600">
-                  <User className="h-4 w-4 text-gray-400" />
-                  <span className="font-medium">{user?.name || user?.email || '사용자'}</span>
-                  {isAdmin && (
-                    <span className="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded font-medium">관리자</span>
-                  )}
-                </div>
-                {isAdmin && (
-                  <button
-                    onClick={() => navigate('/admin')}
-                    className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-700 transition-colors px-2 py-1 rounded hover:bg-purple-50"
-                    title="관리자 페이지"
-                  >
-                    <Shield className="h-3.5 w-3.5" />
-                    <span>관리</span>
-                  </button>
-                )}
-                <button
-                  onClick={() => client.auth.logout()}
-                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50"
-                  title="로그아웃"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>로그아웃</span>
-                </button>
-              </div>
-            );
-          })()}
-        </div>
-      </header>
+      <Header />
 
       {/* Landing Page */}
       {activeTab === 'home' && (
