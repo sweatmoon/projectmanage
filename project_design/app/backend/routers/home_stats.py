@@ -106,17 +106,18 @@ async def get_home_stats(db: AsyncSession = Depends(get_db)):
 
     if auditor_count > 0 and biz_days_ytd > 0:
         # 감리원이 배정된 staffing ids 조회
-        staffing_q = select(Staffing.id).where(
+        staffing_q = select(Staffing.id, Staffing.person_id).where(
             Staffing.deleted_at.is_(None),
             Staffing.person_id.in_(auditor_ids),
         )
-        staffing_ids = [r[0] for r in (await db.execute(staffing_q)).fetchall()]
+        staffing_rows = (await db.execute(staffing_q)).fetchall()
+        staffing_to_person = {row[0]: row[1] for row in staffing_rows}
+        staffing_ids = list(staffing_to_person.keys())
 
         if staffing_ids:
-            # year_start ~ today 사이의 실제 투입 일정(status 있는 것) 수 집계
+            # year_start ~ today 사이의 실제 투입 일정(status 있는 것) 전체 조회
             entries_q = (
-                select(func.count())
-                .select_from(Calendar_entries)
+                select(Calendar_entries.staffing_id, Calendar_entries.entry_date)
                 .where(
                     Calendar_entries.staffing_id.in_(staffing_ids),
                     Calendar_entries.status.isnot(None),
@@ -125,7 +126,16 @@ async def get_home_stats(db: AsyncSession = Depends(get_db)):
                     Calendar_entries.entry_date <= today,
                 )
             )
-            utilization_numerator = (await db.execute(entries_q)).scalar() or 0
+            entry_rows = (await db.execute(entries_q)).fetchall()
+
+            # 인별 날짜 중복 제거: (person_id, entry_date) 고유 쌍 개수
+            unique_person_dates: set = set()
+            for staffing_id, entry_date in entry_rows:
+                person_id = staffing_to_person.get(staffing_id)
+                if person_id:
+                    unique_person_dates.add((person_id, str(entry_date)))
+
+            utilization_numerator = len(unique_person_dates)
 
     utilization_rate = (
         utilization_numerator / utilization_denominator
