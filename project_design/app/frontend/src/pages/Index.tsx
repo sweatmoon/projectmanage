@@ -98,10 +98,8 @@ export default function IndexPage() {
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     try { localStorage.setItem('activeTab', tab); } catch { /* ignore */ }
-    // URL도 함께 업데이트 → 새로고침해도 탭 유지
-    const params = new URLSearchParams(window.location.search);
-    params.set('tab', tab);
-    window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+    // React Router navigate로 URL 업데이트 → location.search 변화 정상 감지
+    navigate(`/?tab=${tab}`, { replace: true });
   };
   const [projects, setProjects] = useState<Project[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
