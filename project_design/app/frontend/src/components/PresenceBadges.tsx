@@ -60,15 +60,19 @@ export function PresenceBadges({ users, currentUserId, className = '' }: Presenc
   );
 }
 
-/** 수정 중인 사람이 있을 때 상단 경고 배너 */
+/** 다른 사람이 열람/수정 중일 때 상단 잠금 배너 (점유 방식) */
 export function PresenceWarningBanner({ users, currentUserId }: { users: PresenceUser[]; currentUserId: string }) {
-  const editors = users.filter(u => u.user_id !== currentUserId && u.mode === 'editing');
-  if (editors.length === 0) return null;
-  const names = editors.map(u => u.user_name).join(', ');
+  const others = users.filter(u => u.user_id !== currentUserId);
+  if (others.length === 0) return null;
+  const names = others.map(u => u.user_name).join(', ');
+  const hasEditor = others.some(u => u.mode === 'editing');
   return (
     <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-md px-3 py-2 text-xs text-amber-800 font-medium">
-      <span>⚠️</span>
-      <span><strong>{names}</strong> 님이 현재 수정 중입니다. 동시에 저장하면 데이터가 덮어씌워질 수 있습니다.</span>
+      <span>🔒</span>
+      <span>
+        <strong>{names}</strong> 님이 현재 {hasEditor ? '수정' : '열람'} 중입니다.
+        해당 페이지가 잠겨 있어 수정할 수 없습니다.
+      </span>
     </div>
   );
 }

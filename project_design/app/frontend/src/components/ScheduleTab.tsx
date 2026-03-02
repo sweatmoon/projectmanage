@@ -6,10 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
+import { usePresence } from '@/hooks/usePresence';
+import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
 
 
 /* ───────── Types ───────── */
@@ -901,6 +903,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [togglingCell, setTogglingCell] = useState<string | null>(null);
   const [bulkFilling, setBulkFilling] = useState(false);
 
+  // ── Presence (주간별 사업 일정 동접자 표시) ──
+  // page_id=0 고정: 전체 일정 화면은 단일 공유 공간
+  const { users: presenceUsers, others: presenceOthers, currentUserId: presenceCurrentUserId } = usePresence({
+    pageType: 'schedule',
+    pageId: 0,
+    mode: bulkFilling ? 'editing' : 'viewing',
+  });
+  const scheduleIsLocked = presenceOthers.length > 0;
+
   // Dynamic column width & row height
   const [colWidth, setColWidth] = useState(getSavedColWidth);
   const [rowHeight, setRowHeight] = useState(getSavedRowHeight);
@@ -1507,6 +1518,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   );
 
   const handleCellClick = async (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => {
+    if (scheduleIsLocked) {
+      toast.error('다른 사용자가 열람 중입니다. 잠시 후 다시 시도하세요.');
+      return;
+    }
     const cellKey = `${staffingId}_${dateStr}`;
     if (togglingCell === cellKey) return;
 
@@ -2038,6 +2053,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
   return (
     <div className="space-y-4">
+      {/* 동접자 잠금 배너 */}
+      <PresenceWarningBanner users={presenceUsers} currentUserId={presenceCurrentUserId} />
+
       {/* Controls */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
@@ -2082,6 +2100,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           <span className="text-xs text-muted-foreground ml-2">({daysInMonth}일)</span>
           {(loadingEntries || bulkFilling) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           {bulkFilling && <span className="text-[10px] text-blue-600 font-medium">일괄 처리중...</span>}
+          {scheduleIsLocked && <Lock className="h-4 w-4 text-amber-500" title="다른 사용자가 열람 중 — 잠금" />}
+          <PresenceBadges users={presenceUsers} currentUserId={presenceCurrentUserId} />
           <div className="flex items-center gap-1 ml-3 border-l pl-3 border-gray-300">
             <label className="text-[10px] text-muted-foreground whitespace-nowrap">열폭</label>
             <input

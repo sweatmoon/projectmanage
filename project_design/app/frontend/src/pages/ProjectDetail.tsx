@@ -597,8 +597,9 @@ export default function ProjectDetail() {
     pageId: projectId || null,
     mode: presenceMode,
   });
-  // 다른 사람이 수정 중이면 잠금 (저장 버튼 비활성, 인풋 읽기 전용)
-  const isLocked = hasEditor;
+  // 다른 사람이 열람/수정 중이면 잠금 (점유 방식 — 먼저 연 사람이 우선권)
+  // 보는 것은 누구나 가능, 저장/편집 액션만 차단
+  const isLocked = presenceOthers.length > 0;
 
   const togglePhaseSchedule = (phaseId: number) => {
     setExpandedPhaseSchedules((prev) => {
