@@ -1463,11 +1463,28 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const isHol = !isWe && getHolidayName(dateStr) !== null;
       const isNonW = isWe || isHol;
 
-      // 슬롯 인덱스가 일치하는 item 탐색
-      // dayInRange 조건 없음 → phase 기간 외 날짜도 entry가 있으면 표시 (비연속 선택 지원)
-      const item = items.find(
-        (it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx
-      );
+      // 슬롯 인덱스 일치하는 item 탐색
+      // - phase 기간 내: 빈 셀도 렌더링 (클릭 가능 영역)
+      // - phase 기간 외: entry(선택된 것)가 있을 때만 렌더링
+      const item = (() => {
+        // 1순위: 슬롯 일치 + phase 기간 내
+        const inRange = items.find(
+          (it) =>
+            (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx &&
+            dayInRange(dateStr, it.badge.startDate, it.badge.endDate)
+        );
+        if (inRange) return inRange;
+
+        // 2순위: 슬롯 일치 + phase 기간 외지만 DB에 선택된 entry가 있는 경우
+        const candidate = items.find(
+          (it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx
+        );
+        if (candidate) {
+          const key = `${candidate.staffing.id}_${dateStr}`;
+          if (entryLookup.get(key)?.status) return candidate;
+        }
+        return undefined;
+      })();
 
       if (!item) return null;
 
