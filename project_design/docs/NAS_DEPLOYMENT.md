@@ -1,138 +1,125 @@
 # NAS 운영 배포 가이드
 
+## 현재 activo-no1 NAS 실제 구성 (스크린샷 확인 기준)
+
+```
+브라우저 → https://activo-no1.synology.me:8443
+    ↓  (DSM Application Portal 역방향 프록시)
+NAS localhost:8888  (HTTP)
+    ↓  (Docker 포트 매핑 8888:8080)
+컨테이너:8080  (FastAPI uvicorn)
+```
+
+| 구성 요소 | 설정값 |
+|----------|--------|
+| 역방향 프록시 소스 | HTTPS · `activo-no1.synology.me` · **8443** |
+| 역방향 프록시 대상 | HTTP · `localhost` · **8888** |
+| Docker 포트 매핑 | `8888:8080` (호스트:컨테이너) |
+| 라우터 포트포워딩 | 외부 8443, 8888 모두 개방 |
+
+---
+
 ## 문제 진단 및 해결
 
 ### 증상
 Synology SSO 로그인은 되는데 콜백 후 "페이지를 찾을 수 없습니다" 오류
 
 ### 원인
-1. **포트 불일치**: 컨테이너 포트(8888)와 OIDC 콜백 URI 포트(8443)가 다름
-2. **역방향 프록시 헤더 미처리**: HTTPS→HTTP 변환 시 `X-Forwarded-Proto` 헤더를 uvicorn이 무시
+1. **X-Forwarded-Proto 미처리**: DSM 역방향 프록시가 HTTPS→HTTP 변환 시 헤더를 전달하는데 uvicorn이 무시하여 콜백 리다이렉트 URL이 `http://`로 생성됨
+2. **APP_HOST_PORT 불일치**: 이전 설정에서 `8080:8080`이었는데 역방향 프록시 대상이 `8888`이므로 컨테이너가 응답하지 않음
 
-### 해결책 (v74b212e → 현재 버전에서 수정됨)
-- `deploy/docker-entrypoint.sh`: uvicorn에 `--proxy-headers --forwarded-allow-ips='*'` 추가
-- `app/backend/main.py`: `ReverseProxyMiddleware` 추가 (X-Forwarded-* 헤더 반영)
-- 콜백 후 `APP_URL` 미설정 시 `request.base_url` 폴백 처리
-
----
-
-## Synology NAS 배포 절차
-
-### 전제 조건
-- Docker Hub: `sweatmoon/gantt-app:latest`
-- NAS 도메인: `activo-no1.synology.me`
-- OIDC 외부 접속 포트: `8443`
+### 해결 (현재 버전에 반영)
+- `deploy/docker-entrypoint.sh`: uvicorn `--proxy-headers --forwarded-allow-ips='*'` 추가
+- `app/backend/main.py`: `ReverseProxyMiddleware` 추가 (X-Forwarded-Proto/Host 자동 반영)
+- `docker-compose.prod.yml`: `APP_HOST_PORT=8888` 기본값으로 수정
 
 ---
 
-## 방법 A: DSM Application Portal 역방향 프록시 (권장)
+## NAS .env 파일 설정
 
-### 1단계: Application Portal 역방향 프록시 설정
-
-DSM > 제어판 > Application Portal > 역방향 프록시 탭 > 만들기
-
-| 항목 | 값 |
-|------|-----|
-| 역방향 프록시 이름 | gantt-app |
-| **원본** 프로토콜 | HTTPS |
-| **원본** 호스트 이름 | activo-no1.synology.me |
-| **원본** 포트 | **8443** |
-| **대상** 프로토콜 | HTTP |
-| **대상** 호스트 이름 | localhost |
-| **대상** 포트 | **8080** |
-
-> "사용자 지정 헤더" 탭에서 **WebSocket 활성화** 체크
-
-### 2단계: `.env` 파일 생성
-
-```bash
-cd ~/docker/gantt-app   # NAS Container Manager 작업 디렉터리
-cp .env.example .env
-nano .env
-```
+NAS의 docker 작업 디렉터리에서 `.env` 파일을 아래와 같이 설정:
 
 ```env
-POSTGRES_PASSWORD=안전한비밀번호32자이상
-JWT_SECRET=랜덤32자이상문자열
+# ─── 필수 변경 항목 ───────────────────────────────────────
+POSTGRES_PASSWORD=안전한비밀번호를여기입력
+JWT_SECRET=최소32자이상랜덤문자열을여기입력
 
-# OIDC 설정
+# ─── OIDC (Synology SSO) ─────────────────────────────────
 OIDC_ISSUER_URL=https://activo-no1.synology.me/webman/sso
 OIDC_CLIENT_ID=dc94720916c6260370a1653e9342050b
-OIDC_CLIENT_SECRET=여기에_클라이언트_시크릿_입력
+OIDC_CLIENT_SECRET=여기에_DSM_SSO_클라이언트_시크릿_입력
 OIDC_REDIRECT_URI=https://activo-no1.synology.me:8443/auth/callback
 APP_URL=https://activo-no1.synology.me:8443
 
-# 역방향 프록시 사용 → 컨테이너는 8080으로만 리슨
-APP_HOST_PORT=8080
+# ─── 포트 매핑 (역방향 프록시 대상 포트와 일치) ──────────
+APP_HOST_PORT=8888   ← 역방향 프록시 대상이 8888이므로 반드시 8888
 
+# ─── 관리자 ──────────────────────────────────────────────
 ADMIN_USERS=sweatmoon
 ```
 
-### 3단계: 컨테이너 실행
+---
+
+## 컨테이너 재시작 방법
 
 ```bash
+# NAS SSH 또는 Container Manager 터미널에서:
+cd ~/docker/gantt-app   # docker-compose.yml 위치
+
+# 최신 이미지 pull 후 재시작
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
 
-### 4단계: Alembic 마이그레이션 (최초 1회)
-
-```bash
-docker exec gantt-app alembic upgrade head
+# 또는 Watchtower가 자동으로 5분마다 업데이트 (이미 실행 중)
 ```
 
 ---
 
-## 방법 B: 역방향 프록시 없이 직접 포트 노출
+## DSM Application Portal 역방향 프록시 설정 확인
 
-### `.env` 설정
+**DSM > 제어판 > Application Portal > 역방향 프록시 > "gantt-app" 편집**
 
-```env
-APP_HOST_PORT=8443    # 컨테이너 8080 → 호스트 8443 매핑
-APP_URL=https://activo-no1.synology.me:8443
-OIDC_REDIRECT_URI=https://activo-no1.synology.me:8443/auth/callback
-```
+| 항목 | 현재값 | 올바른값 |
+|------|--------|---------|
+| 소스 프로토콜 | HTTPS | HTTPS ✅ |
+| 소스 호스트 | activo-no1.synology.me | 동일 ✅ |
+| 소스 포트 | 8443 | 8443 ✅ |
+| 대상 프로토콜 | HTTP | HTTP ✅ |
+| 대상 호스트 | localhost | localhost ✅ |
+| 대상 포트 | **8888** | **8888** ✅ |
 
-> ⚠️ 이 경우 HTTPS 종료를 별도로 처리해야 합니다. (DSM 인증서 또는 nginx)
-
----
-
-## DSM SSO 애플리케이션 설정 확인
-
-DSM > 제어판 > Application Portal > SSO 클라이언트 설정에서:
-
-- **Redirect URI**: `https://activo-no1.synology.me:8443/auth/callback` ✅
-- **허용 범위**: `openid profile email`
+> **"사용자 지정 머리글" 탭** 에서 WebSocket 관련 헤더 확인:
+> - `Upgrade: $http_upgrade`
+> - `Connection: $connection_upgrade`
 
 ---
 
 ## 트러블슈팅
 
-### "페이지를 찾을 수 없습니다" 오류
+### 로그 확인
 
 ```bash
-# 컨테이너 로그 확인
-docker logs gantt-app --tail=50
+# 컨테이너 실시간 로그
+docker logs gantt-app -f --tail=50
 
 # 콜백 처리 확인
-docker logs gantt-app 2>&1 | grep "callback\|redirect\|Login"
+docker logs gantt-app 2>&1 | grep -E "callback|redirect|Login success|error"
 ```
 
-**체크리스트**:
-1. ✅ `APP_URL`이 실제 접속 URL과 일치하는지 확인
-2. ✅ `OIDC_REDIRECT_URI`가 DSM SSO에 등록된 URI와 **정확히** 일치하는지 확인
-3. ✅ Application Portal 역방향 프록시에서 포트(8443)가 올바른지 확인
-4. ✅ 방화벽에서 8443 포트가 열려 있는지 확인
-
-### 로그인 후 빈 화면
-
-```bash
-# 토큰이 올바르게 전달되는지 확인
-docker logs gantt-app 2>&1 | grep "Login success"
+**정상 작동 시 로그**:
+```
+Login success for user: sweatmoon (...) role=admin → https://activo-no1.synology.me:8443
 ```
 
-- `Login success for user: ... → https://activo-no1.synology.me:8443` 확인
+### "Invalid or expired state" 오류
+- OIDC state가 10분 안에 콜백이 와야 함
+- DB 연결 확인: `docker logs gantt-db --tail=20`
 
-### DB 마이그레이션 오류
+### 로그인 후 빈 화면 / 무한 로딩
+- 브라우저 개발자 도구 > Network 탭에서 `/?token=...` 리다이렉트 확인
+- localStorage에 `app_token` 키가 저장됐는지 확인
+
+### DB 마이그레이션
 
 ```bash
 docker exec gantt-app alembic current
