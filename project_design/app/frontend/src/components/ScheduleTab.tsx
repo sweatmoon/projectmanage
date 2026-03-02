@@ -977,9 +977,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [localStaffing]);
 
   const fetchCalendarEntries = useCallback(async () => {
-    const relevantStaffingIds = localStaffing
-      .filter((s) => s.person_id || s.person_name_text)
-      .map((s) => s.id);
+    // person 미배정 staffing도 포함 — DB에 entry가 있을 수 있음(phantom badge 동작에 필요)
+    const relevantStaffingIds = localStaffing.map((s) => s.id);
 
     if (relevantStaffingIds.length === 0) {
       setCalendarEntries([]);
