@@ -14,6 +14,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck } from 'lucide-react';
 import { countBusinessDays as countBizDaysHoliday, isNonWorkday } from '@/lib/holidays';
+import { usePresence } from '@/hooks/usePresence';
+import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
 
 interface Project {
   id: number;
@@ -584,7 +586,19 @@ export default function ProjectDetail() {
   const [dateSyncPreview, setDateSyncPreview] = useState<DateSyncPreview | null>(null);
   const [applyingDateSync, setApplyingDateSync] = useState(false);
 
-  const isLocked = false;
+  // ── Presence (동접자 표시) ──
+  // showPhaseDialog / showTextEdit / saving 중 하나라도 열리면 'editing' 모드
+  const presenceMode = useMemo<'viewing' | 'editing'>(
+    () => (showPhaseDialog || showTextEdit || saving ? 'editing' : 'viewing'),
+    [showPhaseDialog, showTextEdit, saving],
+  );
+  const { users: presenceUsers, others: presenceOthers, hasEditor, currentUserId: presenceCurrentUserId } = usePresence({
+    pageType: 'project',
+    pageId: projectId || null,
+    mode: presenceMode,
+  });
+  // 다른 사람이 수정 중이면 잠금 (저장 버튼 비활성, 인풋 읽기 전용)
+  const isLocked = hasEditor;
 
   const togglePhaseSchedule = (phaseId: number) => {
     setExpandedPhaseSchedules((prev) => {
@@ -1197,6 +1211,8 @@ export default function ProjectDetail() {
             </Button>
             <div className="flex-1 min-w-0">
               <h1 className="text-lg font-bold text-slate-800 truncate">{project.project_name}</h1>
+              {/* 동접자 배지 */}
+              <PresenceBadges users={presenceUsers} currentUserId={presenceCurrentUserId} className="mt-0.5" />
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleCleanupStaffing} disabled={cleaningUp}>
@@ -1208,12 +1224,15 @@ export default function ProjectDetail() {
                 {exportLoading ? '내보내는 중...' : '텍스트 내보내기'}
               </Button>
               {statusBadge(project.status)}
-              {isLocked && <Lock className="h-4 w-4 text-amber-500" />}
+              {isLocked && <Lock className="h-4 w-4 text-amber-500" title="다른 사용자가 수정 중" />}
             </div>
           </div>
         </header>
 
         <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+          {/* 수정 중인 사람 경고 배너 */}
+          <PresenceWarningBanner users={presenceUsers} currentUserId={presenceCurrentUserId} />
+
           {/* Project Info Card */}
           <Card>
             <CardHeader className="pb-3">
