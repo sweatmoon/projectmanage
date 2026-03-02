@@ -1,11 +1,20 @@
-name: Docker 이미지 빌드 & Docker Hub 업로드
+name: Docker 이미지 빌드 & 배포
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
+    paths:
+      - 'project_design/**'
+  pull_request:
+    branches: [ "main", "develop" ]
     paths:
       - 'project_design/**'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '추가 태그 (예: v1.2.0)'
+        required: false
+        default: ''
 
 jobs:
   build-and-push:
@@ -15,21 +24,70 @@ jobs:
       - name: 소스코드 다운로드
         uses: actions/checkout@v4
 
+      - name: 이미지 태그 결정
+        id: tags
+        run: |
+          SHA="${{ github.sha }}"
+          SHORT_SHA="${SHA:0:7}"
+          BRANCH="${{ github.ref_name }}"
+          REPO="sweatmoon/gantt-app"
+
+          if [ "$BRANCH" = "main" ]; then
+            TAGS="${REPO}:latest,${REPO}:${SHORT_SHA}"
+            ENV_LABEL="production"
+            DO_PUSH="true"
+          elif [ "$BRANCH" = "develop" ]; then
+            TAGS="${REPO}:staging,${REPO}:staging-${SHORT_SHA}"
+            ENV_LABEL="staging"
+            DO_PUSH="true"
+          else
+            TAGS="${REPO}:pr-${SHORT_SHA}"
+            ENV_LABEL="pr"
+            DO_PUSH="false"
+          fi
+
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAGS="${TAGS},${REPO}:${{ github.event.inputs.tag }}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "env_label=${ENV_LABEL}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "do_push=${DO_PUSH}" >> $GITHUB_OUTPUT
+
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+
       - name: Docker Hub 로그인
+        if: steps.tags.outputs.do_push == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Docker 이미지 빌드 & 업로드
+      - name: 이미지 빌드 & 업로드
         uses: docker/build-push-action@v5
         with:
           context: ./project_design
           dockerfile: ./project_design/Dockerfile
-          push: true
-          tags: |
-            sweatmoon/gantt-app:latest
-            sweatmoon/gantt-app:${{ github.sha }}
+          push: ${{ steps.tags.outputs.do_push == 'true' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: 완료 메시지
-        run: echo "✅ 이미지 업로드 완료 - sweatmoon/gantt-app:latest"
+      - name: 빌드 결과 요약
+        run: |
+          echo "## 🐳 Docker 빌드 결과" >> $GITHUB_STEP_SUMMARY
+          echo "| 항목 | 값 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| 브랜치 | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 커밋 | \`${{ steps.tags.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 환경 | **${{ steps.tags.outputs.env_label }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| 태그 | \`${{ steps.tags.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.tags.outputs.do_push }}" = "true" ]; then
+            echo "| 업로드 | ✅ Docker Hub 업로드 완료 |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> Watchtower가 5분 내 새 이미지를 감지하여 NAS 컨테이너를 자동 재시작합니다." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 업로드 | ⏭️ PR 빌드 - 업로드 생략 |" >> $GITHUB_STEP_SUMMARY
+          fi
