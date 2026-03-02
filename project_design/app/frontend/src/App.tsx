@@ -3,6 +3,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import Index from './pages/Index';
 import ProjectDetail from './pages/ProjectDetail';
 import StaffingRowDetail from './pages/StaffingRowDetail';
@@ -14,6 +15,21 @@ import { client, authStore } from './lib/api';
 
 const queryClient = new QueryClient();
 
+// ── auth_error 파라미터 처리 (콜백 오류 시 백엔드에서 리다이렉트) ──
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search);
+  const authError = urlParams.get('auth_error');
+  if (authError) {
+    urlParams.delete('auth_error');
+    const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+    window.history.replaceState({}, '', newUrl);
+    // React 마운트 후 토스트 표시
+    setTimeout(() => {
+      toast.error(`로그인 오류: ${decodeURIComponent(authError)}`, { duration: 8000 });
+    }, 500);
+  }
+}
+
 // ── 인증 가드 ───────────────────────────────────────────────
 function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
   const [checking, setChecking] = useState(true);
@@ -21,18 +37,14 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
 
   useEffect(() => {
     async function check() {
-      // OIDC_ISSUER_URL이 없으면 dev mode → /auth/dev-login으로 토큰 발급
-      // /auth/login에 GET 요청으로 OIDC 설정 여부 확인 (503=미설정=dev mode)
+      // /auth/login 에 GET 요청으로 OIDC 설정 여부 확인
+      // 503 = OIDC 미설정 = dev mode, opaqueredirect = OIDC 설정됨 = 프로덕션
       let isDevMode = import.meta.env.DEV || window.location.hostname === 'localhost';
       if (!isDevMode) {
         try {
           const res = await fetch('/auth/login', { method: 'GET', redirect: 'manual' });
-          // 503 = OIDC 미설정 = dev mode, 307/302 = OIDC 설정됨 = 프로덕션
-          if (res.status === 503 || res.type === 'opaqueredirect') {
-            // opaqueredirect = manual redirect = OIDC 설정된 리다이렉트
-            isDevMode = res.status === 503;
-          }
-        } catch { isDevMode = true; /* 네트워크 오류면 dev mode 가정 */ }
+          isDevMode = res.status === 503;
+        } catch { isDevMode = true; }
       }
 
       if (authStore.isLoggedIn()) {
@@ -47,12 +59,8 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
         }
         setAuthed(true);
       } else if (isDevMode) {
-        // dev mode: 토큰 없으면 dev-login으로 자동 발급
-        if (!authStore.isLoggedIn()) {
-          window.location.href = '/auth/dev-login';
-          return;
-        }
-        setAuthed(true);
+        window.location.href = '/auth/dev-login';
+        return;
       } else {
         window.location.href = '/auth/login';
         return;

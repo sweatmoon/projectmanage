@@ -212,16 +212,23 @@ async def callback(
     db: AsyncSession = Depends(get_db),
 ):
     cfg = get_oidc_settings()
+    app_url = cfg["app_url"].rstrip("/") if cfg["app_url"] else str(request.base_url).rstrip("/")
+
+    def error_redirect(msg: str, detail: str = ""):
+        """오류 시 프론트엔드 에러 페이지로 리다이렉트"""
+        logger.error(f"Auth callback error: {msg} | {detail}")
+        from urllib.parse import quote
+        return RedirectResponse(url=f"{app_url}/?auth_error={quote(msg)}", status_code=302)
 
     # state 검증
     result = await db.execute(select(OIDCState).where(OIDCState.state == state))
     oidc_state = result.scalar_one_or_none()
     if not oidc_state:
-        raise HTTPException(status_code=400, detail="Invalid or expired state")
+        return error_redirect("로그인 세션이 만료되었습니다. 다시 시도해주세요.", "Invalid state")
     if oidc_state.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         await db.delete(oidc_state)
         await db.commit()
-        raise HTTPException(status_code=400, detail="State expired, please login again")
+        return error_redirect("로그인 세션이 만료되었습니다. 다시 시도해주세요.", "State expired")
 
     code_verifier = oidc_state.code_verifier
     nonce = oidc_state.nonce
@@ -231,10 +238,9 @@ async def callback(
     await db.flush()
 
     # 시놀로지 token endpoint로 code 교환
-    # 시놀로지 SSO는 SSOAccessToken.cgi 엔드포인트 사용
     token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
     try:
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # NAS 사설 인증서 허용
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             token_resp = await client.post(token_url, data={
                 "grant_type": "authorization_code",
                 "code": code,
@@ -243,37 +249,69 @@ async def callback(
                 "client_secret": cfg["client_secret"],
                 "code_verifier": code_verifier,
             })
+            logger.info(f"SSOAccessToken response status: {token_resp.status_code}")
             token_resp.raise_for_status()
             tokens = token_resp.json()
+            logger.info(f"SSO token response keys: {list(tokens.keys())}")
     except Exception as e:
         logger.error(f"Token exchange failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Token exchange failed: {e}")
+        return error_redirect("인증 서버 연결에 실패했습니다.", str(e))
 
-    id_token = tokens.get("id_token") or tokens.get("access_token")
-    if not id_token:
-        raise HTTPException(status_code=502, detail="No id_token in response")
+    import base64 as _b64, json as _json
 
-    # id_token에서 사용자 정보 추출 (서명 검증 없이 디코드 - NAS 내부망이므로 허용)
-    try:
-        import base64, json as _json
-        parts = id_token.split(".")
-        payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
-        user_info = _json.loads(base64.urlsafe_b64decode(payload_b64))
-    except Exception:
-        # id_token 파싱 실패 시 userinfo endpoint 시도
+    logger.info(f"SSO token response keys: {list(tokens.keys())}")
+
+    # ── 사용자 정보 추출 우선순위 ─────────────────────────────
+    # 1) id_token JWT 디코드
+    # 2) SSOUserInfo.cgi 조회
+    # 3) tokens에 직접 포함된 account/username 필드
+    user_info: dict = {}
+
+    # 1. id_token 디코드 시도
+    id_token = tokens.get("id_token", "")
+    if id_token and id_token.count(".") == 2:
         try:
-            async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-                ui_resp = await client.get(
-                    f"{cfg['issuer_url']}/SSOUserInfo.cgi",
-                    headers={"Authorization": f"Bearer {tokens.get('access_token', '')}"}
-                )
-                user_info = ui_resp.json()
-        except Exception as e2:
-            raise HTTPException(status_code=502, detail=f"Cannot get user info: {e2}")
+            payload_b64 = id_token.split(".")[1]
+            payload_b64 += "=" * (4 - len(payload_b64) % 4)
+            user_info = _json.loads(_b64.urlsafe_b64decode(payload_b64))
+            logger.info(f"id_token claims: {list(user_info.keys())}")
+        except Exception as e:
+            logger.warning(f"id_token decode failed: {e}")
 
-    user_id = user_info.get("sub") or user_info.get("account") or user_info.get("username", "unknown")
+    # 2. UserInfo endpoint 조회 (id_token에 sub 없을 때)
+    if not user_info.get("sub") and not user_info.get("account"):
+        try:
+            access_token = tokens.get("access_token", "")
+            async with httpx.AsyncClient(timeout=15.0, verify=False) as hc:
+                ui_resp = await hc.get(
+                    f"{cfg['issuer_url']}/SSOUserInfo.cgi",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                if ui_resp.status_code == 200:
+                    ui_data = ui_resp.json()
+                    logger.info(f"SSOUserInfo response keys: {list(ui_data.keys())}")
+                    user_info.update(ui_data)
+        except Exception as e:
+            logger.warning(f"SSOUserInfo.cgi failed: {e}")
+
+    # 3. tokens 자체에 account 정보가 있는 경우 (일부 DSM 버전)
+    if not user_info.get("sub") and not user_info.get("account"):
+        for k in ("account", "username", "user", "userid", "user_id"):
+            if tokens.get(k):
+                user_info["account"] = tokens[k]
+                logger.info(f"Using tokens['{k}'] as user_id: {tokens[k]}")
+                break
+
+    if not user_info:
+        logger.error(f"No user info. Full token response: {tokens}")
+        return error_redirect("사용자 정보를 가져올 수 없습니다. NAS SSO 설정을 확인하세요.", str(tokens))
+
+    user_id = (user_info.get("sub") or user_info.get("account")
+               or user_info.get("username") or user_info.get("preferred_username", "unknown"))
     email = user_info.get("email") or f"{user_id}@synology.local"
-    name = user_info.get("name") or user_info.get("preferred_username") or user_id
+    name  = (user_info.get("name") or user_info.get("preferred_username")
+             or user_info.get("display_name") or user_id)
+    logger.info(f"Resolved user → id={user_id!r}, name={name!r}, email={email!r}")
 
     # ADMIN_USERS 환경변수로 admin 역할 자동 지정
     admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
