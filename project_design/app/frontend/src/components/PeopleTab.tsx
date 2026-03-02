@@ -31,15 +31,16 @@ const empStatusConfig: Record<string, { className: string }> = {
   '외부': { className: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
   '퇴사': { className: 'bg-red-100 text-red-700 hover:bg-red-100' },
 };
+const DEFAULT_BADGE = 'bg-gray-100 text-gray-600 hover:bg-gray-100';
 
 // ── 엑셀(CSV) 양식 다운로드 ─────────────────────────────────
 function downloadImportTemplate() {
   const BOM = '\uFEFF';
   const headers = ['이름', '직급', '감리원등급', '구분'];
   const exampleRows = [
-    ['홍길동', '수석', '특급', '재직'],
-    ['김철수', '책임', '고급', '재직'],
-    ['이영희', '선임', '중급', '외부'],
+    ['홍길동', '수석', '수석감리원', '재직'],
+    ['김철수', '책임', '감리원', '재직'],
+    ['이영희', '선임', '', '외부'],
   ];
   const csvContent = BOM + [headers.join(','), ...exampleRows.map((r) => r.join(','))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -317,7 +318,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {paginatedPeople.map((person) => {
-              const esc = empStatusConfig[person.employment_status || ''] || empStatusConfig['재직'];
+              const escClass = (empStatusConfig[person.employment_status || '']?.className) ?? DEFAULT_BADGE;
               const isSelected = selectedIds.has(person.id);
               const isDeleting = deletingId === person.id;
               return (
@@ -345,7 +346,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                         <div className="flex items-center gap-1.5">
                           <span className="font-semibold text-sm truncate">{person.person_name}</span>
                           {person.employment_status && (
-                            <Badge className={`text-[10px] px-1.5 py-0 ${esc.className}`}>{person.employment_status}</Badge>
+                            <Badge className={`text-[10px] px-1.5 py-0 ${escClass}`}>{person.employment_status}</Badge>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">

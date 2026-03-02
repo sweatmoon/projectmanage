@@ -505,28 +505,18 @@ export default function IndexPage() {
                   <SelectValue placeholder="등급 선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="특급">특급</SelectItem>
-                  <SelectItem value="고급">고급</SelectItem>
-                  <SelectItem value="중급">중급</SelectItem>
-                  <SelectItem value="초급">초급</SelectItem>
+                  <SelectItem value="수석감리원">수석감리원</SelectItem>
+                  <SelectItem value="감리원">감리원</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>구분</Label>
-              <Select
+              <Input
                 value={newPerson.employment_status}
-                onValueChange={(v) => setNewPerson({ ...newPerson, employment_status: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="재직">재직</SelectItem>
-                  <SelectItem value="외부">외부</SelectItem>
-                  <SelectItem value="퇴사">퇴사</SelectItem>
-                </SelectContent>
-              </Select>
+                onChange={(e) => setNewPerson({ ...newPerson, employment_status: e.target.value })}
+                placeholder="예: 재직, 외부, 퇴사"
+              />
             </div>
           </div>
           <DialogFooter>

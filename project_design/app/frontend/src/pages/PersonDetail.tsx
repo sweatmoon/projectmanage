@@ -52,8 +52,7 @@ const empStatusConfig: Record<string, string> = {
   '퇴사': 'bg-red-100 text-red-700 hover:bg-red-100',
 };
 
-const gradeOptions = ['특급', '고급', '중급', '초급'];
-const statusOptions = ['재직', '외부', '퇴사'];
+const gradeOptions = ['수석감리원', '감리원'];
 
 export default function PersonDetail() {
   const { id } = useParams<{ id: string }>();
@@ -241,18 +240,15 @@ export default function PersonDetail() {
                     ))}
                   </select>
                 </div>
-                {/* 구분 */}
+                {/* 구분 - 자유 텍스트 */}
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">구분</label>
-                  <select
+                  <input
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    value={editForm.employment_status || '재직'}
+                    value={editForm.employment_status || ''}
                     onChange={(e) => setEditForm({ ...editForm, employment_status: e.target.value })}
-                  >
-                    {statusOptions.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                    placeholder="예: 재직, 외부, 퇴사"
+                  />
                 </div>
               </div>
             ) : (
@@ -271,10 +267,7 @@ export default function PersonDetail() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-400 mb-0.5">구분</p>
-                  {person.employment_status
-                    ? <Badge className={empStatusConfig[person.employment_status] || ''}>{person.employment_status}</Badge>
-                    : <span className="text-slate-300">-</span>
-                  }
+                  <p className="font-medium text-slate-700">{person.employment_status || <span className="text-slate-300">-</span>}</p>
                 </div>
               </div>
             )}

@@ -141,6 +141,33 @@ class DatabaseManager:
             logger.error(f"Failed to initialize database: {e}", exc_info=True)
             raise
 
+    async def _migrate_people_table(self):
+        """people 테이블에 누락된 컬럼을 안전하게 추가 (데이터 보존)"""
+        try:
+            async with self.engine.begin() as conn:
+                # PostgreSQL / SQLite 모두 지원하는 방식으로 컬럼 존재 여부 확인
+                db_url = str(self.engine.url)
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='people' AND column_name='position'"
+                        )
+                    )
+                    exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(people)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    exists = "position" in cols
+
+                if not exists:
+                    await conn.execute(text("ALTER TABLE people ADD COLUMN position VARCHAR"))
+                    logger.info("Migration: people.position 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: people.position 컬럼 이미 존재")
+        except Exception as e:
+            logger.warning(f"Migration _migrate_people_table 중 오류 (무시): {e}")
+
     async def close_db(self):
         """Close database connection and dispose engine
 
@@ -186,6 +213,10 @@ class DatabaseManager:
                     self._initialized = True
                     logger.info("Tables initialized successfully")
                     logger.debug(f"[DB_OP] Create tables completed in {time.time() - start_time:.4f}s")
+
+                # people 테이블 컬럼 마이그레이션 (position 컬럼 추가)
+                await self._migrate_people_table()
+
             except (UniqueViolationError, DuplicateTableError) as e:
                 self._initialized = True
                 logger.info(f"Duplicate table creation: {e}, ignored.")
