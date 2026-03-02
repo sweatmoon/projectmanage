@@ -254,34 +254,49 @@ export default function IndexPage() {
       // Step 2: 단계/인력 일괄 입력
       const isProposal = newProject.status === '제안';
 
-      if (isProposal && proposalScheduleText.trim()) {
-        // 제안 모드: 감리 일정 + 인력 섹션 파싱
-        try {
-          const importRes = await client.apiCall.invoke({
-            url: '/api/v1/project_import/import_proposal',
-            method: 'POST',
-            data: {
-              project_id: createdProject.id,
-              schedule_text: proposalScheduleText.trim(),
-              sections: proposalSections.filter(s => s.text.trim()),
-            },
-          });
-          toast.success(
-            `프로젝트 생성 완료! ${importRes?.phases_created || 0}개 단계, ${importRes?.staffing_created || 0}개 투입공수, ${importRes?.calendar_entries_created || 0}개 일정 생성됨`
-          );
-        } catch (importErr) {
-          console.error('Proposal import error:', importErr);
-          toast.warning('프로젝트는 생성되었으나 제안 데이터 가져오기 중 오류가 발생했습니다.');
+      // 제안 입력을 기존 import_phases 형식으로 변환
+      // "단계명, YYYYMMDD, YYYYMMDD, 인력1:분야, 인력2:분야, ..."
+      const buildProposalPhaseText = () => {
+        // 인력 섹션 파싱: "이름, 분야" or "이름: 분야" → "이름:분야"
+        const allPeople: string[] = [];
+        for (const section of proposalSections) {
+          if (!section.text.trim()) continue;
+          for (const line of section.text.split('\n')) {
+            const l = line.trim();
+            if (!l) continue;
+            let name = '', field = '';
+            if (l.includes(',')) {
+              [name, field] = l.split(',', 2).map(s => s.trim());
+            } else if (l.includes(':')) {
+              [name, field] = l.split(':', 2).map(s => s.trim());
+            } else {
+              name = l.trim();
+            }
+            if (name) allPeople.push(field ? `${name}:${field}` : name);
+          }
         }
-      } else if (!isProposal && phaseText.trim()) {
-        // 감리 모드: 기존 형식
+        // 각 단계 줄에 인력 합치기
+        return proposalScheduleText.trim().split('\n').map(line => {
+          const l = line.trim();
+          if (!l) return '';
+          const parts = l.split(',').map(s => s.trim());
+          if (parts.length < 3) return l;
+          return [...parts.slice(0, 3), ...allPeople].join(', ');
+        }).filter(Boolean).join('\n');
+      };
+
+      const finalPhaseText = isProposal
+        ? buildProposalPhaseText()
+        : phaseText.trim();
+
+      if (finalPhaseText) {
         try {
           const importRes = await client.apiCall.invoke({
             url: '/api/v1/project_import/import_phases',
             method: 'POST',
             data: {
               project_id: createdProject.id,
-              text: phaseText.trim(),
+              text: finalPhaseText,
             },
           });
           toast.success(
