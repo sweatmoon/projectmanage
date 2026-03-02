@@ -394,7 +394,8 @@ export default function ProjectDetail() {
         if (!field) field = defaultField;
         if (name) {
           allPeople.push(field ? `${name}:${field}` : name);
-          sectionMap[name] = section.label; // 섹션 정보 보존
+          // DB category: 감리원 → 단계감리팀, 나머지 → 전문가팀
+          sectionMap[name] = section.label === '감리원' ? '단계감리팀' : '전문가팀';
         }
       }
     }
@@ -442,9 +443,19 @@ export default function ProjectDetail() {
           const field = ep[1]?.trim() || '';
           if (!name) continue;
           // categoryMap 우선, 없으면 field 이름 패턴으로 섹션 추정
-          const targetSection = (categoryMap && categoryMap[name]) ||
-                                defaultFieldToSection[field] ||
-                                '감리원';
+          // 단계감리팀 → '감리원', 전문가팀 → field 패턴으로 세부 섹션 결정
+          let targetSection: string;
+          if (categoryMap && categoryMap[name]) {
+            const cat = categoryMap[name];
+            if (cat === '단계감리팀' || cat === '감리팀') {
+              targetSection = '감리원';
+            } else {
+              // 전문가팀: field 이름으로 세부 섹션 결정 (heuristic)
+              targetSection = defaultFieldToSection[field] || '핵심기술';
+            }
+          } else {
+            targetSection = defaultFieldToSection[field] || '감리원';
+          }
           sectionMap[targetSection].add(field ? `${name}, ${field}` : name);
         }
       }

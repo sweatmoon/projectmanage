@@ -147,7 +147,7 @@ async def _import_phases_logic(
             if section_map and person_name in section_map:
                 category_val = section_map[person_name]
             else:
-                category_val = '감리팀'
+                category_val = '단계감리팀'
 
             # Create staffing entry
             new_staffing = Staffing(
@@ -506,7 +506,7 @@ async def export_project_to_text(
             if not person_name and s.person_id:
                 person_name = people_by_id.get(s.person_id, '')
             if person_name and person_name not in section_map_out:
-                section_map_out[person_name] = s.category or '감리팀'
+                section_map_out[person_name] = s.category or '단계감리팀'
 
         return ProjectExportResponse(
             text='\n'.join(lines),
