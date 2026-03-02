@@ -114,7 +114,7 @@ export default function IndexPage() {
 
   // New person dialog
   const [showNewPerson, setShowNewPerson] = useState(false);
-  const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '재직' });
+  const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '' });
   const [creatingPerson, setCreatingPerson] = useState(false);
 
   const fetchProjects = useCallback(async () => {
@@ -255,7 +255,7 @@ export default function IndexPage() {
       });
       toast.success('인력이 등록되었습니다.');
       setShowNewPerson(false);
-      setNewPerson({ person_name: '', position: '', grade: '', employment_status: '재직' });
+      setNewPerson({ person_name: '', position: '', grade: '', employment_status: '' });
       fetchPeople();
     } catch (err) {
       console.error(err);
@@ -496,7 +496,6 @@ export default function IndexPage() {
               <Input
                 value={newPerson.person_name}
                 onChange={(e) => setNewPerson({ ...newPerson, person_name: e.target.value })}
-                placeholder="이름 입력"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && document.getElementById('btn-create-person')?.click()}
               />
@@ -506,30 +505,21 @@ export default function IndexPage() {
               <Input
                 value={newPerson.position}
                 onChange={(e) => setNewPerson({ ...newPerson, position: e.target.value })}
-                placeholder="예: 수석, 책임, 선임, 주임, 사원"
+
               />
             </div>
             <div>
               <Label>감리원 등급</Label>
-              <Select
-                value={newPerson.grade || ''}
-                onValueChange={(v) => setNewPerson({ ...newPerson, grade: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="등급 선택" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="수석감리원">수석감리원</SelectItem>
-                  <SelectItem value="감리원">감리원</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                value={newPerson.grade}
+                onChange={(e) => setNewPerson({ ...newPerson, grade: e.target.value })}
+              />
             </div>
             <div>
               <Label>구분</Label>
               <Input
                 value={newPerson.employment_status}
                 onChange={(e) => setNewPerson({ ...newPerson, employment_status: e.target.value })}
-                placeholder="예: 재직, 외부, 퇴사"
               />
             </div>
           </div>
