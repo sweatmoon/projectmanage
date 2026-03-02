@@ -291,8 +291,13 @@ export default function IndexPage() {
           }
         }
 
-        // 감리 일정 텍스트: 이름 뒤에 분야 삽입, MD 유지
+        // nameInfo에 있는 모든 인력을 sectionMap에 미리 등록 (일정 텍스트 미등장 인력 포함)
         const sectionMap: Record<string, string> = {};
+        for (const [name, info] of Object.entries(nameInfo)) {
+          sectionMap[name] = info.category;
+        }
+
+        // 감리 일정 텍스트: 이름 뒤에 분야 삽입, MD 유지
         const text = proposalScheduleText.trim().split('\n').map(line => {
           const l = line.trim();
           if (!l) return '';
@@ -307,7 +312,7 @@ export default function IndexPage() {
             const isMd = secondPart !== undefined && /^\d+$/.test(secondPart);
             const mdStr = isMd ? secondPart : (colonParts[2]?.trim() && /^\d+$/.test(colonParts[2].trim()) ? colonParts[2].trim() : '');
             const info = nameInfo[name];
-            if (info) sectionMap[name] = info.category;
+            // sectionMap은 이미 nameInfo 전체로 초기화됨 (위에서 처리)
             const field = info?.field || (!isMd && secondPart ? secondPart : '');
             if (field && mdStr) return `${name}:${field}:${mdStr}`;
             if (field) return `${name}:${field}`;
