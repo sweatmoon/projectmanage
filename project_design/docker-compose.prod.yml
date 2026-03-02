@@ -1,0 +1,39 @@
+# ============================================================
+# docker-compose.prod.yml  ← 운영 환경 오버라이드
+# ============================================================
+# NAS Container Manager 에서 이 파일 내용을 docker-compose.yml 에
+# 이어 붙여서 사용하거나, 아래 명령으로 실행:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 환경변수는 .env 파일로 관리 (절대 Git에 커밋하지 마세요!)
+# ============================================================
+
+version: '3.9'
+
+services:
+
+  app:
+    # 운영: 항상 최신 이미지 pull
+    pull_policy: always
+    ports:
+      - "8888:8080"          # NAS 외부포트:컨테이너포트
+
+  # ── Watchtower: 자동 이미지 업데이트 (운영 전용) ──────────
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300   # 5분마다 체크
+      - WATCHTOWER_CLEANUP=true        # 구 이미지 자동 삭제
+      - WATCHTOWER_NOTIFICATIONS=email # 이메일 알림 (선택)
+      - WATCHTOWER_NOTIFICATION_EMAIL_FROM=${NOTIFY_EMAIL_FROM:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_TO=${NOTIFY_EMAIL_TO:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER=${NOTIFY_SMTP_HOST:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT=${NOTIFY_SMTP_PORT:-587}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER=${NOTIFY_SMTP_USER:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=${NOTIFY_SMTP_PASS:-}
+      - TZ=Asia/Seoul
+    command: gantt-app   # 이 컨테이너만 모니터링

@@ -22,11 +22,13 @@ project_design/app/backend/__pycache__/
 # Database (SQLite - don't commit the actual DB)
 project_design/app/backend/app.db
 
-# Environment files
+# Environment files (절대 커밋 금지 - 비밀번호/키 포함)
 .env
 .env.local
 .env.*.local
 *.env
+# .env.example 은 커밋 허용 (템플릿이므로)
+!.env.example
 
 # Logs
 *.log

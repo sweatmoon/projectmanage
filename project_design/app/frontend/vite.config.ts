@@ -2,6 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
+// ── HMR 호스트 자동 감지 ────────────────────────────────────
+// 로컬(localhost), 샌드박스(*.sandbox.novita.ai), 기타 환경 모두 대응
+// VITE_HMR_HOST 환경변수로 명시적 지정 가능 (CI/CD 등)
+const hmrHost = process.env.VITE_HMR_HOST || undefined;
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -9,46 +14,43 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+
+  // ── 개발 서버 (npm run dev) ────────────────────────────────
   server: {
-    host: true,
+    host: true,         // 0.0.0.0 - 외부 접속 허용
     port: 8080,
     strictPort: true,
     allowedHosts: 'all',
-    hmr: {
-      host: '8080-iv0ih9bz1s5i9apw3jwur-de59bda9.sandbox.novita.ai',
-      protocol: 'wss',
-      clientPort: 443,
-    },
+
+    // HMR: VITE_HMR_HOST 지정 시 해당 호스트, 미지정 시 Vite 기본값(자동)
+    hmr: hmrHost
+      ? { host: hmrHost, protocol: 'wss', clientPort: 443 }
+      : true,
+
+    // 백엔드 프록시 (개발 시 Vite:8080 → FastAPI:8000)
     proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/auth': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/admin': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/health': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
+      '/api':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/auth':   { target: 'http://localhost:8000', changeOrigin: true },
+      '/admin':  { target: 'http://localhost:8000', changeOrigin: true },
+      '/health': { target: 'http://localhost:8000', changeOrigin: true },
     },
+
     watch: { usePolling: true, interval: 600 },
   },
+
+  // ── 프리뷰 서버 (npm run preview) ─────────────────────────
   preview: {
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: 'all',
   },
+
+  // ── 프로덕션 빌드 (npm run build) ─────────────────────────
   build: {
     rollupOptions: {
       output: {
         manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
+          'react-vendor':  ['react', 'react-dom'],
           'router-vendor': ['react-router-dom'],
           'ui-vendor': [
             '@radix-ui/react-accordion',
@@ -62,16 +64,9 @@ export default defineConfig({
             '@radix-ui/react-toast',
             '@radix-ui/react-tooltip',
           ],
-          'form-vendor': ['react-hook-form', '@hookform/resolvers', 'zod'],
-          'utils-vendor': [
-            'axios',
-            'clsx',
-            'tailwind-merge',
-            'class-variance-authority',
-            'date-fns',
-            'lucide-react',
-          ],
-          'query-vendor': ['@tanstack/react-query'],
+          'form-vendor':   ['react-hook-form', '@hookform/resolvers', 'zod'],
+          'utils-vendor':  ['axios', 'clsx', 'tailwind-merge', 'class-variance-authority', 'date-fns', 'lucide-react'],
+          'query-vendor':  ['@tanstack/react-query'],
         },
       },
     },

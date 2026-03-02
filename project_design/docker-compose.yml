@@ -1,26 +1,39 @@
+# ============================================================
+# docker-compose.yml  ← 공통 베이스 (Base)
+# ============================================================
+# 사용법:
+#   운영: docker compose up -d
+#         (자동으로 docker-compose.prod.yml 을 오버라이드로 사용)
+#   개발: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# ⚠️  이 파일 단독으로는 실행하지 마세요.
+#      환경별 오버라이드 파일과 함께 사용합니다.
+# ============================================================
+
 version: '3.9'
 
 services:
+
   # ── 메인 앱 ──────────────────────────────────────────────
   app:
-    image: sweatmoon/gantt-app:latest
+    image: sweatmoon/gantt-app:${IMAGE_TAG:-latest}
     container_name: gantt-app
     restart: unless-stopped
-    ports:
-      - "8888:8080"
     volumes:
       - app_logs:/app/logs
     environment:
       - PORT=8080
-      - DATABASE_URL=postgresql+asyncpg://gantt:${POSTGRES_PASSWORD:-ganttpass}@db:5432/ganttdb
-      - JWT_SECRET=${JWT_SECRET:-change-me-to-a-long-random-string-at-least-32-chars}
+      - DATABASE_URL=postgresql+asyncpg://gantt:${POSTGRES_PASSWORD}@db:5432/ganttdb
+      - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-8}
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
       - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
-      - APP_URL=${APP_URL:-http://localhost:8080}
-      - ADMIN_USERS=sweatmoon
+      - APP_URL=${APP_URL}
+      - ADMIN_USERS=${ADMIN_USERS:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       db:
         condition: service_healthy
@@ -41,7 +54,7 @@ services:
     environment:
       - POSTGRES_DB=ganttdb
       - POSTGRES_USER=gantt
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ganttpass}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - TZ=Asia/Seoul
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gantt -d ganttdb"]
@@ -50,7 +63,7 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── 자동 백업 ────────────────────────────────────────────
+  # ── 자동 DB 백업 ─────────────────────────────────────────
   backup:
     image: postgres:16-alpine
     container_name: gantt-backup
@@ -58,25 +71,20 @@ services:
     volumes:
       - backup_data:/backups
     environment:
-      - PGPASSWORD=ganttpass
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - BACKUP_KEEP_DAYS=${BACKUP_KEEP_DAYS:-30}
       - TZ=Asia/Seoul
     depends_on:
       db:
         condition: service_healthy
-    entrypoint: ["/bin/sh", "-c", "while true; do pg_dump -h db -U gantt -d ganttdb | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz; find /backups -name '*.sql.gz' -mtime +30 -delete; sleep 86400; done"]
-
-  # ── 자동 이미지 업데이트 ─────────────────────────────────
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_CLEANUP=true
-      - TZ=Asia/Seoul
-    command: gantt-app
+    entrypoint: ["/bin/sh", "-c",
+      "while true; do
+         pg_dump -h db -U gantt -d ganttdb | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
+         && echo \"[$(date)] ✅ 백업 완료\"
+         || echo \"[$(date)] ❌ 백업 실패\";
+         find /backups -name '*.sql.gz' -mtime +${BACKUP_KEEP_DAYS:-30} -delete;
+         sleep 86400;
+       done"]
 
 volumes:
   postgres_data:
