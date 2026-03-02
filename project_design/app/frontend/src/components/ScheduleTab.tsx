@@ -1089,15 +1089,32 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [localProjects]);
 
   const visiblePhases = useMemo(() => {
+    // 1) 기본: 현재 월과 날짜가 겹치는 phase
+    const overlapping = new Set<number>();
+    for (const ph of localPhases) {
+      if (phaseOverlapsMonth(ph, year, month)) overlapping.add(ph.id);
+    }
+
+    // 2) 보완: 현재 월에 선택된 calendar entry(status 있음)가 있는 staffing의 phase도 포함
+    //    → phase 기간이 이미 지났어도 entries가 남아있으면 셀 표시 보장
+    const phaseIdsWithEntries = new Set<number>();
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    for (const entry of calendarEntries) {
+      if (!entry.status) continue;
+      if (!entry.entry_date.startsWith(yearMonth)) continue;
+      const s = localStaffing.find((st) => st.id === entry.staffing_id);
+      if (s) phaseIdsWithEntries.add(s.phase_id);
+    }
+
     return localPhases
-      .filter((ph) => phaseOverlapsMonth(ph, year, month))
+      .filter((ph) => overlapping.has(ph.id) || phaseIdsWithEntries.has(ph.id))
       .sort((a, b) => {
         const aIdx = projectIndexMap.get(a.project_id) ?? 999999;
         const bIdx = projectIndexMap.get(b.project_id) ?? 999999;
         if (aIdx !== bIdx) return aIdx - bIdx;
         return a.sort_order - b.sort_order;
       });
-  }, [localPhases, year, month, projectIndexMap]);
+  }, [localPhases, year, month, projectIndexMap, calendarEntries, localStaffing]);
 
   const phaseBadges: PhaseBadgeInfo[] = useMemo(() => {
     return visiblePhases.map((ph) => {
@@ -1636,6 +1653,24 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   };
 
   const [rebuildingCalendar, setRebuildingCalendar] = useState(false);
+  const [repairingSchedule, setRepairingSchedule] = useState(false);
+
+  const handleRepairSchedule = async () => {
+    if (!confirm('DB에 저장된 일정 데이터를 기준으로\n• 삭제된 staffing에 연결된 고아 entries 정리\n• 인력별 일정 표시 매핑 복구\n를 실행합니다. 계속하시겠습니까?')) return;
+    setRepairingSchedule(true);
+    try {
+      const result = await client.calendar.repairSchedule();
+      toast.success(
+        `일정 복구 완료: 고아 ${result.orphan_deleted}개 삭제\n${result.detail.join('\n')}`
+      );
+      await fetchCalendarEntries();
+    } catch (err) {
+      console.error('Repair failed:', err);
+      toast.error('일정 복구 중 오류가 발생했습니다.');
+    } finally {
+      setRepairingSchedule(false);
+    }
+  };
 
   const handleRebuildCalendar = async () => {
     if (!confirm('모든 투입일정을 공휴일/주말 제외 영업일 기준으로 재생성합니다.\n기존 수동 수정 내역이 모두 초기화됩니다. 계속하시겠습니까?')) return;
@@ -2062,12 +2097,23 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
             variant="outline"
             size="sm"
             onClick={handleRebuildCalendar}
-            disabled={rebuildingCalendar || bulkFilling}
+            disabled={rebuildingCalendar || bulkFilling || repairingSchedule}
             className="text-[10px] h-6 px-2 border-orange-300 text-orange-700 hover:bg-orange-50 whitespace-nowrap"
             title="공휴일/주말에 잘못 생성된 일정을 삭제하고 영업일 기준으로 재생성합니다"
           >
             {rebuildingCalendar ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : '🗓️'}
             공휴일 일정 재생성
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRepairSchedule}
+            disabled={rebuildingCalendar || bulkFilling || repairingSchedule}
+            className="text-[10px] h-6 px-2 border-blue-300 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
+            title="선택된 일정이 있는데 화면에 표시 안 될 때: DB 기반으로 일정 매핑을 복구합니다"
+          >
+            {repairingSchedule ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : '🔧'}
+            일정 매핑 복구
           </Button>
         </div>
       </div>
