@@ -61,3 +61,13 @@ async def get_admin_user(current_user: UserResponse = Depends(get_current_user))
     if current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
+
+
+async def require_write_permission(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
+    """Dependency to block viewer role from write operations (POST/PUT/PATCH/DELETE)."""
+    if current_user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="조회 전용 계정입니다. 입력·수정·삭제 작업은 허용되지 않습니다."
+        )
+    return current_user

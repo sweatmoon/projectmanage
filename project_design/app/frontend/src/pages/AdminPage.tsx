@@ -354,8 +354,8 @@ export default function AdminPage() {
 
   // ── 역할 변경 ──────────────────────────────────────────────
   const handleRoleChange = async (userId: string, currentRole: string) => {
-    const roles = ['user', 'admin', 'audit_viewer'];
-    const roleNames = { user: '일반사용자', admin: '관리자', audit_viewer: '감사자' };
+    const roles = ['user', 'viewer', 'admin', 'audit_viewer'];
+    const roleNames = { user: '일반사용자', viewer: '뷰어', admin: '관리자', audit_viewer: '감사자' };
     const nextRole = roles[(roles.indexOf(currentRole) + 1) % roles.length];
     if (!confirm(`역할을 '${roleNames[nextRole as keyof typeof roleNames]}'(으)로 변경하시겠습니까?`)) return;
     try {
@@ -871,7 +871,7 @@ export default function AdminPage() {
                           user.role === 'audit_viewer' ? 'bg-blue-100 text-blue-700'    :
                                                          'bg-gray-100 text-gray-600'
                         }`}>
-                          {user.role === 'audit_viewer' ? '감사자' : user.role === 'admin' ? '관리자' : '일반'}
+                          {user.role === 'audit_viewer' ? '감사자' : user.role === 'admin' ? '관리자' : user.role === 'viewer' ? '뷰어' : '일반'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(user.created_at)}</td>
@@ -938,6 +938,7 @@ export default function AdminPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                 >
                   <option value="user">일반사용자</option>
+                  <option value="viewer">뷰어 (조회만)</option>
                   <option value="admin">관리자</option>
                 </select>
               </div>
@@ -1004,9 +1005,14 @@ export default function AdminPage() {
                         <select
                           value={u.role}
                           onChange={e => handleUpdateAllowedUserRole(u.user_id, e.target.value)}
-                          className={`px-2 py-1 rounded text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400 ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}
+                          className={`px-2 py-1 rounded text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400 ${
+                            u.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                            u.role === 'viewer' ? 'bg-blue-100 text-blue-600' :
+                            'bg-gray-100 text-gray-600'
+                          }`}
                         >
                           <option value="user">일반사용자</option>
+                          <option value="viewer">뷰어 (조회만)</option>
                           <option value="admin">관리자</option>
                         </select>
                       </td>

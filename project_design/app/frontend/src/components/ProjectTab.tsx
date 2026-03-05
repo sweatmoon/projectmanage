@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useUserRole } from '@/hooks/useUserRole';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog,
@@ -45,6 +46,7 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { canWrite, isViewer } = useUserRole();
 
   const filtered = projects.filter(
     (p) =>
@@ -215,6 +217,8 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
             variant="destructive"
             size="sm"
             onClick={() => setShowDeleteConfirm(true)}
+            disabled={!canWrite}
+            title={isViewer ? '조회 전용 계정입니다' : undefined}
           >
             <Trash2 className="h-4 w-4 mr-1" />
             선택 삭제 ({selectedIds.size})

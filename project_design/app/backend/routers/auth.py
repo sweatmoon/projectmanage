@@ -365,8 +365,7 @@ async def callback(
         user.last_login = now_utc
         user.name = name
         user.email = email
-        if is_admin:
-            user.role = "admin"
+        user.role = role  # allowed_entry.role (admin/user/viewer) 또는 폴백 role 동기화
     else:
         user = User(id=user_id, email=email, name=name, role=role, last_login=now_utc)
         db.add(user)

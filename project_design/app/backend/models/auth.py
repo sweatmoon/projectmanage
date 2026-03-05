@@ -9,7 +9,7 @@ class User(Base):
     id = Column(String(255), primary_key=True, index=True)  # Use platform sub as primary key
     email = Column(String(255), nullable=False)
     name = Column(String(255), nullable=True)
-    role = Column(String(50), default="user", nullable=False)  # user/admin
+    role = Column(String(50), default="user", nullable=False)  # user / admin / viewer
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
 
@@ -21,7 +21,7 @@ class AllowedUser(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(String(255), unique=True, index=True, nullable=False)  # Synology 계정 ID
     display_name = Column(String(255), nullable=True)   # 표시 이름 (메모용)
-    role = Column(String(50), default="user", nullable=False)  # user / admin
+    role = Column(String(50), default="user", nullable=False)  # user / admin / viewer
     is_active = Column(Boolean, default=True, nullable=False)   # 활성/비활성
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String(255), nullable=True)     # 등록한 관리자 ID
