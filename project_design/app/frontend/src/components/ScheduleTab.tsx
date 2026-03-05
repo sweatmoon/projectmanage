@@ -2053,36 +2053,18 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return dates;
   }, [year, month]);
 
-  // person별: 이달 영업일 중 빈 날(=투입 가능일, 중복 무관) 계산
+  // DB 등록 인력(people) 전체 기준: 이달 영업일 중 빈 날 계산 (외부인력 제외, 중복 무관)
   const availablePeopleInfo = useMemo(() => {
-    // 이 달에 staffing이 있는 인력 목록 수집
-    const personMeta = new Map<number | string, { name: string; isExternal: boolean }>();
-    for (const s of localStaffing) {
-      const ph = phaseMapLocal.get(s.phase_id);
-      if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
-      const personKey: number | string = s.person_id
-        ? s.person_id
-        : `ext_${(s.person_name_text || '').trim()}`;
-      if (!personMeta.has(personKey)) {
-        const name = s.person_id
-          ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
-          : (s.person_name_text || '?');
-        personMeta.set(personKey, { name, isExternal: !s.person_id });
-      }
-    }
-    return Array.from(personMeta.entries()).map(([personKey, meta]) => {
-      const busyDates = personAllDates.get(personKey) || new Set<string>();
-      const freeDays = monthBizDates.filter(d => !busyDates.has(d)).length;
-      const busyDays = monthBizDates.filter(d => busyDates.has(d)).length;
-      return { ...meta, personKey, freeDays, busyDays, totalBizDays: monthBizDates.length };
-    })
-    .filter(v => v.freeDays > 0)
-    .sort((a, b) => {
-      if (a.busyDays === 0 && b.busyDays !== 0) return -1;
-      if (a.busyDays !== 0 && b.busyDays === 0) return 1;
-      return b.freeDays - a.freeDays;
-    });
-  }, [localStaffing, phaseMapLocal, year, month, people, personAllDates, monthBizDates]);
+    return people
+      .map((p) => {
+        const busyDates = personAllDates.get(p.id) || new Set<string>();
+        const freeDays = monthBizDates.filter(d => !busyDates.has(d)).length;
+        const busyDays = monthBizDates.filter(d => busyDates.has(d)).length;
+        return { name: p.person_name, personKey: p.id as number | string, freeDays, busyDays, totalBizDays: monthBizDates.length, isExternal: false };
+      })
+      .filter(v => v.freeDays > 0)
+      .sort((a, b) => b.freeDays - a.freeDays);
+  }, [people, personAllDates, monthBizDates]);
 
   // 일정이 아예 없는 사람 (busyDays === 0)
   const noSchedulePeople = useMemo(
@@ -2119,39 +2101,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
     const weekBizCount = weekBizDates.length;
 
-    // 이 주차에 staffing이 있는 인력 수집 (personKey 기준, 중복 제거)
-    const personMeta = new Map<number | string, { name: string; isExternal: boolean }>();
-    for (const s of localStaffing) {
-      const ph = phaseMapLocal.get(s.phase_id);
-      if (!ph) continue;
-      if (!phaseOverlapsWeek(ph, weekInfo.startDate, weekInfo.endDate)) continue;
-      const personKey: number | string = s.person_id
-        ? s.person_id
-        : `ext_${(s.person_name_text || '').trim()}`;
-      if (!personMeta.has(personKey)) {
-        const name = s.person_id
-          ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
-          : (s.person_name_text || '?');
-        personMeta.set(personKey, { name, isExternal: !s.person_id });
-      }
-    }
-
-    // 각 인력별: 이 주차 영업일 중 빈 날 카운트 (중복 무관)
-    const availPeople = Array.from(personMeta.entries()).map(([personKey, meta]) => {
-      const busyDates = personAllDates.get(personKey) || new Set<string>();
-      const freeDays = weekBizDates.filter(d => !busyDates.has(d)).length;
-      const busyDays = weekBizDates.filter(d => busyDates.has(d)).length;
-      return { ...meta, freeDays, busyDays, totalBizDays: weekBizCount };
-    })
-    .filter(v => v.freeDays > 0)
-    .sort((a, b) => {
-      if (a.busyDays === 0 && b.busyDays !== 0) return -1;
-      if (a.busyDays !== 0 && b.busyDays === 0) return 1;
-      return b.freeDays - a.freeDays;
-    });
+    // DB 등록 인력(people) 전체 기준: 이 주차 영업일 중 빈 날 카운트 (외부인력 제외, 해당 사업 투입 여부 무관)
+    const availPeople = people
+      .map((p) => {
+        const busyDates = personAllDates.get(p.id) || new Set<string>();
+        const freeDays = weekBizDates.filter(d => !busyDates.has(d)).length;
+        const busyDays = weekBizDates.filter(d => busyDates.has(d)).length;
+        return { name: p.person_name, isExternal: false, freeDays, busyDays, totalBizDays: weekBizCount };
+      })
+      .filter(v => v.freeDays > 0)
+      .sort((a, b) => b.freeDays - a.freeDays);
 
     setWeekAvailPopup({ weekInfo, people: availPeople });
-  }, [localStaffing, phaseMapLocal, people, personAllDates, weekInfos]);
+  }, [people, personAllDates, weekInfos]);
 
   const maxBadgesInWeek = useMemo(() => {
     let max = 0;
@@ -2310,14 +2272,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                 {noSchedulePeople.map((p) => (
                   <span
                     key={p.name}
-                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 border ${
-                      p.isExternal
-                        ? 'bg-orange-50 border-orange-300 text-orange-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
-                    }`}
-                    title={`배정 MD: ${p.totalMd}일 / 선택된 일정: 0일 (미배정)`}
+                    className="text-xs px-2 py-1 rounded flex items-center gap-1 border bg-red-50 border-red-200 text-red-800"
+                    title={`투입 가능: ${p.freeDays}일 / 영업일: ${p.totalBizDays}일 (이달 일정 없음)`}
                   >
-                    {p.isExternal && <span className="text-orange-500 text-[9px] font-bold">(외)</span>}
                     <span className="font-semibold">{p.name}</span>
                     <span className="text-[10px] font-bold">{p.freeDays}/{p.totalBizDays}</span>
                   </span>
@@ -2342,12 +2299,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                 {partialSchedulePeople.map((p) => (
                   <span
                     key={p.name}
-                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
-                      p.isExternal ? 'bg-amber-50 border border-amber-200' : 'bg-green-50 border border-green-200'
-                    }`}
+                    className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-green-50 border border-green-200"
                     title={`투입 가능: ${p.freeDays}일 / 영업일: ${p.totalBizDays}일 (일정 있는 날: ${p.busyDays}일)`}
                   >
-                    {p.isExternal && <span className="text-amber-500 text-[9px]">(외)</span>}
                     <span className="font-medium text-gray-800">{p.name}</span>
                     <span className="text-green-700 font-bold">{p.freeDays}</span>
                     <span className="text-gray-400 text-[10px]">/{p.totalBizDays}</span>
@@ -2869,9 +2823,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             >
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-muted-foreground w-5">{idx + 1}</span>
-                                {p.isExternal && (
-                                  <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded">외부</span>
-                                )}
                                 <span className="text-sm font-semibold text-red-800">{p.name}</span>
                               </div>
                               <span className="text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full border border-red-200">
@@ -2899,9 +2850,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             >
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-muted-foreground w-5">{idx + 1}</span>
-                                {p.isExternal && (
-                                  <span className="text-[9px] bg-amber-100 text-amber-700 px-1 rounded">외부</span>
-                                )}
                                 <span className="text-sm font-medium text-gray-800">{p.name}</span>
                               </div>
                               <div className="flex items-center gap-2">
