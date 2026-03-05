@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+const api = axios.create({ baseURL: '/api/v1' })
 
 export interface Project {
   id: number
@@ -49,48 +49,51 @@ export interface CalendarEntry {
 }
 
 // Projects
-export const getProjects = () => api.get<Project[]>('/projects').then(r => r.data)
-export const createProject = (d: Partial<Project>) => api.post<Project>('/projects', d).then(r => r.data)
-export const updateProject = (id: number, d: Partial<Project>) => api.put<Project>(`/projects/${id}`, d).then(r => r.data)
-export const deleteProject = (id: number) => api.delete(`/projects/${id}`)
+export const getProjects = () => api.get<{items: Project[]}>('/entities/projects', { params: { limit: 500 } }).then(r => r.data.items)
+export const createProject = (d: Partial<Project>) => api.post<Project>('/entities/projects', d).then(r => r.data)
+export const updateProject = (id: number, d: Partial<Project>) => api.put<Project>(`/entities/projects/${id}`, d).then(r => r.data)
+export const deleteProject = (id: number) => api.delete(`/entities/projects/${id}`)
 
 // People
-export const getPeople = () => api.get<Person[]>('/people').then(r => r.data)
-export const createPerson = (d: Partial<Person>) => api.post<Person>('/people', d).then(r => r.data)
-export const updatePerson = (id: number, d: Partial<Person>) => api.put<Person>(`/people/${id}`, d).then(r => r.data)
-export const deletePerson = (id: number) => api.delete(`/people/${id}`)
+export const getPeople = () => api.get<{items: Person[]}>('/entities/people', { params: { limit: 500 } }).then(r => r.data.items)
+export const createPerson = (d: Partial<Person>) => api.post<Person>('/entities/people', d).then(r => r.data)
+export const updatePerson = (id: number, d: Partial<Person>) => api.put<Person>(`/entities/people/${id}`, d).then(r => r.data)
+export const deletePerson = (id: number) => api.delete(`/entities/people/${id}`)
 
 // Phases
 export const getPhases = (project_id?: number) =>
-  api.get<Phase[]>('/phases', { params: project_id ? { project_id } : {} }).then(r => r.data)
-export const createPhase = (d: Partial<Phase>) => api.post<Phase>('/phases', d).then(r => r.data)
-export const updatePhase = (id: number, d: Partial<Phase>) => api.put<Phase>(`/phases/${id}`, d).then(r => r.data)
-export const deletePhase = (id: number) => api.delete(`/phases/${id}`)
+  api.get<{items: Phase[]}>('/entities/phases', { params: { limit: 2000, ...(project_id ? { project_id } : {}) } }).then(r => r.data.items)
+export const createPhase = (d: Partial<Phase>) => api.post<Phase>('/entities/phases', d).then(r => r.data)
+export const updatePhase = (id: number, d: Partial<Phase>) => api.put<Phase>(`/entities/phases/${id}`, d).then(r => r.data)
+export const deletePhase = (id: number) => api.delete(`/entities/phases/${id}`)
 
 // Staffing
 export const getStaffing = (project_id?: number) =>
-  api.get<Staffing[]>('/staffing', { params: project_id ? { project_id } : {} }).then(r => r.data)
-export const createStaffing = (d: Partial<Staffing>) => api.post<Staffing>('/staffing', d).then(r => r.data)
-export const updateStaffing = (id: number, d: Partial<Staffing>) => api.put<Staffing>(`/staffing/${id}`, d).then(r => r.data)
-export const deleteStaffing = (id: number) => api.delete(`/staffing/${id}`)
+  api.get<{items: Staffing[]}>('/entities/staffing', { params: { limit: 2000, ...(project_id ? { project_id } : {}) } }).then(r => r.data.items)
+export const createStaffing = (d: Partial<Staffing>) => api.post<Staffing>('/entities/staffing', d).then(r => r.data)
+export const updateStaffing = (id: number, d: Partial<Staffing>) => api.put<Staffing>(`/entities/staffing/${id}`, d).then(r => r.data)
+export const deleteStaffing = (id: number) => api.delete(`/entities/staffing/${id}`)
 
 // Calendar entries
 export const getCalendarEntries = (staffing_id?: number) =>
-  api.get<CalendarEntry[]>('/calendar_entries', { params: staffing_id ? { staffing_id } : {} }).then(r => r.data)
+  api.get<CalendarEntry[]>('/entities/calendar_entries', { params: staffing_id ? { staffing_id } : {} }).then(r => r.data)
 export const createCalendarEntry = (d: { staffing_id: number; entry_date: string; status?: string }) =>
-  api.post<CalendarEntry>('/calendar_entries', d).then(r => r.data)
+  api.post<CalendarEntry>('/entities/calendar_entries', d).then(r => r.data)
 export const bulkCreateEntries = (entries: { staffing_id: number; entry_date: string; status?: string }[]) =>
-  api.post('/calendar_entries/bulk', entries).then(r => r.data)
-export const deleteCalendarEntry = (id: number) => api.delete(`/calendar_entries/${id}`)
+  api.post('/entities/calendar_entries/batch', entries).then(r => r.data)
+export const deleteCalendarEntry = (id: number) => api.delete(`/entities/calendar_entries/${id}`)
 
-// Calendar toggle/month (새 API)
+// Calendar toggle/month/range (새 API)
 export const toggleCalendarEntry = (staffing_id: number, entry_date: string, status?: string) =>
-  api.post('/calendar_entries/toggle', { staffing_id, entry_date, status }).then(r => r.data)
+  api.post('/calendar/toggle', { staffing_id, entry_date, status }).then(r => r.data)
 
 export const getMonthEntries = (year: number, month: number, staffing_ids?: number[]) =>
-  api.post<CalendarEntry[]>('/calendar_entries/month', { year, month, staffing_ids }).then(r => r.data)
+  api.post<{ entries: CalendarEntry[] }>('/calendar/month', { year, month, staffing_ids }).then(r => r.data.entries)
+
+export const getRangeEntries = (start_date: string, end_date: string, staffing_ids?: number[]) =>
+  api.post<{ entries: CalendarEntry[] }>('/calendar/range', { start_date, end_date, staffing_ids }).then(r => r.data.entries)
 
 export const cleanupDuplicates = () =>
-  api.delete('/calendar_entries/cleanup-duplicates').then(r => r.data)
+  api.delete('/calendar/cleanup-duplicates').then(r => r.data)
 
 export default api
