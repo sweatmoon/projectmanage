@@ -392,6 +392,58 @@ async def get_month_entries(
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 
+class DateRangeQueryRequest(BaseModel):
+    start_date: str   # YYYY-MM-DD
+    end_date: str     # YYYY-MM-DD
+    staffing_ids: Optional[List[int]] = None
+
+
+@router.post("/range", response_model=MonthEntriesResponse)
+async def get_range_entries(
+    request: DateRangeQueryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all calendar entries for a date range (used for quarterly/semi-annual/yearly views)."""
+    try:
+        start = date.fromisoformat(request.start_date)
+        end = date.fromisoformat(request.end_date)
+
+        stmt = select(Calendar_entries).where(
+            and_(
+                Calendar_entries.entry_date >= start,
+                Calendar_entries.entry_date <= end,
+            )
+        )
+        if request.staffing_ids:
+            stmt = stmt.where(Calendar_entries.staffing_id.in_(request.staffing_ids))
+
+        result = await db.execute(stmt)
+        entries = result.scalars().all()
+
+        seen = set()
+        unique_entries = []
+        for e in entries:
+            key = (e.staffing_id, str(e.entry_date))
+            if key not in seen:
+                seen.add(key)
+                unique_entries.append(e)
+
+        return MonthEntriesResponse(
+            entries=[
+                CellResponse(
+                    id=e.id,
+                    staffing_id=e.staffing_id,
+                    entry_date=e.entry_date,
+                    status=e.status,
+                )
+                for e in unique_entries
+            ]
+        )
+    except Exception as e:
+        logger.error(f"Error querying range entries: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
 class StaffingIdsRequest(BaseModel):
     staffing_ids: List[int]
 
