@@ -355,6 +355,66 @@ export default function ProjectDetail() {
   const [textEditLoading, setTextEditLoading] = useState(false);
   const [textEditSaving, setTextEditSaving] = useState(false);
 
+  // ── 입력 유효성 검증 ──────────────────────────────────────
+  const validateAuditLine = (line: string): string | null => {
+    const l = line.trim();
+    if (!l) return null;
+    const parts = l.split(',').map(s => s.trim());
+    if (parts.length < 3) return '쉼표로 구분된 항목이 3개 미만입니다 (단계명, 시작일, 종료일 필수)';
+    const [, start, end] = parts;
+    if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
+    if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
+    if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+    for (const p of parts.slice(3)) {
+      if (!p) continue;
+      const cp = p.split(':');
+      if (!cp[0].trim()) return `인력 이름이 비어있습니다: "${p}"`;
+      const field = cp[1]?.trim();
+      if (!field) return `분야 누락: "${p}" → 이름:분야[:MD] 형식이어야 합니다`;
+      if (/^\d+$/.test(field)) return `분야 오류: "${p}" → 분야 자리에 숫자가 왔습니다`;
+    }
+    return null;
+  };
+
+  const validateProposalScheduleLine = (line: string): string | null => {
+    const l = line.trim();
+    if (!l) return null;
+    const parts = l.split(',').map(s => s.trim());
+    if (parts.length < 3) return '쉼표로 구분된 항목이 3개 미만입니다 (단계명, 시작일, 종료일 필수)';
+    const [, start, end] = parts;
+    if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
+    if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
+    if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+    for (const p of parts.slice(3)) {
+      if (!p) continue;
+      const cp = p.split(':');
+      if (!cp[0].trim()) return `인력 이름이 비어있습니다: "${p}"`;
+      for (let i = 1; i < cp.length; i++) {
+        if (cp[i].trim() && !/^\d+$/.test(cp[i].trim()))
+          return `MD 값 오류: "${p}" → 콜론 뒤는 숫자만 입력 가능합니다`;
+      }
+    }
+    return null;
+  };
+
+  const validatePersonLine = (line: string): string | null => {
+    const l = line.trim();
+    if (!l) return null;
+    const sep = l.includes(',') ? ',' : l.includes(':') ? ':' : null;
+    if (!sep) return `형식 오류: "${l}" → 이름, 분야 형식이어야 합니다`;
+    const [name, field] = l.split(sep, 2).map(s => s.trim());
+    if (!name)  return `이름이 비어있습니다`;
+    if (!field) return `분야가 비어있습니다: "${l}"`;
+    return null;
+  };
+
+  const getInvalidLines = (text: string, validator: (line: string) => string | null): { line: number; msg: string }[] => {
+    return text.split('\n').map((line, idx) => {
+      const err = validator(line);
+      return err ? { line: idx + 1, msg: err } : null;
+    }).filter(Boolean) as { line: number; msg: string }[];
+  };
+
   // 제안 모드 텍스트 편집 섹션 상태
   const [proposalScheduleText, setProposalScheduleText] = useState('');
   const [proposalSections, setProposalSections] = useState([
@@ -1808,45 +1868,79 @@ export default function ProjectDetail() {
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">제안서 일정과 인력을 수정하세요.</p>
                   {/* 감리 일정 */}
-                  <div>
-                    <label className="text-xs font-medium text-slate-700">📅 감리 일정</label>
-                    <p className="text-[10px] text-slate-500 mb-1">
-                      형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:5, 이름C:0:5:0<br/>
-                      • 이름만 → 전체기간 &nbsp;• 이름:5 → 감리 5일 &nbsp;• 이름:예비:감리:시정 → 감리일수만 사용
-                    </p>
-                    <Textarea
-                      value={proposalScheduleText}
-                      onChange={(e) => setProposalScheduleText(e.target.value)}
-                      placeholder={`설계-정밀진단, 20260323, 20260327, 강혁, 김현선, 최규택:3\n설계-재검증, 20260427, 20260501, 강혁, 김현선, 최규택, 양권묵:2`}
-                      rows={3}
-                      className="font-mono text-xs"
-                    />
-                  </div>
+                  {(() => {
+                    const errs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
+                    return (
+                      <div>
+                        <label className="text-xs font-medium text-slate-700">📅 감리 일정</label>
+                        <p className="text-[10px] text-slate-500 mb-1">
+                          형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:5, 이름C:0:5:0<br/>
+                          • 이름만 → 전체기간 &nbsp;• 이름:5 → 감리 5일 &nbsp;• 이름:예비:감리:시정 → 감리일수만 사용
+                        </p>
+                        <Textarea
+                          value={proposalScheduleText}
+                          onChange={(e) => setProposalScheduleText(e.target.value)}
+                          placeholder={`설계-정밀진단, 20260323, 20260327, 강혁, 김현선, 최규택:3\n설계-재검증, 20260427, 20260501, 강혁, 김현선, 최규택, 양권묵:2`}
+                          rows={3}
+                          className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                        />
+                        {errs.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {errs.map(e => (
+                              <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* 인력 섹션 */}
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2">
-                      <label className="text-xs font-medium text-slate-700">👤 감리원</label>
-                      <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야</p>
-                      <Textarea
-                        value={proposalSections[0].text}
-                        onChange={(e) => updateProposalSection(0, e.target.value)}
-                        placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
-                        rows={4}
-                        className="font-mono text-xs"
-                      />
-                    </div>
-                    {proposalSections.slice(1).map((section, i) => (
-                      <div key={section.label}>
-                        <label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</label>
-                        <Textarea
-                          value={section.text}
-                          onChange={(e) => updateProposalSection(i + 1, e.target.value)}
-                          placeholder="이름, 분야"
-                          rows={3}
-                          className="font-mono text-xs mt-1"
-                        />
-                      </div>
-                    ))}
+                    {(() => {
+                      const errs = proposalSections[0].text.trim() ? getInvalidLines(proposalSections[0].text, validatePersonLine) : [];
+                      return (
+                        <div className="col-span-2">
+                          <label className="text-xs font-medium text-slate-700">👤 감리원</label>
+                          <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야</p>
+                          <Textarea
+                            value={proposalSections[0].text}
+                            onChange={(e) => updateProposalSection(0, e.target.value)}
+                            placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
+                            rows={4}
+                            className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                          />
+                          {errs.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {errs.map(e => (
+                                <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {proposalSections.slice(1).map((section, i) => {
+                      const errs = section.text.trim() ? getInvalidLines(section.text, validatePersonLine) : [];
+                      return (
+                        <div key={section.label}>
+                          <label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</label>
+                          <Textarea
+                            value={section.text}
+                            onChange={(e) => updateProposalSection(i + 1, e.target.value)}
+                            placeholder="이름, 분야"
+                            rows={3}
+                            className={`font-mono text-xs mt-1 ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                          />
+                          {errs.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {errs.map(e => (
+                                <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -1863,13 +1957,27 @@ export default function ProjectDetail() {
                       • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
                     </p>
                   </div>
-                  <Textarea
-                    value={textEditContent}
-                    onChange={(e) => setTextEditContent(e.target.value)}
-                    placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
-                    rows={14}
-                    className="font-mono text-xs"
-                  />
+                  {(() => {
+                    const errs = textEditContent.trim() ? getInvalidLines(textEditContent, validateAuditLine) : [];
+                    return (
+                      <>
+                        <Textarea
+                          value={textEditContent}
+                          onChange={(e) => setTextEditContent(e.target.value)}
+                          placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
+                          rows={14}
+                          className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                        />
+                        {errs.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {errs.map(e => (
+                              <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -1879,7 +1987,15 @@ export default function ProjectDetail() {
               </Button>
               <Button
                 onClick={handleTextEditSave}
-                disabled={textEditSaving || textEditLoading}
+                disabled={textEditSaving || textEditLoading || (() => {
+                  if (project?.status === '제안') {
+                    const schedErrs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
+                    const secErrs = proposalSections.flatMap(s => s.text.trim() ? getInvalidLines(s.text, validatePersonLine) : []);
+                    return schedErrs.length > 0 || secErrs.length > 0;
+                  } else {
+                    return textEditContent.trim() ? getInvalidLines(textEditContent, validateAuditLine).length > 0 : false;
+                  }
+                })()}
                 variant="destructive"
               >
                 <RefreshCw className={`h-4 w-4 mr-1 ${textEditSaving ? 'animate-spin' : ''}`} />
