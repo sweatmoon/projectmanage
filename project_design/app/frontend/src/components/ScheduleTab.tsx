@@ -2017,6 +2017,117 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return { personTotals: pMap, projectTotals: prMap };
   }, [calendarEntries, staffingMap, people, projectMap]);
 
+  // ── 투입 가능 인력 계산 ──────────────────────────────────────
+  // 현재 월에 phase가 걸쳐 있는 인력 중, 선택(entry)된 일수가 MD보다 적거나
+  // 아직 배정이 안 된 인력을 찾아 잔여 공수를 계산
+  const availablePeopleInfo = useMemo(() => {
+    // person별 (month 기준) 총 MD와 선택된 일수
+    const personMdMap = new Map<string, { name: string; totalMd: number; usedMd: number; isExternal: boolean }>();
+    for (const s of localStaffing) {
+      const ph = phaseMapLocal.get(s.phase_id);
+      if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
+      const personName = s.person_id
+        ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
+        : s.person_name_text || '?';
+      const isExternal = !s.person_id;
+      const md = s.md ?? 0;
+      const usedMd = staffingDayCount.get(s.id) || 0;
+      const existing = personMdMap.get(personName);
+      if (existing) {
+        existing.totalMd += md;
+        existing.usedMd += usedMd;
+      } else {
+        personMdMap.set(personName, { name: personName, totalMd: md, usedMd, isExternal });
+      }
+    }
+    // 잔여 공수(remainMd)가 있는 인력만 반환, 일정 없는 사람(usedMd=0) 먼저 정렬
+    return Array.from(personMdMap.values())
+      .map(v => ({ ...v, remainMd: v.totalMd - v.usedMd }))
+      .filter(v => v.remainMd > 0)
+      .sort((a, b) => {
+        // 일정 없는 사람(usedMd=0) 먼저, 같으면 잔여일 내림차순
+        if (a.usedMd === 0 && b.usedMd !== 0) return -1;
+        if (a.usedMd !== 0 && b.usedMd === 0) return 1;
+        return b.remainMd - a.remainMd;
+      });
+  }, [localStaffing, phaseMapLocal, year, month, people, staffingDayCount]);
+
+  // 일정이 아예 없는 사람 (usedMd === 0)
+  const noSchedulePeople = useMemo(
+    () => availablePeopleInfo.filter(p => p.usedMd === 0),
+    [availablePeopleInfo]
+  );
+  // 일정은 있지만 잔여 공수가 남은 사람
+  const partialSchedulePeople = useMemo(
+    () => availablePeopleInfo.filter(p => p.usedMd > 0),
+    [availablePeopleInfo]
+  );
+
+  // ── 주차별 투입 가능 인력 계산 ──────────────────────────────
+  // 선택한 주차의 영업일 목록을 구하고, 그 안에 선택된 entry가 없는 인력 계산
+  const [weekAvailPopup, setWeekAvailPopup] = useState<{
+    weekInfo: WeekInfo;
+    people: Array<{ name: string; isExternal: boolean; availDays: number; totalMd: number; usedInWeek: number }>;
+  } | null>(null);
+
+  const handleWeekLabelClick = useCallback((weekInfo: WeekInfo) => {
+    // 해당 주차 영업일 목록
+    const weekBizDates = new Set<string>();
+    const start = new Date(weekInfo.startDate);
+    const end = new Date(weekInfo.endDate);
+    let cur = new Date(start);
+    while (cur <= end) {
+      const y = cur.getFullYear();
+      const m2 = cur.getMonth() + 1;
+      const d2 = cur.getDate();
+      if (!isNonWorkday(y, m2, d2)) {
+        weekBizDates.add(formatDateStr(y, m2, d2));
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    const weekBizCount = weekBizDates.size;
+
+    // 이 주차에 활동 중인 staffing 수집
+    const personWeekMap = new Map<string, { name: string; isExternal: boolean; usedInWeek: number; totalMd: number }>();
+    for (const s of localStaffing) {
+      const ph = phaseMapLocal.get(s.phase_id);
+      if (!ph) continue;
+      // phase가 이 주차와 겹치는지
+      if (!phaseOverlapsWeek(ph, weekInfo.startDate, weekInfo.endDate)) continue;
+      const personName = s.person_id
+        ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
+        : s.person_name_text || '?';
+      const isExternal = !s.person_id;
+      // 이 주차에 선택된 entry 수
+      let usedInWeek = 0;
+      for (const d3 of weekBizDates) {
+        const key = `${s.id}_${d3}`;
+        if (entryLookup.has(key) && entryLookup.get(key)?.status) usedInWeek++;
+      }
+      const md = s.md ?? 0;
+      const existing = personWeekMap.get(personName);
+      if (existing) {
+        existing.usedInWeek += usedInWeek;
+        existing.totalMd += md;
+      } else {
+        personWeekMap.set(personName, { name: personName, isExternal, usedInWeek, totalMd: md });
+      }
+    }
+
+    // 주차 투입 가능 = 이 주차에 배정은 있지만 선택된 entry가 주차 영업일보다 적은 인력
+    // usedInWeek === 0 인 사람(이 주차에 일정 아예 없음)을 먼저 정렬
+    const availPeople = Array.from(personWeekMap.values())
+      .map(v => ({ ...v, availDays: weekBizCount - v.usedInWeek }))
+      .filter(v => v.availDays > 0)
+      .sort((a, b) => {
+        if (a.usedInWeek === 0 && b.usedInWeek !== 0) return -1;
+        if (a.usedInWeek !== 0 && b.usedInWeek === 0) return 1;
+        return b.availDays - a.availDays;
+      });
+
+    setWeekAvailPopup({ weekInfo, people: availPeople });
+  }, [localStaffing, phaseMapLocal, people, entryLookup, weekInfos]);
+
   const maxBadgesInWeek = useMemo(() => {
     let max = 0;
     for (const w of weekInfos) {
@@ -2159,34 +2270,66 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
       {/* Aggregation */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* 왼쪽: 일정 없는 인력 */}
         <Card>
           <CardHeader className="pb-2 pt-3 px-4">
-            <CardTitle className="text-xs font-medium text-muted-foreground">프로젝트별 투입일수 (선택됨)</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <span className="text-red-500">⚠️</span> 일정 없는 인력 ({year}년 {month}월 기준)
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <div className="flex flex-wrap gap-2">
-              {Array.from(projectTotals.entries()).map(([name, count]) => (
-                <span key={name} className="text-xs bg-slate-100 px-2 py-1 rounded">
-                  {name}: <strong>{count}일</strong>
-                </span>
-              ))}
-              {projectTotals.size === 0 && <span className="text-xs text-muted-foreground">-</span>}
-            </div>
+            {noSchedulePeople.length === 0 ? (
+              <span className="text-xs text-muted-foreground">이달 모든 배정 인력에 일정이 입력되었습니다 ✅</span>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {noSchedulePeople.map((p) => (
+                  <span
+                    key={p.name}
+                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 border ${
+                      p.isExternal
+                        ? 'bg-orange-50 border-orange-300 text-orange-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                    title={`배정 MD: ${p.totalMd}일 / 선택된 일정: 0일 (미배정)`}
+                  >
+                    {p.isExternal && <span className="text-orange-500 text-[9px] font-bold">(외)</span>}
+                    <span className="font-semibold">{p.name}</span>
+                    <span className="text-[10px] font-bold">MD {p.totalMd}일</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        {/* 오른쪽: 투입 가능 공수 (일정은 있지만 잔여 공수 있음) */}
         <Card>
           <CardHeader className="pb-2 pt-3 px-4">
-            <CardTitle className="text-xs font-medium text-muted-foreground">인력별 투입일수 (선택됨)</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <span className="text-green-600">✅</span> 투입 가능 공수 ({year}년 {month}월 기준)
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <div className="flex flex-wrap gap-2">
-              {Array.from(personTotals.entries()).map(([name, count]) => (
-                <span key={name} className="text-xs bg-slate-100 px-2 py-1 rounded">
-                  {name}: <strong>{count}일</strong>
-                </span>
-              ))}
-              {personTotals.size === 0 && <span className="text-xs text-muted-foreground">-</span>}
-            </div>
+            {partialSchedulePeople.length === 0 ? (
+              <span className="text-xs text-muted-foreground">잔여 공수가 있는 인력이 없습니다</span>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {partialSchedulePeople.map((p) => (
+                  <span
+                    key={p.name}
+                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                      p.isExternal ? 'bg-amber-50 border border-amber-200' : 'bg-green-50 border border-green-200'
+                    }`}
+                    title={`총 MD: ${p.totalMd}일 / 선택됨: ${p.usedMd}일 / 잔여: ${p.remainMd}일`}
+                  >
+                    {p.isExternal && <span className="text-amber-500 text-[9px]">(외)</span>}
+                    <span className="font-medium text-gray-800">{p.name}</span>
+                    <span className="text-green-700 font-bold">{p.remainMd}일</span>
+                    <span className="text-gray-400 text-[10px]">/{p.totalMd}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -2358,9 +2501,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             rowSpan={weekInfo.dayCount}
                           >
                             <div className="flex flex-col gap-0.5">
-                              <div className="text-[8px] font-bold text-slate-500 mb-0.5">
-                                {weekInfo.weekLabel}
-                              </div>
+                              <button
+                                className="text-[8px] font-bold text-slate-500 mb-0.5 hover:text-blue-600 hover:underline cursor-pointer text-left transition-colors"
+                                title={`${weekInfo.weekLabel} (${weekInfo.startDate} ~ ${weekInfo.endDate})\n클릭: 이 주차 투입 가능 인력 보기`}
+                                onClick={() => handleWeekLabelClick(weekInfo)}
+                              >
+                                🗓 {weekInfo.weekLabel}
+                              </button>
                               {/* Group A: 사업(감리) badges */}
                               {(() => {
                                 const aBadges = weekInfo.badges.filter((b) => b.status === 'A');
@@ -2637,6 +2784,117 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           )}
         </CardContent>
       </Card>
+
+      {/* 주차별 투입 가능 인력 팝업 */}
+      {weekAvailPopup && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30"
+          onClick={() => setWeekAvailPopup(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl border border-gray-200 w-[420px] max-w-[95vw] max-h-[80vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b bg-slate-50 rounded-t-xl">
+              <div>
+                <h3 className="text-sm font-bold text-gray-800">
+                  🗓 {weekAvailPopup.weekInfo.weekLabel} 투입 가능 인력
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {weekAvailPopup.weekInfo.startDate} ~ {weekAvailPopup.weekInfo.endDate}
+                </p>
+              </div>
+              <button
+                onClick={() => setWeekAvailPopup(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg transition"
+              >
+                <X className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              {weekAvailPopup.people.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <div className="text-2xl mb-2">✅</div>
+                  <p className="text-sm font-medium">이 주차에 투입 가능한 인력이 없습니다</p>
+                  <p className="text-xs mt-1">모든 배정 인력의 일정이 채워졌습니다</p>
+                </div>
+              ) : (() => {
+                const noSched = weekAvailPopup.people.filter(p => p.usedInWeek === 0);
+                const partSched = weekAvailPopup.people.filter(p => p.usedInWeek > 0);
+                return (
+                  <div className="space-y-3">
+                    {/* 이 주차 일정 아예 없는 인력 */}
+                    {noSched.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-red-500 text-sm">⚠️</span>
+                          <p className="text-[11px] font-semibold text-red-700">
+                            이 주차 일정 없음 ({noSched.length}명)
+                          </p>
+                        </div>
+                        <div className="divide-y divide-red-50 rounded-lg border border-red-100 overflow-hidden">
+                          {noSched.map((p, idx) => (
+                            <div
+                              key={p.name}
+                              className="flex items-center justify-between px-4 py-2.5 bg-red-50/40 hover:bg-red-50 transition"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-muted-foreground w-5">{idx + 1}</span>
+                                {p.isExternal && (
+                                  <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded">외부</span>
+                                )}
+                                <span className="text-sm font-semibold text-red-800">{p.name}</span>
+                              </div>
+                              <span className="text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full border border-red-200">
+                                {p.availDays}일 가능
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* 이 주차 일정 일부만 있는 인력 */}
+                    {partSched.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-green-600 text-sm">✅</span>
+                          <p className="text-[11px] font-semibold text-green-700">
+                            일부 투입 가능 ({partSched.length}명)
+                          </p>
+                        </div>
+                        <div className="divide-y divide-gray-100 rounded-lg border border-gray-100 overflow-hidden">
+                          {partSched.map((p, idx) => (
+                            <div
+                              key={p.name}
+                              className="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-muted-foreground w-5">{idx + 1}</span>
+                                {p.isExternal && (
+                                  <span className="text-[9px] bg-amber-100 text-amber-700 px-1 rounded">외부</span>
+                                )}
+                                <span className="text-sm font-medium text-gray-800">{p.name}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-[11px] text-muted-foreground">
+                                  이 주 투입: <strong className="text-blue-600">{p.usedInWeek}일</strong>
+                                </span>
+                                <span className="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                                  {p.availDays}일 가능
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editTarget && (
