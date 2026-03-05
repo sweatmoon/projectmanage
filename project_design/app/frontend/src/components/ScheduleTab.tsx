@@ -1073,6 +1073,29 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return byProject;
   }, [calendarEntries, localStaffing, staffingProjectMap]);
 
+  // ── person별 전체 일정 날짜 Set (중복 제거) ──────────────────
+  // key: person_id (number) 또는 'ext_이름' (외부) → Set<dateStr>
+  // 같은 날 여러 staffing에 배정되어 있어도 날짜는 1개만 카운트
+  const personAllDates = useMemo(() => {
+    const map = new Map<number | string, Set<string>>();
+    const staffingPersonKey = new Map<number, number | string>();
+    for (const s of localStaffing) {
+      if (s.person_id) {
+        staffingPersonKey.set(s.id, s.person_id);
+      } else if (s.person_name_text) {
+        staffingPersonKey.set(s.id, `ext_${s.person_name_text.trim()}`);
+      }
+    }
+    for (const e of calendarEntries) {
+      if (!e.status) continue;
+      const personKey = staffingPersonKey.get(e.staffing_id);
+      if (personKey === undefined) continue;
+      if (!map.has(personKey)) map.set(personKey, new Set());
+      map.get(personKey)!.add(e.entry_date);
+    }
+    return map;
+  }, [calendarEntries, localStaffing]);
+
   const projectColorMap = useMemo(() => {
     const map = new Map<number, typeof PROJECT_COLORS[0]>();
     const uniqueIds = [...new Set(localProjects.map((p) => p.id))];
@@ -2017,116 +2040,118 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return { personTotals: pMap, projectTotals: prMap };
   }, [calendarEntries, staffingMap, people, projectMap]);
 
-  // ── 투입 가능 인력 계산 ──────────────────────────────────────
-  // 현재 월에 phase가 걸쳐 있는 인력 중, 선택(entry)된 일수가 MD보다 적거나
-  // 아직 배정이 안 된 인력을 찾아 잔여 공수를 계산
+  // ── 유휴 인력 계산 (월 기준) ───────────────────────────────
+  // 이달 영업일 목록
+  const monthBizDates = useMemo(() => {
+    const dates: string[] = [];
+    const dim = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= dim; d++) {
+      if (!isNonWorkday(year, month, d)) {
+        dates.push(formatDateStr(year, month, d));
+      }
+    }
+    return dates;
+  }, [year, month]);
+
+  // person별: 이달 영업일 중 빈 날(=투입 가능일, 중복 무관) 계산
   const availablePeopleInfo = useMemo(() => {
-    // person별 (month 기준) 총 MD와 선택된 일수
-    const personMdMap = new Map<string, { name: string; totalMd: number; usedMd: number; isExternal: boolean }>();
+    // 이 달에 staffing이 있는 인력 목록 수집
+    const personMeta = new Map<number | string, { name: string; isExternal: boolean }>();
     for (const s of localStaffing) {
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
-      const personName = s.person_id
-        ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
-        : s.person_name_text || '?';
-      const isExternal = !s.person_id;
-      const md = s.md ?? 0;
-      const usedMd = staffingDayCount.get(s.id) || 0;
-      const existing = personMdMap.get(personName);
-      if (existing) {
-        existing.totalMd += md;
-        existing.usedMd += usedMd;
-      } else {
-        personMdMap.set(personName, { name: personName, totalMd: md, usedMd, isExternal });
+      const personKey: number | string = s.person_id
+        ? s.person_id
+        : `ext_${(s.person_name_text || '').trim()}`;
+      if (!personMeta.has(personKey)) {
+        const name = s.person_id
+          ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
+          : (s.person_name_text || '?');
+        personMeta.set(personKey, { name, isExternal: !s.person_id });
       }
     }
-    // 잔여 공수(remainMd)가 있는 인력만 반환, 일정 없는 사람(usedMd=0) 먼저 정렬
-    return Array.from(personMdMap.values())
-      .map(v => ({ ...v, remainMd: v.totalMd - v.usedMd }))
-      .filter(v => v.remainMd > 0)
-      .sort((a, b) => {
-        // 일정 없는 사람(usedMd=0) 먼저, 같으면 잔여일 내림차순
-        if (a.usedMd === 0 && b.usedMd !== 0) return -1;
-        if (a.usedMd !== 0 && b.usedMd === 0) return 1;
-        return b.remainMd - a.remainMd;
-      });
-  }, [localStaffing, phaseMapLocal, year, month, people, staffingDayCount]);
+    return Array.from(personMeta.entries()).map(([personKey, meta]) => {
+      const busyDates = personAllDates.get(personKey) || new Set<string>();
+      const freeDays = monthBizDates.filter(d => !busyDates.has(d)).length;
+      const busyDays = monthBizDates.filter(d => busyDates.has(d)).length;
+      return { ...meta, personKey, freeDays, busyDays, totalBizDays: monthBizDates.length };
+    })
+    .filter(v => v.freeDays > 0)
+    .sort((a, b) => {
+      if (a.busyDays === 0 && b.busyDays !== 0) return -1;
+      if (a.busyDays !== 0 && b.busyDays === 0) return 1;
+      return b.freeDays - a.freeDays;
+    });
+  }, [localStaffing, phaseMapLocal, year, month, people, personAllDates, monthBizDates]);
 
-  // 일정이 아예 없는 사람 (usedMd === 0)
+  // 일정이 아예 없는 사람 (busyDays === 0)
   const noSchedulePeople = useMemo(
-    () => availablePeopleInfo.filter(p => p.usedMd === 0),
+    () => availablePeopleInfo.filter(p => p.busyDays === 0),
     [availablePeopleInfo]
   );
-  // 일정은 있지만 잔여 공수가 남은 사람
+  // 일정은 있지만 빈 날이 있는 사람
   const partialSchedulePeople = useMemo(
-    () => availablePeopleInfo.filter(p => p.usedMd > 0),
+    () => availablePeopleInfo.filter(p => p.busyDays > 0),
     [availablePeopleInfo]
   );
 
   // ── 주차별 투입 가능 인력 계산 ──────────────────────────────
-  // 선택한 주차의 영업일 목록을 구하고, 그 안에 선택된 entry가 없는 인력 계산
+  // 해당 주차 영업일 중 person에게 일정이 없는 날 = 투입 가능일 (중복 무관)
   const [weekAvailPopup, setWeekAvailPopup] = useState<{
     weekInfo: WeekInfo;
-    people: Array<{ name: string; isExternal: boolean; availDays: number; totalMd: number; usedInWeek: number }>;
+    people: Array<{ name: string; isExternal: boolean; freeDays: number; busyDays: number; totalBizDays: number }>;
   } | null>(null);
 
   const handleWeekLabelClick = useCallback((weekInfo: WeekInfo) => {
     // 해당 주차 영업일 목록
-    const weekBizDates = new Set<string>();
+    const weekBizDates: string[] = [];
     const start = new Date(weekInfo.startDate);
     const end = new Date(weekInfo.endDate);
     let cur = new Date(start);
     while (cur <= end) {
-      const y = cur.getFullYear();
-      const m2 = cur.getMonth() + 1;
-      const d2 = cur.getDate();
-      if (!isNonWorkday(y, m2, d2)) {
-        weekBizDates.add(formatDateStr(y, m2, d2));
+      const wy = cur.getFullYear();
+      const wm = cur.getMonth() + 1;
+      const wd = cur.getDate();
+      if (!isNonWorkday(wy, wm, wd)) {
+        weekBizDates.push(formatDateStr(wy, wm, wd));
       }
       cur.setDate(cur.getDate() + 1);
     }
-    const weekBizCount = weekBizDates.size;
+    const weekBizCount = weekBizDates.length;
 
-    // 이 주차에 활동 중인 staffing 수집
-    const personWeekMap = new Map<string, { name: string; isExternal: boolean; usedInWeek: number; totalMd: number }>();
+    // 이 주차에 staffing이 있는 인력 수집 (personKey 기준, 중복 제거)
+    const personMeta = new Map<number | string, { name: string; isExternal: boolean }>();
     for (const s of localStaffing) {
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph) continue;
-      // phase가 이 주차와 겹치는지
       if (!phaseOverlapsWeek(ph, weekInfo.startDate, weekInfo.endDate)) continue;
-      const personName = s.person_id
-        ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
-        : s.person_name_text || '?';
-      const isExternal = !s.person_id;
-      // 이 주차에 선택된 entry 수
-      let usedInWeek = 0;
-      for (const d3 of weekBizDates) {
-        const key = `${s.id}_${d3}`;
-        if (entryLookup.has(key) && entryLookup.get(key)?.status) usedInWeek++;
-      }
-      const md = s.md ?? 0;
-      const existing = personWeekMap.get(personName);
-      if (existing) {
-        existing.usedInWeek += usedInWeek;
-        existing.totalMd += md;
-      } else {
-        personWeekMap.set(personName, { name: personName, isExternal, usedInWeek, totalMd: md });
+      const personKey: number | string = s.person_id
+        ? s.person_id
+        : `ext_${(s.person_name_text || '').trim()}`;
+      if (!personMeta.has(personKey)) {
+        const name = s.person_id
+          ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
+          : (s.person_name_text || '?');
+        personMeta.set(personKey, { name, isExternal: !s.person_id });
       }
     }
 
-    // 주차 투입 가능 = 이 주차에 배정은 있지만 선택된 entry가 주차 영업일보다 적은 인력
-    // usedInWeek === 0 인 사람(이 주차에 일정 아예 없음)을 먼저 정렬
-    const availPeople = Array.from(personWeekMap.values())
-      .map(v => ({ ...v, availDays: weekBizCount - v.usedInWeek }))
-      .filter(v => v.availDays > 0)
-      .sort((a, b) => {
-        if (a.usedInWeek === 0 && b.usedInWeek !== 0) return -1;
-        if (a.usedInWeek !== 0 && b.usedInWeek === 0) return 1;
-        return b.availDays - a.availDays;
-      });
+    // 각 인력별: 이 주차 영업일 중 빈 날 카운트 (중복 무관)
+    const availPeople = Array.from(personMeta.entries()).map(([personKey, meta]) => {
+      const busyDates = personAllDates.get(personKey) || new Set<string>();
+      const freeDays = weekBizDates.filter(d => !busyDates.has(d)).length;
+      const busyDays = weekBizDates.filter(d => busyDates.has(d)).length;
+      return { ...meta, freeDays, busyDays, totalBizDays: weekBizCount };
+    })
+    .filter(v => v.freeDays > 0)
+    .sort((a, b) => {
+      if (a.busyDays === 0 && b.busyDays !== 0) return -1;
+      if (a.busyDays !== 0 && b.busyDays === 0) return 1;
+      return b.freeDays - a.freeDays;
+    });
 
     setWeekAvailPopup({ weekInfo, people: availPeople });
-  }, [localStaffing, phaseMapLocal, people, entryLookup, weekInfos]);
+  }, [localStaffing, phaseMapLocal, people, personAllDates, weekInfos]);
 
   const maxBadgesInWeek = useMemo(() => {
     let max = 0;
@@ -2294,7 +2319,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                   >
                     {p.isExternal && <span className="text-orange-500 text-[9px] font-bold">(외)</span>}
                     <span className="font-semibold">{p.name}</span>
-                    <span className="text-[10px] font-bold">MD {p.totalMd}일</span>
+                    <span className="text-[10px] font-bold">{p.freeDays}/{p.totalBizDays}</span>
                   </span>
                 ))}
               </div>
@@ -2302,7 +2327,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           </CardContent>
         </Card>
 
-        {/* 오른쪽: 투입 가능 공수 (일정은 있지만 잔여 공수 있음) */}
+        {/* 오른쪽: 투입 가능 공수 (일정은 있지만 빈 영업일 있음) */}
         <Card>
           <CardHeader className="pb-2 pt-3 px-4">
             <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -2311,7 +2336,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           </CardHeader>
           <CardContent className="px-4 pb-3">
             {partialSchedulePeople.length === 0 ? (
-              <span className="text-xs text-muted-foreground">잔여 공수가 있는 인력이 없습니다</span>
+              <span className="text-xs text-muted-foreground">여유 일정이 있는 인력이 없습니다</span>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {partialSchedulePeople.map((p) => (
@@ -2320,12 +2345,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
                       p.isExternal ? 'bg-amber-50 border border-amber-200' : 'bg-green-50 border border-green-200'
                     }`}
-                    title={`총 MD: ${p.totalMd}일 / 선택됨: ${p.usedMd}일 / 잔여: ${p.remainMd}일`}
+                    title={`투입 가능: ${p.freeDays}일 / 영업일: ${p.totalBizDays}일 (일정 있는 날: ${p.busyDays}일)`}
                   >
                     {p.isExternal && <span className="text-amber-500 text-[9px]">(외)</span>}
                     <span className="font-medium text-gray-800">{p.name}</span>
-                    <span className="text-green-700 font-bold">{p.remainMd}일</span>
-                    <span className="text-gray-400 text-[10px]">/{p.totalMd}</span>
+                    <span className="text-green-700 font-bold">{p.freeDays}</span>
+                    <span className="text-gray-400 text-[10px]">/{p.totalBizDays}</span>
                   </span>
                 ))}
               </div>
@@ -2819,10 +2844,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                   <p className="text-xs mt-1">모든 배정 인력의 일정이 채워졌습니다</p>
                 </div>
               ) : (() => {
-                const noSched = weekAvailPopup.people.filter(p => p.usedInWeek === 0);
-                const partSched = weekAvailPopup.people.filter(p => p.usedInWeek > 0);
+                const noSched = weekAvailPopup.people.filter(p => p.busyDays === 0);
+                const partSched = weekAvailPopup.people.filter(p => p.busyDays > 0);
+                const biz = weekAvailPopup.people[0]?.totalBizDays ?? 0;
                 return (
                   <div className="space-y-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      이 주차 영업일 <strong>{biz}일</strong> 기준 &middot; 투입가능(중복무관) / 영업일
+                    </p>
                     {/* 이 주차 일정 아예 없는 인력 */}
                     {noSched.length > 0 && (
                       <div>
@@ -2846,7 +2875,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                 <span className="text-sm font-semibold text-red-800">{p.name}</span>
                               </div>
                               <span className="text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full border border-red-200">
-                                {p.availDays}일 가능
+                                {p.freeDays}/{p.totalBizDays}일 가능
                               </span>
                             </div>
                           ))}
@@ -2875,12 +2904,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                 )}
                                 <span className="text-sm font-medium text-gray-800">{p.name}</span>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
                                 <span className="text-[11px] text-muted-foreground">
-                                  이 주 투입: <strong className="text-blue-600">{p.usedInWeek}일</strong>
+                                  일정 있는 날: <strong className="text-blue-600">{p.busyDays}일</strong>
                                 </span>
                                 <span className="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
-                                  {p.availDays}일 가능
+                                  {p.freeDays}/{p.totalBizDays}일 가능
                                 </span>
                               </div>
                             </div>
