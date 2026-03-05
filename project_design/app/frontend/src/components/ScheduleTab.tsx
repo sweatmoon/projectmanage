@@ -2344,10 +2344,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     ));
                   })}
                 </colgroup>
-                <thead className="sticky top-0 z-40">
+                <thead className="sticky top-0 z-30">
                   <tr className="bg-slate-100">
                     <th
-                      className="sticky left-0 z-50 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
+                      className="sticky left-0 z-50 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5" 
                       rowSpan={2}
                       style={{ width: badgeColW }}
                     >
@@ -2356,14 +2356,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     <th
                       className="sticky z-50 bg-slate-100 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
                       rowSpan={2}
-                      style={{ left: stickyLeftForDate, width: dateColW }}
+                      style={{ left: stickyLeftForDate, width: dateColW, zIndex: 50 }}
                     >
                       일
                     </th>
                     <th
                       className="sticky z-50 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
                       rowSpan={2}
-                      style={{ left: stickyLeftForDow, width: dowColW }}
+                      style={{ left: stickyLeftForDow, width: dowColW, zIndex: 50 }}
                     >
                       요일
                     </th>
@@ -2469,7 +2469,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         {/* Badge column */}
                         {isFirstDayOfWeek && weekInfo ? (
                           <td
-                            className={`sticky left-0 z-30 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
+                            className={`sticky left-0 z-20 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
                               isTd ? 'bg-blue-50' : 'bg-slate-50'
                             }`}
                             style={{
@@ -2590,7 +2590,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           </td>
                         ) : !isFirstDayOfWeek ? null : (
                           <td
-                            className="sticky left-0 z-30 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
+                            className="sticky left-0 z-20 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
                             style={{ width: badgeColW, padding: '2px 3px' }}
                           >
                             <span className="text-[8px] text-gray-400 italic">-</span>
@@ -2598,7 +2598,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         )}
                         {/* Date */}
                         <td
-                          className={`sticky z-30 border border-gray-300 text-center font-semibold text-[11px] ${
+                          className={`sticky z-20 border border-gray-300 text-center font-semibold text-[11px] ${
                             isTd ? 'bg-blue-100 text-blue-800' : isHol ? 'bg-red-50 text-red-600' : isWe ? 'bg-gray-100' : 'bg-white'
                           }`}
                           style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight }}
@@ -2609,7 +2609,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         </td>
                         {/* Day of week */}
                         <td
-                          className={`sticky z-30 border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
+                          className={`sticky z-20 border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
                             isHol ? 'text-red-500' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'
                           } ${isTd ? 'bg-blue-100' : isHol ? 'bg-red-50' : isWe ? 'bg-gray-100' : 'bg-white'}`}
                           style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0' }}
