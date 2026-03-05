@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
+import { useUserRole } from '@/hooks/useUserRole';
 
 
 interface Person {
@@ -100,6 +101,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { canWrite, isViewer } = useUserRole();
 
   // 필터: 이름·직급·등급으로 검색
   const filtered = useMemo(() => {
@@ -272,7 +274,8 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
           variant="outline"
           size="sm"
           onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
+          disabled={uploading || !canWrite}
+          title={isViewer ? '조회 전용 계정입니다' : undefined}
         >
           {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
           일괄 업로드
@@ -289,7 +292,8 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
             variant="destructive"
             size="sm"
             onClick={handleBulkDelete}
-            disabled={bulkDeleting}
+            disabled={bulkDeleting || !canWrite}
+            title={isViewer ? '조회 전용 계정입니다' : undefined}
           >
             {bulkDeleting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
             선택 삭제 ({selectedIds.size})
@@ -355,6 +359,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                         </div>
                       </div>
                       {/* Delete button */}
+                      {canWrite && (
                       <button
                         className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors flex-shrink-0"
                         onClick={(e) => { e.stopPropagation(); handleDeletePerson(person); }}
@@ -363,6 +368,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                       >
                         {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                       </button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

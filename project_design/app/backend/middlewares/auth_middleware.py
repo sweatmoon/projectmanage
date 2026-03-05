@@ -106,6 +106,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "토큰이 만료되었거나 유효하지 않습니다.", "auth_required": True}
             )
 
+        # ── viewer 읽기 전용 강제 ─────────────────────────────
+        # viewer 역할은 GET/HEAD/OPTIONS 외 모든 쓰기 요청 차단
+        if (
+            request.state.user_role == "viewer"
+            and request.method.upper() not in ("GET", "HEAD", "OPTIONS")
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "조회 전용 계정입니다. 입력·수정·삭제 작업은 허용되지 않습니다."}
+            )
+
         response = await call_next(request)
 
         # 접속 로그 기록 (API 요청만)

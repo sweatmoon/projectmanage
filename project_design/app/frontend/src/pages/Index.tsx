@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { countBusinessDays } from '@/lib/holidays';
+import { useUserRole } from '@/hooks/useUserRole';
 
 // ── 입력 유효성 검증 헬퍼 ──────────────────────────────────────────
 function fmt8(d: string) { return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; }
@@ -141,6 +142,7 @@ const WIDE_MODE_KEY = 'schedule_wide_mode';
 export default function IndexPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { canWrite, isViewer } = useUserRole();
   const [activeTab, setActiveTab] = useState<string>(() => {
     // URL 파라미터가 있으면 우선, 없으면 localStorage
     try {
@@ -555,13 +557,15 @@ export default function IndexPage() {
                 </button>
               )}
               {activeTab === 'projects' && (
-                <Button size="sm" onClick={() => setShowNewProject(true)}>
+                <Button size="sm" onClick={() => setShowNewProject(true)} disabled={!canWrite}
+                  title={isViewer ? '조회 전용 계정입니다' : undefined}>
                   <Plus className="h-4 w-4 mr-1" />
                   프로젝트 추가
                 </Button>
               )}
               {activeTab === 'people' && (
-                <Button size="sm" onClick={() => setShowNewPerson(true)}>
+                <Button size="sm" onClick={() => setShowNewPerson(true)} disabled={!canWrite}
+                  title={isViewer ? '조회 전용 계정입니다' : undefined}>
                   <Plus className="h-4 w-4 mr-1" />
                   인력 추가
                 </Button>

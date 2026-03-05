@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
+import { useUserRole } from '@/hooks/useUserRole';
 
 
 
@@ -884,6 +885,7 @@ function saveMonth(year: number, month: number) {
 export default function ScheduleTab({ projects, phases, staffing, people, onRefresh }: ScheduleTabProps) {
   const now = new Date();
   const saved = getSavedMonth();
+  const { canWrite, isViewer } = useUserRole();
   const [year, setYear] = useState(saved?.year ?? now.getFullYear());
   const [month, setMonth] = useState(saved?.month ?? (now.getMonth() + 1));
   const [autoNavigated, setAutoNavigated] = useState(!!saved);
@@ -1544,6 +1546,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   );
 
   const handleCellClick = async (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => {
+    if (isViewer) {
+      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
+      return;
+    }
     if (scheduleIsLocked) {
       toast.error('다른 사용자가 열람 중입니다. 잠시 후 다시 시도하세요.');
       return;
@@ -1778,6 +1784,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [year, month, daysInMonth]);
 
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
+    if (isViewer) {
+      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
+      return;
+    }
     if (scheduleIsLocked) {
       toast.error('다른 사용자가 열람 중입니다. 잠시 후 다시 시도하세요.');
       return;
@@ -2158,6 +2168,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
   return (
     <div className="space-y-4">
+      {/* viewer 읽기 전용 배너 */}
+      {isViewer && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+          <Lock className="h-4 w-4 flex-shrink-0" />
+          <span>조회 전용 계정입니다. 일정 수정·추가는 불가합니다.</span>
+        </div>
+      )}
       {/* 동접자 잠금 배너 */}
       <PresenceWarningBanner users={presenceUsers} currentUserId={presenceCurrentUserId} />
 
@@ -2329,7 +2346,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
             </div>
           ) : (
             <div className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch' }}>
-              <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+              <table className="text-xs" style={{ tableLayout: 'fixed', minWidth: tableMinWidth, borderCollapse: 'separate', borderSpacing: 0 }}>
                 <colgroup>
                   <col style={{ width: badgeColW }} />
                   <col style={{ width: dateColW }} />
@@ -2344,26 +2361,26 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     ));
                   })}
                 </colgroup>
-                <thead className="sticky top-0 z-30">
+                <thead className="sticky top-0" style={{ zIndex: 40 }}>
                   <tr className="bg-slate-100">
                     <th
-                      className="sticky left-0 z-50 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5" 
+                      className="sticky left-0 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5" 
                       rowSpan={2}
-                      style={{ width: badgeColW }}
+                      style={{ width: badgeColW, zIndex: 60 }}
                     >
                       📌 주간별 사업
                     </th>
                     <th
-                      className="sticky z-50 bg-slate-100 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
+                      className="sticky bg-slate-100 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
                       rowSpan={2}
-                      style={{ left: stickyLeftForDate, width: dateColW, zIndex: 50 }}
+                      style={{ left: stickyLeftForDate, width: dateColW, zIndex: 60 }}
                     >
                       일
                     </th>
                     <th
-                      className="sticky z-50 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
+                      className="sticky bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
                       rowSpan={2}
-                      style={{ left: stickyLeftForDow, width: dowColW, zIndex: 50 }}
+                      style={{ left: stickyLeftForDow, width: dowColW, zIndex: 60 }}
                     >
                       요일
                     </th>
@@ -2469,13 +2486,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         {/* Badge column */}
                         {isFirstDayOfWeek && weekInfo ? (
                           <td
-                            className={`sticky left-0 z-20 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
+                            className={`sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
                               isTd ? 'bg-blue-50' : 'bg-slate-50'
                             }`}
                             style={{
                               width: badgeColW,
                               padding: '2px 3px',
                               verticalAlign: 'top',
+                              zIndex: 25,
                             }}
                             rowSpan={weekInfo.dayCount}
                           >
@@ -2590,18 +2608,18 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           </td>
                         ) : !isFirstDayOfWeek ? null : (
                           <td
-                            className="sticky left-0 z-20 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
-                            style={{ width: badgeColW, padding: '2px 3px' }}
+                            className="sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
+                            style={{ width: badgeColW, padding: '2px 3px', zIndex: 25 }}
                           >
                             <span className="text-[8px] text-gray-400 italic">-</span>
                           </td>
                         )}
                         {/* Date */}
                         <td
-                          className={`sticky z-20 border border-gray-300 text-center font-semibold text-[11px] ${
+                          className={`sticky border border-gray-300 text-center font-semibold text-[11px] ${
                             isTd ? 'bg-blue-100 text-blue-800' : isHol ? 'bg-red-50 text-red-600' : isWe ? 'bg-gray-100' : 'bg-white'
                           }`}
-                          style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight }}
+                          style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight, zIndex: 25 }}
                           title={holidayName ?? undefined}
                         >
                           {d}
@@ -2609,10 +2627,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         </td>
                         {/* Day of week */}
                         <td
-                          className={`sticky z-20 border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
+                          className={`sticky border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
                             isHol ? 'text-red-500' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'
                           } ${isTd ? 'bg-blue-100' : isHol ? 'bg-red-50' : isWe ? 'bg-gray-100' : 'bg-white'}`}
-                          style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0' }}
+                          style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0', zIndex: 25 }}
                         >
                           {dow}
                         </td>

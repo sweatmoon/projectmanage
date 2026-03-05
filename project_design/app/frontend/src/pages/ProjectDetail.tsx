@@ -16,6 +16,7 @@ import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, 
 import { countBusinessDays as countBizDaysHoliday, isNonWorkday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
+import { useUserRole } from '@/hooks/useUserRole';
 
 interface Project {
   id: number;
@@ -327,6 +328,7 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const projectId = Number(id);
+  const { canWrite, isViewer } = useUserRole();
 
   const [project, setProject] = useState<Project | null>(null);
   const [phases, setPhases] = useState<Phase[]>([]);
@@ -690,7 +692,8 @@ export default function ProjectDetail() {
   });
   // 다른 사람이 열람/수정 중이면 잠금 (점유 방식 — 먼저 연 사람이 우선권)
   // 보는 것은 누구나 가능, 저장/편집 액션만 차단
-  const isLocked = presenceOthers.length > 0;
+  // viewer 역할도 읽기 전용 → isLocked와 같은 동작
+  const isLocked = presenceOthers.length > 0 || isViewer;
 
   const togglePhaseSchedule = (phaseId: number) => {
     setExpandedPhaseSchedules((prev) => {
@@ -1316,7 +1319,8 @@ export default function ProjectDetail() {
                 {exportLoading ? '내보내는 중...' : '텍스트 내보내기'}
               </Button>
               {statusBadge(project.status)}
-              {isLocked && <Lock className="h-4 w-4 text-amber-500" title="다른 사용자가 수정 중" />}
+              {isViewer && <Lock className="h-4 w-4 text-blue-500" title="조회 전용 계정 (뷰어)" />}
+              {!isViewer && presenceOthers.length > 0 && <Lock className="h-4 w-4 text-amber-500" title="다른 사용자가 수정 중" />}
             </div>
           </div>
         </header>
