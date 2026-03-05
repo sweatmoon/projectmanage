@@ -298,6 +298,19 @@ export default function IndexPage() {
         }
 
         // 감리 일정 텍스트: 이름 뒤에 분야 삽입, MD 유지
+        // MD 파싱 규칙 (예비조사:감리:시정조치확인 형식 지원):
+        //   이름          → MD 없음 (전체기간)
+        //   이름:5        → 감리일수 5일
+        //   이름:2:5      → 감리일수 5일 (두번째값)
+        //   이름:2:5:3    → 감리일수 5일 (세번째값 중 두번째=감리)
+        const extractMd = (colonParts: string[]): string => {
+          const nums = colonParts.slice(1).map(s => s.trim());
+          if (nums.length === 0) return '';
+          if (nums.length === 1) return /^\d+$/.test(nums[0]) ? nums[0] : ''; // 이름:5
+          if (nums.length === 2) return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리
+          return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리:시정 → 감리(두번째)
+        };
+
         const text = proposalScheduleText.trim().split('\n').map(line => {
           const l = line.trim();
           if (!l) return '';
@@ -308,12 +321,9 @@ export default function IndexPage() {
             if (!entry) return '';
             const colonParts = entry.split(':');
             const name = colonParts[0].trim();
-            const secondPart = colonParts[1]?.trim();
-            const isMd = secondPart !== undefined && /^\d+$/.test(secondPart);
-            const mdStr = isMd ? secondPart : (colonParts[2]?.trim() && /^\d+$/.test(colonParts[2].trim()) ? colonParts[2].trim() : '');
+            const mdStr = extractMd(colonParts);
             const info = nameInfo[name];
-            // sectionMap은 이미 nameInfo 전체로 초기화됨 (위에서 처리)
-            const field = info?.field || (!isMd && secondPart ? secondPart : '');
+            const field = info?.field || '';
             if (field && mdStr) return `${name}:${field}:${mdStr}`;
             if (field) return `${name}:${field}`;
             if (mdStr) return `${name}:${mdStr}`;
@@ -593,12 +603,13 @@ export default function IndexPage() {
                   <div>
                     <Label className="text-xs font-medium text-slate-700">📅 감리 일정</Label>
                     <p className="text-[10px] text-slate-500 mb-1">
-                      형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3  (이름만=전체기간, 이름:숫자=MD지정)
+                      형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:5, 이름C:0:5:0<br/>
+                      • 이름만 → 전체기간 &nbsp;• 이름:5 → 감리 5일 &nbsp;• 이름:예비:감리:시정 → 감리일수만 사용
                     </p>
                     <Textarea
                       value={proposalScheduleText}
                       onChange={(e) => setProposalScheduleText(e.target.value)}
-                      placeholder={`설계-정밀진단, 20260323, 20260327, 강혁, 김현선, 최규택:3\n설계-재검증, 20260427, 20260501, 강혁, 김현선, 최규택, 양권묵:2`}
+                      placeholder={`사전, 20260325, 20260327, 이현우:0:3:0, 김미정:0:3:0\n설계, 20260615, 20260619, 이현우, 김미정, 장덕호:0:3:0\n구현, 20261026, 20261030, 이현우:1:5:1, 김미정:0:5:1, 김선강`}
                       rows={3}
                       className="font-mono text-xs"
                     />
