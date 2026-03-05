@@ -356,6 +356,8 @@ export default function ProjectDetail() {
   const [textEditSaving, setTextEditSaving] = useState(false);
 
   // ── 입력 유효성 검증 ──────────────────────────────────────
+  const fmt8pd = (d: string) => `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
+
   const validateAuditLine = (line: string): string | null => {
     const l = line.trim();
     if (!l) return null;
@@ -365,6 +367,7 @@ export default function ProjectDetail() {
     if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
     if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
     if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+    const maxMd = countBizDaysHoliday(fmt8pd(start), fmt8pd(end));
     for (const p of parts.slice(3)) {
       if (!p) continue;
       const cp = p.split(':');
@@ -372,6 +375,12 @@ export default function ProjectDetail() {
       const field = cp[1]?.trim();
       if (!field) return `분야 누락: "${p}" → 이름:분야[:MD] 형식이어야 합니다`;
       if (/^\d+$/.test(field)) return `분야 오류: "${p}" → 분야 자리에 숫자가 왔습니다`;
+      const mdStr = cp[2]?.trim();
+      if (mdStr) {
+        if (!/^\d+$/.test(mdStr)) return `MD 오류: "${p}" → MD는 숫자여야 합니다`;
+        const md = parseInt(mdStr, 10);
+        if (md > maxMd) return `MD 초과: "${p}" → ${md}일은 영업일(${maxMd}일)을 초과합니다`;
+      }
     }
     return null;
   };
@@ -385,6 +394,7 @@ export default function ProjectDetail() {
     if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
     if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
     if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+    const maxMd = countBizDaysHoliday(fmt8pd(start), fmt8pd(end));
     for (const p of parts.slice(3)) {
       if (!p) continue;
       const cp = p.split(':');
@@ -393,6 +403,12 @@ export default function ProjectDetail() {
         if (cp[i].trim() && !/^\d+$/.test(cp[i].trim()))
           return `MD 값 오류: "${p}" → 콜론 뒤는 숫자만 입력 가능합니다`;
       }
+      // 감리일수 추출: 콜론1개→cp[1], 콜론2~3개→cp[2]
+      let mdVal: number | null = null;
+      if (cp.length === 2) mdVal = parseInt(cp[1], 10);
+      else if (cp.length >= 3) mdVal = parseInt(cp[2], 10);
+      if (mdVal !== null && !isNaN(mdVal) && mdVal > maxMd)
+        return `MD 초과: "${p}" → ${mdVal}일은 영업일(${maxMd}일)을 초과합니다`;
     }
     return null;
   };

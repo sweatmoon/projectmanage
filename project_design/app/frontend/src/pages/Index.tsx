@@ -19,6 +19,82 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { countBusinessDays } from '@/lib/holidays';
+
+// ── 입력 유효성 검증 헬퍼 ──────────────────────────────────────────
+function fmt8(d: string) { return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; }
+
+function validateAuditLine(line: string): string | null {
+  const l = line.trim();
+  if (!l) return null;
+  const parts = l.split(',').map(s => s.trim());
+  if (parts.length < 3) return '항목이 3개 미만입니다 (단계명, 시작일, 종료일 필수)';
+  const [, start, end] = parts;
+  if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
+  if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
+  if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+  const maxMd = countBusinessDays(fmt8(start), fmt8(end));
+  for (const p of parts.slice(3)) {
+    if (!p) continue;
+    const cp = p.split(':');
+    if (!cp[0].trim()) return `이름이 비어있습니다: "${p}"`;
+    const field = cp[1]?.trim();
+    if (!field) return `분야 누락: "${p}" → 이름:분야[:MD] 형식`;
+    if (/^\d+$/.test(field)) return `분야 오류: "${p}" → 분야 자리에 숫자가 왔습니다`;
+    const mdStr = cp[2]?.trim();
+    if (mdStr) {
+      if (!/^\d+$/.test(mdStr)) return `MD 오류: "${p}" → MD는 숫자여야 합니다`;
+      const md = parseInt(mdStr, 10);
+      if (md > maxMd) return `MD 초과: "${p}" → ${md}일은 영업일(${maxMd}일)을 초과합니다`;
+    }
+  }
+  return null;
+}
+
+function validateProposalScheduleLine(line: string): string | null {
+  const l = line.trim();
+  if (!l) return null;
+  const parts = l.split(',').map(s => s.trim());
+  if (parts.length < 3) return '항목이 3개 미만입니다 (단계명, 시작일, 종료일 필수)';
+  const [, start, end] = parts;
+  if (!/^\d{8}$/.test(start)) return `시작일 형식 오류: "${start}" → YYYYMMDD 8자리`;
+  if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
+  if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
+  const maxMd = countBusinessDays(fmt8(start), fmt8(end));
+  for (const p of parts.slice(3)) {
+    if (!p) continue;
+    const cp = p.split(':');
+    if (!cp[0].trim()) return `이름이 비어있습니다: "${p}"`;
+    for (let i = 1; i < cp.length; i++) {
+      if (cp[i].trim() && !/^\d+$/.test(cp[i].trim()))
+        return `MD 오류: "${p}" → 콜론 뒤는 숫자(일수)만 허용`;
+    }
+    let mdVal: number | null = null;
+    if (cp.length === 2) mdVal = parseInt(cp[1], 10);
+    else if (cp.length >= 3) mdVal = parseInt(cp[2], 10);
+    if (mdVal !== null && !isNaN(mdVal) && mdVal > maxMd)
+      return `MD 초과: "${p}" → ${mdVal}일은 영업일(${maxMd}일)을 초과합니다`;
+  }
+  return null;
+}
+
+function validatePersonLine(line: string): string | null {
+  const l = line.trim();
+  if (!l) return null;
+  const sep = l.includes(',') ? ',' : l.includes(':') ? ':' : null;
+  if (!sep) return `형식 오류: "${l}" → 이름, 분야 형식이어야 합니다`;
+  const [name, field] = l.split(sep, 2).map(s => s.trim());
+  if (!name)  return '이름이 비어있습니다';
+  if (!field) return `분야가 비어있습니다: "${l}" → 이름, 분야 형식`;
+  return null;
+}
+
+function getInvalidLines(text: string, validator: (l: string) => string | null): { line: number; msg: string }[] {
+  return text.split('\n').map((l, i) => {
+    const err = validator(l);
+    return err ? { line: i + 1, msg: err } : null;
+  }).filter(Boolean) as { line: number; msg: string }[];
+}
 
 interface Project {
   id: number;
@@ -600,49 +676,77 @@ export default function IndexPage() {
                   </p>
 
                   {/* 감리 일정 */}
-                  <div>
-                    <Label className="text-xs font-medium text-slate-700">📅 감리 일정</Label>
-                    <p className="text-[10px] text-slate-500 mb-1">
-                      형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:5, 이름C:0:5:0<br/>
-                      • 이름만 → 전체기간 &nbsp;• 이름:5 → 감리 5일 &nbsp;• 이름:예비:감리:시정 → 감리일수만 사용
-                    </p>
-                    <Textarea
-                      value={proposalScheduleText}
-                      onChange={(e) => setProposalScheduleText(e.target.value)}
-                      placeholder={`사전, 20260325, 20260327, 이현우:0:3:0, 김미정:0:3:0\n설계, 20260615, 20260619, 이현우, 김미정, 장덕호:0:3:0\n구현, 20261026, 20261030, 이현우:1:5:1, 김미정:0:5:1, 김선강`}
-                      rows={3}
-                      className="font-mono text-xs"
-                    />
-                  </div>
+                  {(() => {
+                    const errs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
+                    return (
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">📅 감리 일정</Label>
+                        <p className="text-[10px] text-slate-500 mb-1">
+                          형식: 단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:5, 이름C:0:5:0<br/>
+                          • 이름만 → 전체기간 &nbsp;• 이름:5 → 감리 5일 &nbsp;• 이름:예비:감리:시정 → 감리일수만 사용
+                        </p>
+                        <Textarea
+                          value={proposalScheduleText}
+                          onChange={(e) => setProposalScheduleText(e.target.value)}
+                          placeholder={`사전, 20260325, 20260327, 이현우:0:3:0, 김미정:0:3:0\n설계, 20260615, 20260619, 이현우, 김미정, 장덕호:0:3:0\n구현, 20261026, 20261030, 이현우:1:5:1, 김미정:0:5:1, 김선강`}
+                          rows={3}
+                          className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                        />
+                        {errs.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {errs.map(e => <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* 인력 섹션들 */}
                   <div className="grid grid-cols-2 gap-3">
                     {/* 감리원 - 전체 너비 */}
-                    <div className="col-span-2">
-                      <Label className="text-xs font-medium text-slate-700">👤 감리원</Label>
-                      <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야  (한 줄에 한 명)</p>
-                      <Textarea
-                        value={proposalSections[0].text}
-                        onChange={(e) => updateProposalSection(0, e.target.value)}
-                        placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
-                        rows={4}
-                        className="font-mono text-xs"
-                      />
-                    </div>
+                    {(() => {
+                      const errs = proposalSections[0].text.trim() ? getInvalidLines(proposalSections[0].text, validatePersonLine) : [];
+                      return (
+                        <div className="col-span-2">
+                          <Label className="text-xs font-medium text-slate-700">👤 감리원</Label>
+                          <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야  (한 줄에 한 명)</p>
+                          <Textarea
+                            value={proposalSections[0].text}
+                            onChange={(e) => updateProposalSection(0, e.target.value)}
+                            placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
+                            rows={4}
+                            className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                          />
+                          {errs.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {errs.map(e => <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* 전문가 영역별 */}
-                    {proposalSections.slice(1).map((section, i) => (
-                      <div key={section.label}>
-                        <Label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</Label>
-                        <Textarea
-                          value={section.text}
-                          onChange={(e) => updateProposalSection(i + 1, e.target.value)}
-                          placeholder={`이름, 분야`}
-                          rows={3}
-                          className="font-mono text-xs mt-1"
-                        />
-                      </div>
-                    ))}
+                    {proposalSections.slice(1).map((section, i) => {
+                      const errs = section.text.trim() ? getInvalidLines(section.text, validatePersonLine) : [];
+                      return (
+                        <div key={section.label}>
+                          <Label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</Label>
+                          <Textarea
+                            value={section.text}
+                            onChange={(e) => updateProposalSection(i + 1, e.target.value)}
+                            placeholder="이름, 분야"
+                            rows={3}
+                            className={`font-mono text-xs mt-1 ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                          />
+                          {errs.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {errs.map(e => <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -663,22 +767,45 @@ export default function IndexPage() {
                       • <strong>강진욱:SW개발보안:4</strong> → 해당 단계 중 4일만 투입
                     </p>
                   </div>
-                  <Textarea
-                    value={phaseText}
-                    onChange={(e) => setPhaseText(e.target.value)}
-                    placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
-                    rows={8}
-                    className="font-mono text-xs"
-                  />
+                  {(() => {
+                    const errs = phaseText.trim() ? getInvalidLines(phaseText, validateAuditLine) : [];
+                    return (
+                      <>
+                        <Textarea
+                          value={phaseText}
+                          onChange={(e) => setPhaseText(e.target.value)}
+                          placeholder={`요구정의, 20250224, 20250228, 이현우:사업관리 및 품질보증, 차판용:응용시스템\n개략설계, 20250421, 20250430, 이현우:사업관리 및 품질보증, 강진욱:SW개발보안:4`}
+                          rows={8}
+                          className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                        />
+                        {errs.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {errs.map(e => <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewProject(false)}>취소</Button>
-            <Button onClick={handleCreateProject} disabled={creatingProject}>
+            <Button
+              onClick={handleCreateProject}
+              disabled={creatingProject || (() => {
+                if (newProject.status === '제안') {
+                  const schedErrs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
+                  const secErrs = proposalSections.flatMap(s => s.text.trim() ? getInvalidLines(s.text, validatePersonLine) : []);
+                  return schedErrs.length > 0 || secErrs.length > 0;
+                }
+                return phaseText.trim() ? getInvalidLines(phaseText, validateAuditLine).length > 0 : false;
+              })()}
+            >
               {creatingProject ? '생성 중...' : '생성'}
             </Button>
+
           </DialogFooter>
         </DialogContent>
       </Dialog>
