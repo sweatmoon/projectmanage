@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
+import { useUserRole } from '@/hooks/useUserRole';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
 
 
@@ -702,6 +703,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
   const [periodMonths, setPeriodMonths] = useState(3); // 3, 6, 12
   const [scale, setScale] = useState<ScaleMode>('week');
+  const { isViewer } = useUserRole();
   const [editTarget, setEditTarget] = useState<{ project: Project; phase: Phase } | null>(null);
   const [projectInfoTarget, setProjectInfoTarget] = useState<Project | null>(null);
   const [mdExpandDialog, setMdExpandDialog] = useState<{
@@ -988,6 +990,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   };
 
   const handleBadgeClick = (project: Project, phase: Phase) => {
+    if (isViewer) {
+      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
+      return;
+    }
     setEditTarget({ project: { ...project }, phase: { ...phase } });
   };
 
@@ -1761,7 +1767,9 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
               </div>
               <div className="px-5 py-3 border-t flex gap-2 justify-end">
                 <Button size="sm" variant="outline" onClick={() => { setProjectInfoTarget(null); toggleProjectExpand(proj.id); }}>단계 펼치기</Button>
-                <Button size="sm" onClick={() => { if (projPhaseList.length > 0) { setProjectInfoTarget(null); setEditTarget({ project: { ...proj }, phase: { ...projPhaseList[0] } }); } }} disabled={projPhaseList.length === 0}>단계 수정</Button>
+                {!isViewer && (
+                  <Button size="sm" onClick={() => { if (projPhaseList.length > 0) { setProjectInfoTarget(null); setEditTarget({ project: { ...proj }, phase: { ...projPhaseList[0] } }); } }} disabled={projPhaseList.length === 0}>단계 수정</Button>
+                )}
               </div>
             </div>
           </div>
