@@ -108,9 +108,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # ── viewer 읽기 전용 강제 ─────────────────────────────
         # viewer 역할은 GET/HEAD/OPTIONS 외 모든 쓰기 요청 차단
+        # 단, 아래 경로는 조회 목적으로 POST를 사용하므로 viewer에게도 허용
+        VIEWER_ALLOWED_POST_PATHS = {
+            "/api/v1/calendar/month",
+            "/api/v1/calendar/range",
+            "/api/v1/calendar/by_staffing_ids",
+            "/api/v1/calendar/entries_by_person_ids",
+        }
         if (
             request.state.user_role == "viewer"
             and request.method.upper() not in ("GET", "HEAD", "OPTIONS")
+            and path not in VIEWER_ALLOWED_POST_PATHS
         ):
             return JSONResponse(
                 status_code=403,
