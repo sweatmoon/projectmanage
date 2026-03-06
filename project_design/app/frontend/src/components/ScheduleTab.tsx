@@ -924,6 +924,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
   // Badge checkbox filter: checked project IDs -> sort those people first
   const [checkedProjectIds, setCheckedProjectIds] = useState<Set<number>>(new Set());
+  // 체크박스 변경 시점의 인력 순서를 고정 (셀 클릭으로 일정 변경 시 소팅 불변)
+  const [frozenPeopleOrder, setFrozenPeopleOrder] = useState<Array<number | string> | null>(null);
 
   // Badge hover highlight
   const [hoveredBadgePhaseId, setHoveredBadgePhaseId] = useState<number | null>(null);
@@ -1231,56 +1233,44 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return result;
   }, [localStaffing, people, localProjects]);
 
-  // People participating in checked projects who have schedule in the current month
+  // People participating in checked projects (staffing 배정 기반 — calendarEntries 미의존)
   const checkedProjectPeople = useMemo(() => {
     if (checkedProjectIds.size === 0) return new Set<number | string>();
 
-    // Collect staffing IDs belonging to checked projects
-    const checkedStaffingIds = new Set<number>();
-    const staffingToPersonKey = new Map<number, number | string>();
+    const personIds = new Set<number | string>();
     for (const s of localStaffing) {
       if (!checkedProjectIds.has(s.project_id)) continue;
-      // Check if this staffing's phase overlaps the current month
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
-      checkedStaffingIds.add(s.id);
       const personKey = s.person_id ? s.person_id : (s.person_name_text ? `ext_${s.person_name_text.trim()}` : null);
-      if (personKey) staffingToPersonKey.set(s.id, personKey);
-    }
-
-    // Only include people who have at least one calendar entry in the current month for checked projects
-    const personIds = new Set<number | string>();
-    for (const entry of calendarEntries) {
-      if (!entry.status) continue;
-      if (!checkedStaffingIds.has(entry.staffing_id)) continue;
-      const personKey = staffingToPersonKey.get(entry.staffing_id);
       if (personKey) personIds.add(personKey);
     }
-
-    // Also include people who have staffing assignments (even without entries yet) so they still appear grouped
-    // but prioritize those with actual entries by returning all assigned people
-    // If no one has entries, fall back to all assigned people
-    if (personIds.size === 0) {
-      for (const [, personKey] of staffingToPersonKey) {
-        personIds.add(personKey);
-      }
-    }
-
     return personIds;
-  }, [checkedProjectIds, localStaffing, phaseMapLocal, year, month, calendarEntries]);
+  }, [checkedProjectIds, localStaffing, phaseMapLocal, year, month]);
 
   // Sort: checked project people first (by phase sort_order), then others
+  // 결과를 frozenPeopleOrder 기준으로 안정 정렬 — 셀 클릭 시 순서 불변
   const allPeople: UnifiedPerson[] = useMemo(() => {
     if (checkedProjectIds.size === 0) return allPeopleBase;
 
-    // Build sort key for checked people based on earliest phase sort_order
+    // frozenPeopleOrder가 있으면 그 순서 그대로 사용 (셀 클릭 후 재정렬 방지)
+    if (frozenPeopleOrder !== null) {
+      const orderMap = new Map<number | string, number>();
+      frozenPeopleOrder.forEach((id, idx) => orderMap.set(id, idx));
+      return [...allPeopleBase].sort((a, b) => {
+        const ia = orderMap.get(a.id) ?? 99999;
+        const ib = orderMap.get(b.id) ?? 99999;
+        return ia - ib;
+      });
+    }
+
+    // 체크박스 변경 직후 최초 소팅 계산
     const personSortKey = new Map<number | string, number>();
     for (const s of localStaffing) {
       if (!checkedProjectIds.has(s.project_id)) continue;
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph) continue;
       const teamInfo = getTeamInfo(s.field);
-      // Sort key: team group * 1000 + team order * 100 + phase sort_order
       const key = teamInfo.sortGroup * 1000 + teamInfo.sortOrder * 100 + ph.sort_order;
       const personKey = s.person_id ? s.person_id : `ext_${(s.person_name_text || '').trim()}`;
       const existing = personSortKey.get(personKey);
@@ -1299,7 +1289,18 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     });
 
     return [...checked, ...unchecked];
-  }, [allPeopleBase, checkedProjectIds, checkedProjectPeople, localStaffing, phaseMapLocal]);
+  }, [allPeopleBase, checkedProjectIds, checkedProjectPeople, localStaffing, phaseMapLocal, frozenPeopleOrder]);
+
+  // 체크박스 변경 직후 (frozenPeopleOrder === null) allPeople 순서를 고정
+  // 이후 셀 클릭으로 calendarEntries가 바뀌어도 순서가 유지됨
+  useEffect(() => {
+    if (checkedProjectIds.size > 0 && frozenPeopleOrder === null) {
+      setFrozenPeopleOrder(allPeople.map((p) => p.id));
+    }
+    if (checkedProjectIds.size === 0) {
+      setFrozenPeopleOrder(null);
+    }
+  }, [allPeople, checkedProjectIds, frozenPeopleOrder]);
 
   // Person staffings with badge (unified), sorted by project index ascending
   // Also assigns a fixed slotIndex to each item via interval graph coloring:
@@ -2158,6 +2159,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   };
 
   const toggleProjectCheck = (projectId: number) => {
+    // 체크박스 변경 시 frozenPeopleOrder 초기화 → 다음 렌더에서 새로 소팅 계산
+    setFrozenPeopleOrder(null);
     setCheckedProjectIds((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) next.delete(projectId);
