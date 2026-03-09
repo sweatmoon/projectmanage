@@ -433,74 +433,61 @@ export default function ProjectDetail() {
     }).filter(Boolean) as { line: number; msg: string }[];
   };
 
-  // 제안 모드 텍스트 편집 섹션 상태
+  // 제안 모드 인력 구조화 입력 상태
   const [proposalScheduleText, setProposalScheduleText] = useState('');
-  const [proposalSections, setProposalSections] = useState([
-    { label: '감리원', text: '' },
-    { label: '핵심기술', text: '' },
-    { label: '필수기술', text: '' },
-    { label: '보안진단', text: '' },
-    { label: '테스트', text: '' },
-  ]);
-  const updateProposalSection = (idx: number, text: string) => {
-    setProposalSections(prev => prev.map((s, i) => i === idx ? { ...s, text } : s));
+
+  // 인력 행 타입: 단계감리팀 or 전문가팀, 전문가팀이면 세부 카테고리 지정
+  type ProposalPersonRow = {
+    id: string;
+    name: string;
+    field: string;
+    team: '단계감리팀' | '전문가팀';
+    expertCategory: string; // 전문가팀일 때: 핵심기술/필수기술/보안진단/테스트
+  };
+  const AUDIT_FIELD_PRESETS = ['사업관리 및 품질보증', '응용시스템', '데이터베이스', '시스템구조 및 보안'];
+  const EXPERT_CATEGORIES = ['핵심기술', '필수기술', '보안진단', '테스트'];
+  const EXPERT_FIELD_DEFAULT: Record<string, string> = {
+    '핵심기술': '핵심기술', '필수기술': '필수기술', '보안진단': '보안진단', '테스트': '기능테스트',
   };
 
-  // 제안 입력을 기존 형식으로 변환
-  // buildProposalPhaseData:
-  // - 감리 일정 텍스트: "단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3, 이름C"
-  //   (이름만 있으면 전체 기간, 이름:숫자 면 MD 지정)
-  // - 섹션(감리원/전문가): 이름 → 분야 + category 매핑용
-  // → 출력: "단계명, YYYYMMDD, YYYYMMDD, 이름A:분야, 이름B:분야:3, 이름C:분야"
-  const buildProposalPhaseData = (scheduleText: string, sections: typeof proposalSections) => {
-    const sectionDefaultField: Record<string, string> = {
-      '감리원': '',
-      '핵심기술': '핵심기술',
-      '필수기술': '필수기술',
-      '보안진단': '보안진단',
-      '테스트': '기능테스트',
-    };
+  const makeRowId = () => Math.random().toString(36).slice(2);
+  const [proposalPersonRows, setProposalPersonRows] = useState<ProposalPersonRow[]>([]);
 
-    // 섹션에서 이름 → { field, category } 맵 구성
+  const addPersonRow = (team: '단계감리팀' | '전문가팀' = '단계감리팀') => {
+    setProposalPersonRows(prev => [...prev, {
+      id: makeRowId(), name: '', field: team === '단계감리팀' ? '' : '핵심기술',
+      team, expertCategory: team === '전문가팀' ? '핵심기술' : '',
+    }]);
+  };
+  const updatePersonRow = (id: string, patch: Partial<ProposalPersonRow>) => {
+    setProposalPersonRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  };
+  const removePersonRow = (id: string) => {
+    setProposalPersonRows(prev => prev.filter(r => r.id !== id));
+  };
+
+  // 구조화 rows → 기존 sectionMap / 텍스트 빌드
+  const buildProposalPhaseData = (scheduleText: string, rows: ProposalPersonRow[]) => {
+    // nameInfo: 이름 → { field, category }
     const nameInfo: Record<string, { field: string; category: string }> = {};
-    for (const section of sections) {
-      if (!section.text.trim()) continue;
-      const defaultField = sectionDefaultField[section.label] ?? section.label;
-      const category = section.label === '감리원' ? '단계감리팀' : section.label; // 세부 섹션명 보존
-      for (const line of section.text.split('\n')) {
-        const l = line.trim();
-        if (!l) continue;
-        let name = '', field = '';
-        if (l.includes(',')) {
-          [name, field] = l.split(',', 2).map(s => s.trim());
-        } else if (l.includes(':')) {
-          [name, field] = l.split(':', 2).map(s => s.trim());
-        } else {
-          name = l.trim();
-        }
-        if (!field) field = defaultField;
-        if (name) nameInfo[name] = { field, category };
-      }
+    for (const row of rows) {
+      if (!row.name.trim()) continue;
+      const category = row.team === '단계감리팀' ? '단계감리팀' : row.expertCategory || '핵심기술';
+      const field = row.field.trim() || (row.team === '단계감리팀' ? '' : EXPERT_FIELD_DEFAULT[row.expertCategory] || row.expertCategory);
+      nameInfo[row.name.trim()] = { field, category };
     }
 
-    // nameInfo에 있는 모든 인력을 sectionMap에 미리 등록 (일정 텍스트 미등장 인력 포함)
+    // sectionMap: 이름 → category
     const sectionMap: Record<string, string> = {};
-    for (const [name, info] of Object.entries(nameInfo)) {
-      sectionMap[name] = info.category;
-    }
+    for (const [name, info] of Object.entries(nameInfo)) sectionMap[name] = info.category;
 
-    // 감리 일정 텍스트 파싱: 이름 뒤에 분야 삽입, MD 유지
-    // MD 파싱 규칙 (예비조사:감리:시정조치확인 형식 지원):
-    //   이름          → MD 없음 (전체기간)
-    //   이름:5        → 감리일수 5일
-    //   이름:2:5      → 감리일수 5일 (두번째값)
-    //   이름:2:5:3    → 감리일수 5일 (세번째값 중 두번째=감리)
+    // MD 추출 헬퍼
     const extractMd = (colonParts: string[]): string => {
       const nums = colonParts.slice(1).map(s => s.trim());
       if (nums.length === 0) return '';
-      if (nums.length === 1) return /^\d+$/.test(nums[0]) ? nums[0] : ''; // 이름:5
-      if (nums.length === 2) return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리
-      return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리:시정 → 감리(두번째)
+      if (nums.length === 1) return /^\d+$/.test(nums[0]) ? nums[0] : '';
+      if (nums.length === 2) return /^\d+$/.test(nums[1]) ? nums[1] : '';
+      return /^\d+$/.test(nums[1]) ? nums[1] : '';
     };
 
     const text = scheduleText.trim().split('\n').map(line => {
@@ -523,30 +510,22 @@ export default function ProjectDetail() {
       }).filter(Boolean);
       return [...header, ...people].join(', ');
     }).filter(Boolean).join('\n');
+
     return { text, sectionMap };
   };
 
-  // parseTextToProposalForm:
-  // - 역파싱: "단계명, YYYYMMDD, YYYYMMDD, 이름A:분야, 이름B:분야:3" →
-  //   scheduleText: "단계명, YYYYMMDD, YYYYMMDD, 이름A, 이름B:3" (분야 제거, MD 유지)
-  //   sections: 이름, 분야 (category 기반 섹션 배치)
-  const parseTextToProposalForm = (text: string, categoryMap?: Record<string, string>) => {
-    const defaultFieldToSection: Record<string, string> = {
-      '핵심기술': '핵심기술',
-      '필수기술': '필수기술',
-      '보안진단': '보안진단',
-      '기능테스트': '테스트',
+  // 역파싱: 텍스트 + categoryMap → proposalPersonRows + scheduleText
+  const parseTextToProposalRows = (text: string, categoryMap?: Record<string, string>): {
+    scheduleText: string; rows: ProposalPersonRow[];
+  } => {
+    const defaultFieldToExpertCat: Record<string, string> = {
+      '핵심기술': '핵심기술', '필수기술': '필수기술', '보안진단': '보안진단', '기능테스트': '테스트',
     };
 
-    const sectionPeople: Record<string, Set<string>> = {
-      '감리원': new Set(),
-      '핵심기술': new Set(),
-      '필수기술': new Set(),
-      '보안진단': new Set(),
-      '테스트': new Set(),
-    };
     const nameToField: Record<string, string> = {};
+    const nameToCategory: Record<string, string> = {};
     const scheduleLines: string[] = [];
+    const seenNames = new Set<string>();
 
     for (const line of text.trim().split('\n')) {
       const l = line.trim();
@@ -562,58 +541,40 @@ export default function ProjectDetail() {
         const second = ep[1]?.trim() || '';
         const third = ep[2]?.trim() || '';
         let field = '', mdStr = '';
-        if (/^\d+$/.test(second)) {
-          mdStr = second; // "이름:숫자"
-        } else if (second) {
-          field = second; // "이름:분야" or "이름:분야:숫자"
-          if (/^\d+$/.test(third)) mdStr = third;
-        }
+        if (/^\d+$/.test(second)) { mdStr = second; }
+        else if (second) { field = second; if (/^\d+$/.test(third)) mdStr = third; }
         if (field) nameToField[name] = field;
-
-        // 섹션 배정 (중복 방지: 전체 라인 걸쳐 한 번만)
-        if (!Object.values(sectionPeople).some(s => s.has(name))) {
-          let targetSection: string;
-          if (categoryMap && categoryMap[name]) {
-            const cat = categoryMap[name];
-            if (cat === '단계감리팀' || cat === '감리팀') {
-              targetSection = '감리원';
-            } else if (sectionPeople[cat] !== undefined) {
-              // category가 세부 섹션명과 일치하면 그대로 사용 (핵심기술, 필수기술, 보안진단, 테스트)
-              targetSection = cat;
-            } else {
-              // fallback: field 패턴 또는 핵심기술
-              targetSection = defaultFieldToSection[field] || '핵심기술';
-            }
-          } else {
-            targetSection = defaultFieldToSection[field] || '감리원';
+        if (!seenNames.has(name)) {
+          seenNames.add(name);
+          // category 결정
+          let cat = categoryMap?.[name] || '';
+          if (!cat) {
+            const ti = getTeamInfo(field);
+            cat = ti.group === '단계감리팀' ? '단계감리팀' : (defaultFieldToExpertCat[field] ? defaultFieldToExpertCat[field] : '핵심기술');
           }
-          sectionPeople[targetSection].add(name);
+          nameToCategory[name] = cat;
         }
-
-        // scheduleText용: 이름만 or 이름:MD (분야 제거)
         linePeople.push(mdStr ? `${name}:${mdStr}` : name);
       }
       scheduleLines.push([parts[0], parts[1], parts[2], ...linePeople].join(', '));
     }
 
-    // 섹션 텍스트: "이름, 분야" (분야 있으면)
-    const makeSectionText = (names: Set<string>, defaultField: string) =>
-      [...names].map(name => {
-        const field = nameToField[name] || defaultField;
-        return field ? `${name}, ${field}` : name;
-      }).join('\n');
+    const rows: ProposalPersonRow[] = [...seenNames].map(name => {
+      const field = nameToField[name] || '';
+      const cat = nameToCategory[name] || '단계감리팀';
+      const isAudit = cat === '단계감리팀' || cat === '감리팀';
+      const expertCat = isAudit ? '' : (EXPERT_CATEGORIES.includes(cat) ? cat : '핵심기술');
+      return {
+        id: makeRowId(), name, field,
+        team: isAudit ? '단계감리팀' : '전문가팀',
+        expertCategory: expertCat,
+      };
+    });
 
-    return {
-      scheduleText: scheduleLines.join('\n'),
-      sections: [
-        { label: '감리원', text: makeSectionText(sectionPeople['감리원'], '') },
-        { label: '핵심기술', text: makeSectionText(sectionPeople['핵심기술'], '핵심기술') },
-        { label: '필수기술', text: makeSectionText(sectionPeople['필수기술'], '필수기술') },
-        { label: '보안진단', text: makeSectionText(sectionPeople['보안진단'], '보안진단') },
-        { label: '테스트', text: makeSectionText(sectionPeople['테스트'], '기능테스트') },
-      ],
-    };
+    return { scheduleText: scheduleLines.join('\n'), rows };
   };
+
+  // 기존 호환성 주석 (proposalSections 완전 제거됨)
 
   // Inline MD editing
   const [editingMd, setEditingMd] = useState<{ staffingId: number; value: string } | null>(null);
@@ -1204,12 +1165,12 @@ export default function ProjectDetail() {
       });
       const text = res?.text || '';
       setTextEditContent(text);
-      // 제안 모드이면 폼으로 역파싱 (section_map 활용으로 정확한 섹션 복원)
+      // 제안 모드이면 구조화 rows로 역파싱
       if (project?.status === '제안' && text) {
         const categoryMap: Record<string, string> = res?.section_map || {};
-        const parsed = parseTextToProposalForm(text, categoryMap);
+        const parsed = parseTextToProposalRows(text, categoryMap);
         setProposalScheduleText(parsed.scheduleText);
-        setProposalSections(parsed.sections);
+        setProposalPersonRows(parsed.rows);
       }
     } catch (err) {
       console.error(err);
@@ -1224,7 +1185,7 @@ export default function ProjectDetail() {
     // 제안 모드: proposalScheduleText + sections → 변환
     const isProposal = project?.status === '제안';
     const proposalData = isProposal
-      ? buildProposalPhaseData(proposalScheduleText, proposalSections)
+      ? buildProposalPhaseData(proposalScheduleText, proposalPersonRows)
       : null;
     const finalText = isProposal
       ? (proposalData?.text ?? '')
@@ -1252,13 +1213,7 @@ export default function ProjectDetail() {
       setShowTextEdit(false);
       setTextEditContent('');
       setProposalScheduleText('');
-      setProposalSections([
-        { label: '감리원', text: '' },
-        { label: '핵심기술', text: '' },
-        { label: '필수기술', text: '' },
-        { label: '보안진단', text: '' },
-        { label: '테스트', text: '' },
-      ]);
+      setProposalPersonRows([]);
       fetchAll();
     } catch (err) {
       console.error(err);
@@ -1914,53 +1869,120 @@ export default function ProjectDetail() {
                       </div>
                     );
                   })()}
-                  {/* 인력 섹션 */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      const errs = proposalSections[0].text.trim() ? getInvalidLines(proposalSections[0].text, validatePersonLine) : [];
-                      return (
-                        <div className="col-span-2">
-                          <label className="text-xs font-medium text-slate-700">👤 감리원</label>
-                          <p className="text-[10px] text-slate-500 mb-1">형식: 이름, 분야</p>
-                          <Textarea
-                            value={proposalSections[0].text}
-                            onChange={(e) => updateProposalSection(0, e.target.value)}
-                            placeholder={`강혁, 사업관리 및 품질보증\n김현선, 응용시스템`}
-                            rows={4}
-                            className={`font-mono text-xs ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
-                          />
-                          {errs.length > 0 && (
-                            <div className="mt-1 space-y-0.5">
-                              {errs.map(e => (
-                                <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {proposalSections.slice(1).map((section, i) => {
-                      const errs = section.text.trim() ? getInvalidLines(section.text, validatePersonLine) : [];
-                      return (
-                        <div key={section.label}>
-                          <label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</label>
-                          <Textarea
-                            value={section.text}
-                            onChange={(e) => updateProposalSection(i + 1, e.target.value)}
-                            placeholder="이름, 분야"
-                            rows={3}
-                            className={`font-mono text-xs mt-1 ${errs.length > 0 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
-                          />
-                          {errs.length > 0 && (
-                            <div className="mt-1 space-y-0.5">
-                              {errs.map(e => (
-                                <p key={e.line} className="text-[10px] text-red-600">⚠ {e.line}행: {e.msg}</p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  {/* 인력 구조화 입력 */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-slate-700">👤 투입 인력</label>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                          onClick={() => addPersonRow('단계감리팀')}
+                        >+ 단계감리팀</button>
+                        <button
+                          type="button"
+                          className="text-[10px] px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                          onClick={() => addPersonRow('전문가팀')}
+                        >+ 전문가팀</button>
+                      </div>
+                    </div>
+                    {proposalPersonRows.length === 0 && (
+                      <p className="text-[10px] text-slate-400 italic py-1">위 버튼으로 인력을 추가하세요.</p>
+                    )}
+                    {/* 단계감리팀 그룹 */}
+                    {proposalPersonRows.some(r => r.team === '단계감리팀') && (
+                      <div className="border border-blue-200 rounded-md p-2 bg-blue-50/40 space-y-1.5">
+                        <p className="text-[10px] font-bold text-blue-700">📋 단계감리팀</p>
+                        {proposalPersonRows.filter(r => r.team === '단계감리팀').map(row => (
+                          <div key={row.id} className="flex items-center gap-1.5">
+                            <Input
+                              value={row.name}
+                              onChange={e => updatePersonRow(row.id, { name: e.target.value })}
+                              placeholder="이름"
+                              className="h-6 text-xs flex-1 min-w-0"
+                            />
+                            <select
+                              value={AUDIT_FIELD_PRESETS.includes(row.field) ? row.field : (row.field ? '__custom__' : '')}
+                              onChange={e => {
+                                if (e.target.value !== '__custom__') updatePersonRow(row.id, { field: e.target.value });
+                              }}
+                              className="h-6 text-[11px] border border-input rounded px-1 bg-white flex-shrink-0"
+                              style={{ minWidth: 130 }}
+                            >
+                              <option value="">분야 선택</option>
+                              {AUDIT_FIELD_PRESETS.map(f => <option key={f} value={f}>{f}</option>)}
+                              <option value="__custom__">직접 입력...</option>
+                            </select>
+                            {(!AUDIT_FIELD_PRESETS.includes(row.field)) && (
+                              <Input
+                                value={row.field}
+                                onChange={e => updatePersonRow(row.id, { field: e.target.value })}
+                                placeholder="분야 직접 입력"
+                                className="h-6 text-xs w-24 flex-shrink-0"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              title="전문가팀으로 변경"
+                              className="text-[9px] px-1 py-0.5 rounded bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 flex-shrink-0"
+                              onClick={() => updatePersonRow(row.id, { team: '전문가팀', expertCategory: '핵심기술', field: '핵심기술' })}
+                            >→전문가</button>
+                            <button
+                              type="button"
+                              className="text-[10px] text-slate-400 hover:text-red-500 flex-shrink-0"
+                              onClick={() => removePersonRow(row.id)}
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* 전문가팀 그룹 */}
+                    {proposalPersonRows.some(r => r.team === '전문가팀') && (
+                      <div className="border border-green-200 rounded-md p-2 bg-green-50/40 space-y-1.5">
+                        <p className="text-[10px] font-bold text-green-700">🔧 전문가팀</p>
+                        {proposalPersonRows.filter(r => r.team === '전문가팀').map(row => (
+                          <div key={row.id} className="flex items-center gap-1.5">
+                            <Input
+                              value={row.name}
+                              onChange={e => updatePersonRow(row.id, { name: e.target.value })}
+                              placeholder="이름"
+                              className="h-6 text-xs flex-[1] min-w-0"
+                            />
+                            <select
+                              value={row.expertCategory}
+                              onChange={e => {
+                                const cat = e.target.value;
+                                updatePersonRow(row.id, {
+                                  expertCategory: cat,
+                                  field: EXPERT_FIELD_DEFAULT[cat] || cat,
+                                });
+                              }}
+                              className="h-6 text-[11px] border border-input rounded px-1 bg-white flex-shrink-0"
+                              style={{ minWidth: 80 }}
+                            >
+                              {EXPERT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <Input
+                              value={row.field}
+                              onChange={e => updatePersonRow(row.id, { field: e.target.value })}
+                              placeholder="분야"
+                              className="h-6 text-xs w-24 flex-shrink-0"
+                            />
+                            <button
+                              type="button"
+                              title="단계감리팀으로 변경"
+                              className="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 flex-shrink-0"
+                              onClick={() => updatePersonRow(row.id, { team: '단계감리팀', expertCategory: '', field: '' })}
+                            >→감리팀</button>
+                            <button
+                              type="button"
+                              className="text-[10px] text-slate-400 hover:text-red-500 flex-shrink-0"
+                              onClick={() => removePersonRow(row.id)}
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -2010,8 +2032,7 @@ export default function ProjectDetail() {
                 disabled={textEditSaving || textEditLoading || (() => {
                   if (project?.status === '제안') {
                     const schedErrs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
-                    const secErrs = proposalSections.flatMap(s => s.text.trim() ? getInvalidLines(s.text, validatePersonLine) : []);
-                    return schedErrs.length > 0 || secErrs.length > 0;
+                    return schedErrs.length > 0;
                   } else {
                     return textEditContent.trim() ? getInvalidLines(textEditContent, validateAuditLine).length > 0 : false;
                   }
