@@ -415,11 +415,16 @@ export default function ProjectDetail() {
     return null;
   };
 
-  const validatePersonLine = (line: string): string | null => {
+  // allowNameOnly: 전문가팀 섹션처럼 이름만 입력해도 되는 경우 true
+  const validatePersonLine = (line: string, allowNameOnly = false): string | null => {
     const l = line.trim();
     if (!l) return null;
-    const sep = l.includes(',') ? ',' : l.includes(':') ? ':' : null;
-    if (!sep) return `형식 오류: "${l}" → 이름, 분야 형식이어야 합니다`;
+    // 구분자 없이 이름만 있는 경우
+    if (!l.includes(',') && !l.includes(':')) {
+      if (allowNameOnly) return null; // 이름만 허용
+      return `형식 오류: "${l}" → 이름, 분야 형식이어야 합니다`;
+    }
+    const sep = l.includes(',') ? ',' : ':';
     const [name, field] = l.split(sep, 2).map(s => s.trim());
     if (!name)  return `이름이 비어있습니다`;
     if (!field) return `분야가 비어있습니다: "${l}"`;
@@ -1940,7 +1945,7 @@ export default function ProjectDetail() {
                       );
                     })()}
                     {proposalSections.slice(1).map((section, i) => {
-                      const errs = section.text.trim() ? getInvalidLines(section.text, validatePersonLine) : [];
+                      const errs = section.text.trim() ? getInvalidLines(section.text, (line) => validatePersonLine(line, true)) : [];
                       return (
                         <div key={section.label}>
                           <label className="text-xs font-medium text-slate-700">🔹 전문가 - {section.label}</label>
@@ -2010,7 +2015,7 @@ export default function ProjectDetail() {
                 disabled={textEditSaving || textEditLoading || (() => {
                   if (project?.status === '제안') {
                     const schedErrs = proposalScheduleText.trim() ? getInvalidLines(proposalScheduleText, validateProposalScheduleLine) : [];
-                    const secErrs = proposalSections.flatMap(s => s.text.trim() ? getInvalidLines(s.text, validatePersonLine) : []);
+                    const secErrs = proposalSections.flatMap((s, si) => s.text.trim() ? getInvalidLines(s.text, (line) => validatePersonLine(line, si > 0)) : []);
                     return schedErrs.length > 0 || secErrs.length > 0;
                   } else {
                     return textEditContent.trim() ? getInvalidLines(textEditContent, validateAuditLine).length > 0 : false;
