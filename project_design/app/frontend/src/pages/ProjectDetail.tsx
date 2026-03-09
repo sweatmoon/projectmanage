@@ -771,8 +771,13 @@ export default function ProjectDetail() {
       const personName = s.person_id
         ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || ''
         : s.person_name_text || '';
+      // DB category 우선 사용, 없으면 field 기반 분류
+      const dbCategory = s.category;
       const teamInfo = getTeamInfo(s.field);
-      const category = teamInfo.group;
+      const category = (dbCategory === '단계감리팀' || dbCategory === '전문가팀')
+        ? dbCategory
+        : (dbCategory === '감리팀' ? '단계감리팀' : teamInfo.group);
+      const sortGroup = category === '단계감리팀' ? 0 : 1;
       const rowKey = `${category}||${s.field}||${s.sub_field}||${personName}`;
 
       if (!rowMap.has(rowKey)) {
@@ -786,8 +791,8 @@ export default function ProjectDetail() {
           personId: s.person_id,
           phaseMds: {},
           totalMd: 0,
-          sortGroup: teamInfo.sortGroup,
-          sortOrder: teamInfo.sortGroup === 0 ? teamInfo.sortOrder : expertOrder,
+          sortGroup,
+          sortOrder: sortGroup === 0 ? teamInfo.sortOrder : expertOrder,
         });
       }
       const row = rowMap.get(rowKey)!;
@@ -1070,6 +1075,35 @@ export default function ProjectDetail() {
       handleMdSave();
     } else if (e.key === 'Escape') {
       handleMdCancel();
+    }
+  };
+
+  const [savingCategory, setSavingCategory] = useState(false);
+  const handleCategoryChange = async (row: StaffingRowData) => {
+    if (isLocked || !canWrite) return;
+    const newCategory = row.category === '단계감리팀' ? '전문가팀' : '단계감리팀';
+    setSavingCategory(true);
+    try {
+      const staffingIds = Object.values(row.phaseMds).map((v) => v.staffingId);
+      await Promise.all(
+        staffingIds.map((sid) =>
+          client.entities.staffing.update({
+            id: String(sid),
+            data: { category: newCategory, updated_at: new Date().toISOString() },
+          })
+        )
+      );
+      setStaffingList((prev) =>
+        prev.map((s) =>
+          staffingIds.includes(s.id) ? { ...s, category: newCategory } : s
+        )
+      );
+      toast.success(`팀 구분이 ${newCategory}로 변경되었습니다.`);
+    } catch (err) {
+      console.error(err);
+      toast.error('팀 구분 변경에 실패했습니다.');
+    } finally {
+      setSavingCategory(false);
     }
   };
 
@@ -1564,13 +1598,29 @@ export default function ProjectDetail() {
                           )}
                           <TableRow key={row.rowKey}>
                             <TableCell className="sticky left-0 bg-white z-10 text-xs font-medium">
-                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
-                                row.sortGroup === 0
-                                  ? 'border-blue-300 text-blue-700 bg-blue-50'
-                                  : 'border-green-300 text-green-700 bg-green-50'
-                              }`}>
-                                {row.category}
-                              </Badge>
+                              {canWrite && !isLocked ? (
+                                <button
+                                  type="button"
+                                  disabled={savingCategory}
+                                  title={`클릭하여 ${row.sortGroup === 0 ? '전문가팀' : '단계감리팀'}으로 변경`}
+                                  onClick={() => handleCategoryChange(row)}
+                                  className={`text-[10px] px-1.5 py-0 rounded-full border font-medium transition-colors hover:opacity-70 ${
+                                    row.sortGroup === 0
+                                      ? 'border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100'
+                                      : 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100'
+                                  }`}
+                                >
+                                  {row.category}
+                                </button>
+                              ) : (
+                                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                                  row.sortGroup === 0
+                                    ? 'border-blue-300 text-blue-700 bg-blue-50'
+                                    : 'border-green-300 text-green-700 bg-green-50'
+                                }`}>
+                                  {row.category}
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="text-xs">{row.field}</TableCell>
                             <TableCell className="text-xs font-medium relative">
