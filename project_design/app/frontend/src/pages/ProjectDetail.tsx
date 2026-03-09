@@ -812,7 +812,14 @@ export default function ProjectDetail() {
         ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || ''
         : s.person_name_text || '';
       const teamInfo = getTeamInfo(s.field);
-      const category = teamInfo.group;
+      // DB category 우선 사용: 단계감리팀/전문가팀/감리팀 → 정규화
+      const dbCat = s.category;
+      const category =
+        dbCat === '단계감리팀' || dbCat === '감리팀' ? '단계감리팀'
+        : (dbCat === '전문가팀' || dbCat === '핵심기술' || dbCat === '필수기술' || dbCat === '보안진단' || dbCat === '테스트')
+          ? dbCat
+          : teamInfo.group;
+      const sortGroup = category === '단계감리팀' ? 0 : 1;
       const rowKey = `${category}||${s.field}||${s.sub_field}||${personName}`;
 
       if (!rowMap.has(rowKey)) {
@@ -826,8 +833,8 @@ export default function ProjectDetail() {
           personId: s.person_id,
           phaseMds: {},
           totalMd: 0,
-          sortGroup: teamInfo.sortGroup,
-          sortOrder: teamInfo.sortGroup === 0 ? teamInfo.sortOrder : expertOrder,
+          sortGroup,
+          sortOrder: sortGroup === 0 ? teamInfo.sortOrder : expertOrder,
         });
       }
       const row = rowMap.get(rowKey)!;
