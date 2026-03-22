@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck, HardHat } from 'lucide-react';
 import { countBusinessDays as countBizDaysHoliday, isNonWorkday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
@@ -336,6 +336,15 @@ export default function ProjectDetail() {
   const [people, setPeople] = useState<People[]>([]);
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ── 모자(대체인력) 관련 state ──────────────────────────────────
+  interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
+  const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map()); // key: staffing_id
+  const [hatModalOpen, setHatModalOpen] = useState(false);
+  // hatModalTarget: 원장에서 열 때 rowKey 기준, 단계모달에서 열 때 phase_id 기준으로 staffingId 배열 전달
+  const [hatModalStaffingIds, setHatModalStaffingIds] = useState<number[]>([]);
+  const [hatDraft, setHatDraft] = useState<Map<number, string>>(new Map()); // key: staffing_id, value: 입력중인 이름
+  const [savingHat, setSavingHat] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Edit form
@@ -742,6 +751,20 @@ export default function ProjectDetail() {
       } else {
         setCalendarEntries([]);
       }
+
+      // hat(모자) 데이터 로드
+      try {
+        const hatRes = await client.apiCall.invoke({
+          url: `/api/v1/staffing-hat/by-project/${projectId}`,
+          method: 'GET',
+        });
+        const hats: HatRecord[] = hatRes || [];
+        const map = new Map<number, HatRecord>();
+        hats.forEach((h) => map.set(h.staffing_id, h));
+        setHatMap(map);
+      } catch {
+        setHatMap(new Map());
+      }
     } catch (err) {
       console.error(err);
       toast.error('데이터를 불러오는 중 오류가 발생했습니다.');
@@ -1146,6 +1169,78 @@ export default function ProjectDetail() {
       toast.error('담당자 변경에 실패했습니다.');
     } finally {
       setSavingPerson(false);
+    }
+  };
+
+  // ── 모자(Hat) 모달 열기 ─────────────────────────────────────
+  const openHatModal = (staffingIds: number[]) => {
+    const draft = new Map<number, string>();
+    staffingIds.forEach((sid) => {
+      draft.set(sid, hatMap.get(sid)?.actual_person_name || '');
+    });
+    setHatDraft(draft);
+    setHatModalStaffingIds(staffingIds);
+    setHatModalOpen(true);
+  };
+
+  // ── 모자 저장 ────────────────────────────────────────────────
+  const handleSaveHat = async () => {
+    setSavingHat(true);
+    try {
+      const toUpsert: { staffing_id: number; actual_person_name: string; actual_person_id: number | null }[] = [];
+      const toDelete: number[] = [];
+
+      hatModalStaffingIds.forEach((sid) => {
+        const name = (hatDraft.get(sid) || '').trim();
+        if (name) {
+          // 이름이 있으면 upsert
+          const matchedPerson = people.find((p) => p.person_name === name);
+          toUpsert.push({
+            staffing_id: sid,
+            actual_person_name: name,
+            actual_person_id: matchedPerson?.id ?? null,
+          });
+        } else if (hatMap.has(sid)) {
+          // 비워두면 해제
+          toDelete.push(sid);
+        }
+      });
+
+      // upsert
+      if (toUpsert.length > 0) {
+        const res = await client.apiCall.invoke({
+          url: '/api/v1/staffing-hat/batch',
+          method: 'POST',
+          data: toUpsert,
+        });
+        const newHats: HatRecord[] = res || [];
+        setHatMap((prev) => {
+          const next = new Map(prev);
+          newHats.forEach((h) => next.set(h.staffing_id, h));
+          return next;
+        });
+      }
+
+      // delete
+      for (const sid of toDelete) {
+        await client.apiCall.invoke({
+          url: `/api/v1/staffing-hat/by-staffing/${sid}`,
+          method: 'DELETE',
+        });
+        setHatMap((prev) => {
+          const next = new Map(prev);
+          next.delete(sid);
+          return next;
+        });
+      }
+
+      setHatModalOpen(false);
+      toast.success('모자(대체인력) 정보가 저장되었습니다.');
+    } catch (err) {
+      console.error(err);
+      toast.error('저장에 실패했습니다.');
+    } finally {
+      setSavingHat(false);
     }
   };
 
@@ -1621,6 +1716,22 @@ export default function ProjectDetail() {
                             </TableCell>
                             <TableCell className="text-xs">{row.field}</TableCell>
                             <TableCell className="text-xs font-medium relative">
+                              {/* 🎩 모자 버튼 — 해당 row의 모든 staffingId 전달 */}
+                              {!isLocked && (() => {
+                                const rowStaffingIds = Object.values(row.phaseMds).map((v) => v.staffingId);
+                                const hasHat = rowStaffingIds.some((sid) => hatMap.has(sid));
+                                return (
+                                  <button
+                                    onClick={() => openHatModal(rowStaffingIds)}
+                                    title={hasHat ? '모자(대체인력) 있음 — 클릭하여 수정' : '모자(대체인력) 씌우기'}
+                                    className={`absolute right-0 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-slate-100 transition-colors ${
+                                      hasHat ? 'text-orange-500' : 'text-slate-300 hover:text-slate-500'
+                                    }`}
+                                  >
+                                    <HardHat className="h-3.5 w-3.5" />
+                                  </button>
+                                );
+                              })()}
                               {(() => {
                                 // Find any staffing ID for this row to use for editing
                                 const firstStaffingId = Object.values(row.phaseMds)[0]?.staffingId;
@@ -2123,6 +2234,73 @@ export default function ProjectDetail() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* ── 🎩 모자(대체인력) 모달 ────────────────────────────────── */}
+        <Dialog open={hatModalOpen} onOpenChange={(o) => { if (!savingHat) setHatModalOpen(o); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <HardHat className="h-5 w-5 text-orange-500" />
+                대체인력(모자) 관리
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+              {hatModalStaffingIds.map((sid) => {
+                const staffing = staffingList.find((s) => s.id === sid);
+                if (!staffing) return null;
+                const phase = phases.find((p) => p.id === staffing.phase_id);
+                const phaseName = phase?.phase_name || `단계 ${staffing.phase_id}`;
+                const currentName = hatDraft.get(sid) || '';
+                const hasHat = !!currentName.trim();
+                return (
+                  <div key={sid} className="flex items-center gap-3">
+                    <div className="w-20 text-xs font-medium text-slate-600 shrink-0 truncate" title={phaseName}>
+                      {phaseName}
+                    </div>
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={currentName}
+                        onChange={(e) => setHatDraft((prev) => new Map(prev).set(sid, e.target.value))}
+                        placeholder="대체 투입자 이름 (비우면 해제)"
+                        className={`w-full border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 ${
+                          hasHat ? 'border-orange-300 bg-orange-50' : 'border-slate-200'
+                        }`}
+                        list={`hat-datalist-${sid}`}
+                      />
+                      <datalist id={`hat-datalist-${sid}`}>
+                        {people.map((p) => (
+                          <option key={p.id} value={p.person_name} />
+                        ))}
+                      </datalist>
+                    </div>
+                    {hasHat && (
+                      <button
+                        onClick={() => setHatDraft((prev) => new Map(prev).set(sid, ''))}
+                        className="text-slate-400 hover:text-red-500 shrink-0"
+                        title="해제"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-slate-400 pt-1">
+                💡 이름을 비워두면 해당 단계의 모자가 해제됩니다. 시스템 등록 인력 외 외부인력도 직접 입력 가능합니다.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setHatModalOpen(false)} disabled={savingHat}>
+                취소
+              </Button>
+              <Button onClick={handleSaveHat} disabled={savingHat} className="bg-orange-500 hover:bg-orange-600 text-white">
+                {savingHat ? '저장 중...' : '저장'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </TooltipProvider>
   );

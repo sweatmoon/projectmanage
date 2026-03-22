@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock, HardHat } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
@@ -289,6 +289,8 @@ function calcBizDays(startStr: string, endStr: string): number {
   return calcBizDaysHoliday(startStr, endStr);
 }
 
+interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
+
 interface EditModalProps {
   project: Project;
   phase: Phase;
@@ -298,6 +300,9 @@ interface EditModalProps {
   allPhases: Phase[];
   // person_id별 날짜 Set (프로젝트별): 실제 엔트리 기반 중복 체크용
   personDatesByProject: Map<number, Map<number, Set<string>>>;
+  hatMap: Map<number, HatRecord>; // key: staffing_id
+  onHatSave: (staffingId: number, actualName: string, actualPersonId: number | null) => Promise<void>;
+  onHatDelete: (staffingId: number) => Promise<void>;
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
 }
@@ -515,7 +520,32 @@ function PersonCombobox({
   );
 }
 
-function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, onClose, onSave }: EditModalProps) {
+function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, hatMap, onHatSave, onHatDelete, onClose, onSave }: EditModalProps) {
+  // 🎩 모자 인라인 편집 state
+  const [hatEditId, setHatEditId] = useState<number | null>(null); // staffing_id
+  const [hatDraftName, setHatDraftName] = useState('');
+  const [savingHatInline, setSavingHatInline] = useState(false);
+
+  const openHatInline = (staffingId: number) => {
+    setHatDraftName(hatMap.get(staffingId)?.actual_person_name || '');
+    setHatEditId(staffingId);
+  };
+
+  const saveHatInline = async (staffingId: number) => {
+    setSavingHatInline(true);
+    try {
+      const name = hatDraftName.trim();
+      if (name) {
+        const matched = allPeople.find((p) => p.person_name === name);
+        await onHatSave(staffingId, name, matched?.id ?? null);
+      } else {
+        await onHatDelete(staffingId);
+      }
+      setHatEditId(null);
+    } finally {
+      setSavingHatInline(false);
+    }
+  };
   const [projectName, setProjectName] = useState(project.project_name);
   const [organization, setOrganization] = useState(project.organization);
   const [projectStatus, setProjectStatus] = useState(project.status);
@@ -833,14 +863,58 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                                 <span className="text-[10px]">↩</span>
                               </button>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteStaffing(s.id)}
-                                className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0"
-                                title="투입인력 삭제"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
+                              <>
+                                {/* 🎩 모자 버튼 */}
+                                {hatEditId === s.id ? (
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <input
+                                      type="text"
+                                      value={hatDraftName}
+                                      onChange={(e) => setHatDraftName(e.target.value)}
+                                      placeholder="대체인력 이름"
+                                      className="w-[90px] h-6 px-1.5 text-[10px] border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                      list={`hat-dl-${s.id}`}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') saveHatInline(s.id); if (e.key === 'Escape') setHatEditId(null); }}
+                                      autoFocus
+                                    />
+                                    <datalist id={`hat-dl-${s.id}`}>
+                                      {allPeople.map((p) => <option key={p.id} value={p.person_name} />)}
+                                    </datalist>
+                                    <button
+                                      type="button"
+                                      onClick={() => saveHatInline(s.id)}
+                                      disabled={savingHatInline}
+                                      className="text-[10px] px-1.5 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                                    >
+                                      {savingHatInline ? '...' : '저장'}
+                                    </button>
+                                    <button type="button" onClick={() => setHatEditId(null)} className="text-slate-400 hover:text-slate-600">
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => openHatInline(s.id)}
+                                    title={hatMap.has(s.id) ? `🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정` : '모자(대체인력) 씌우기'}
+                                    className={`p-1 rounded flex-shrink-0 transition-colors ${
+                                      hatMap.has(s.id)
+                                        ? 'text-orange-500 hover:bg-orange-50'
+                                        : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <HardHat className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteStaffing(s.id)}
+                                  className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0"
+                                  title="투입인력 삭제"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </>
                             )}
                           </div>
                         );
@@ -900,6 +974,53 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [localProjects, setLocalProjects] = useState<Project[]>(projects);
   const [localPhases, setLocalPhases] = useState<Phase[]>(phases);
   const [localStaffing, setLocalStaffing] = useState<StaffingRow[]>(staffing);
+
+  // ── 모자(Hat) state ─────────────────────────────────────────
+  const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map()); // key: staffing_id
+
+  // staffing 변경 시 hat 데이터 로드
+  useEffect(() => {
+    const ids = staffing.map((s) => s.id);
+    if (ids.length === 0) { setHatMap(new Map()); return; }
+    // 프로젝트 목록에서 project_id 수집 후 hat 로드
+    const projectIds = [...new Set(staffing.map((s) => s.project_id))];
+    Promise.all(
+      projectIds.map((pid) =>
+        client.apiCall.invoke({ url: `/api/v1/staffing-hat/by-project/${pid}`, method: 'GET' })
+          .catch(() => [])
+      )
+    ).then((results) => {
+      const map = new Map<number, HatRecord>();
+      results.flat().forEach((h: HatRecord) => map.set(h.staffing_id, h));
+      setHatMap(map);
+    });
+  }, [staffing]);
+
+  const handleHatSave = useCallback(async (staffingId: number, actualName: string, actualPersonId: number | null) => {
+    const res = await client.apiCall.invoke({
+      url: '/api/v1/staffing-hat/batch',
+      method: 'POST',
+      data: [{ staffing_id: staffingId, actual_person_name: actualName, actual_person_id: actualPersonId }],
+    });
+    const hats: HatRecord[] = res || [];
+    setHatMap((prev) => {
+      const next = new Map(prev);
+      hats.forEach((h) => next.set(h.staffing_id, h));
+      return next;
+    });
+  }, []);
+
+  const handleHatDelete = useCallback(async (staffingId: number) => {
+    await client.apiCall.invoke({
+      url: `/api/v1/staffing-hat/by-staffing/${staffingId}`,
+      method: 'DELETE',
+    });
+    setHatMap((prev) => {
+      const next = new Map(prev);
+      next.delete(staffingId);
+      return next;
+    });
+  }, []);
 
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(false);
@@ -2904,6 +3025,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           allStaffing={localStaffing}
           allPhases={localPhases}
           personDatesByProject={personDatesByProject}
+          hatMap={hatMap}
+          onHatSave={handleHatSave}
+          onHatDelete={handleHatDelete}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
         />

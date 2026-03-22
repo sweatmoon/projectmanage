@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GanttChart, X, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GanttChart, X, Loader2, HardHat } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { client } from '@/lib/api';
@@ -425,6 +425,8 @@ function PersonCombobox({
   );
 }
 
+interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
+
 /* ───────── EditModal ───────── */
 function EditModal({
   project,
@@ -434,6 +436,9 @@ function EditModal({
   allStaffing,
   allPhases,
   personDatesByProject,
+  hatMap,
+  onHatSave,
+  onHatDelete,
   onClose,
   onSave,
 }: {
@@ -444,9 +449,37 @@ function EditModal({
   allStaffing: StaffingRow[];
   allPhases: Phase[];
   personDatesByProject: Map<number, Map<number, Set<string>>>;
+  hatMap: Map<number, HatRecord>;
+  onHatSave: (staffingId: number, actualName: string, actualPersonId: number | null) => Promise<void>;
+  onHatDelete: (staffingId: number) => Promise<void>;
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
 }) {
+  // 🎩 모자 인라인 편집 state
+  const [hatEditId, setHatEditId] = useState<number | null>(null);
+  const [hatDraftName, setHatDraftName] = useState('');
+  const [savingHatInline, setSavingHatInline] = useState(false);
+
+  const openHatInline = (staffingId: number) => {
+    setHatDraftName(hatMap.get(staffingId)?.actual_person_name || '');
+    setHatEditId(staffingId);
+  };
+
+  const saveHatInline = async (staffingId: number) => {
+    setSavingHatInline(true);
+    try {
+      const name = hatDraftName.trim();
+      if (name) {
+        const matched = allPeople.find((p) => p.person_name === name);
+        await onHatSave(staffingId, name, matched?.id ?? null);
+      } else {
+        await onHatDelete(staffingId);
+      }
+      setHatEditId(null);
+    } finally {
+      setSavingHatInline(false);
+    }
+  };
   const [projectName, setProjectName] = useState(project.project_name);
   const [organization, setOrganization] = useState(project.organization);
   const [projectStatus, setProjectStatus] = useState(project.status);
@@ -673,7 +706,38 @@ function EditModal({
                             {isDeleted ? (
                               <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.delete(s.id); return n; })} className="p-1 text-blue-500 hover:bg-blue-50 rounded flex-shrink-0" title="삭제 취소"><span className="text-[10px]">↩</span></button>
                             ) : (
-                              <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.add(s.id); return n; })} className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0" title="투입인력 삭제"><X className="h-3 w-3" /></button>
+                              <>
+                                {/* 🎩 모자 버튼 */}
+                                {hatEditId === s.id ? (
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <input
+                                      type="text"
+                                      value={hatDraftName}
+                                      onChange={(e) => setHatDraftName(e.target.value)}
+                                      placeholder="대체인력 이름"
+                                      className="w-[90px] h-6 px-1.5 text-[10px] border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                      list={`hat-dl-${s.id}`}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') saveHatInline(s.id); if (e.key === 'Escape') setHatEditId(null); }}
+                                      autoFocus
+                                    />
+                                    <datalist id={`hat-dl-${s.id}`}>
+                                      {allPeople.map((p) => <option key={p.id} value={p.person_name} />)}
+                                    </datalist>
+                                    <button type="button" onClick={() => saveHatInline(s.id)} disabled={savingHatInline}
+                                      className="text-[10px] px-1.5 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50">
+                                      {savingHatInline ? '...' : '저장'}
+                                    </button>
+                                    <button type="button" onClick={() => setHatEditId(null)} className="text-slate-400 hover:text-slate-600"><X className="h-3 w-3" /></button>
+                                  </div>
+                                ) : (
+                                  <button type="button" onClick={() => openHatInline(s.id)}
+                                    title={hatMap.has(s.id) ? `🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정` : '모자(대체인력) 씌우기'}
+                                    className={`p-1 rounded flex-shrink-0 transition-colors ${ hatMap.has(s.id) ? 'text-orange-500 hover:bg-orange-50' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'}`}>
+                                    <HardHat className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                                <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.add(s.id); return n; })} className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0" title="투입인력 삭제"><X className="h-3 w-3" /></button>
+                              </>
                             )}
                           </div>
                         );
@@ -719,6 +783,38 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   const [localProjects, setLocalProjects] = useState<Project[]>(projects);
   const [localPhases, setLocalPhases] = useState<Phase[]>(phases);
   const [localStaffing, setLocalStaffing] = useState<StaffingRow[]>(staffing);
+
+  // ── 모자(Hat) state ───────────────────────────────────
+  const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map());
+
+  useEffect(() => {
+    const projectIds = [...new Set(staffing.map((s) => s.project_id))];
+    if (projectIds.length === 0) { setHatMap(new Map()); return; }
+    Promise.all(
+      projectIds.map((pid) =>
+        client.apiCall.invoke({ url: `/api/v1/staffing-hat/by-project/${pid}`, method: 'GET' }).catch(() => [])
+      )
+    ).then((results) => {
+      const map = new Map<number, HatRecord>();
+      results.flat().forEach((h: HatRecord) => map.set(h.staffing_id, h));
+      setHatMap(map);
+    });
+  }, [staffing]);
+
+  const handleHatSave = useCallback(async (staffingId: number, actualName: string, actualPersonId: number | null) => {
+    const res = await client.apiCall.invoke({
+      url: '/api/v1/staffing-hat/batch',
+      method: 'POST',
+      data: [{ staffing_id: staffingId, actual_person_name: actualName, actual_person_id: actualPersonId }],
+    });
+    const hats: HatRecord[] = res || [];
+    setHatMap((prev) => { const next = new Map(prev); hats.forEach((h) => next.set(h.staffing_id, h)); return next; });
+  }, []);
+
+  const handleHatDelete = useCallback(async (staffingId: number) => {
+    await client.apiCall.invoke({ url: `/api/v1/staffing-hat/by-staffing/${staffingId}`, method: 'DELETE' });
+    setHatMap((prev) => { const next = new Map(prev); next.delete(staffingId); return next; });
+  }, []);
 
   useEffect(() => { setLocalProjects(projects); }, [projects]);
   useEffect(() => { setLocalPhases(phases); }, [phases]);
@@ -1786,6 +1882,9 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
           allStaffing={localStaffing}
           allPhases={localPhases}
           personDatesByProject={personDatesByProject}
+          hatMap={hatMap}
+          onHatSave={handleHatSave}
+          onHatDelete={handleHatDelete}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
         />
