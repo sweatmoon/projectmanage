@@ -3036,6 +3036,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                   key={`${p.id}-${d}-${si}`}
                                   className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'}`}
                                   style={{
+                                    position: 'relative', zIndex: 0,
                                     backgroundColor: isNonWorkSelected
                                       ? (cellData.isHoliday ? '#fee2e2' : '#f3f4f6')
                                       : cellData.badge.color.cell,
@@ -3075,6 +3076,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                   key={`${p.id}-${d}-${si}`}
                                   className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
                                   style={{
+                                    position: 'relative', zIndex: 0,
                                     backgroundColor: isHatCell
                                       ? (cellData.badge.color.available || '#f9fafb')
                                       : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
@@ -3108,6 +3110,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                 <td
                                   key={`${p.id}-${d}-${si}`}
                                   style={{
+                                    position: 'relative', zIndex: 0,
                                     backgroundColor: focusBg || (cellData.isHoliday ? '#fef2f2' : '#f1f5f9'),
                                     width: colWidth,
                                     height: rowHeight,
@@ -3123,6 +3126,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                               <td
                                 key={`${p.id}-${d}-${si}`}
                                 style={{
+                                  position: 'relative', zIndex: 0,
                                   backgroundColor: focusBg || (isHol ? '#fef2f2' : isWe ? '#f1f5f9' : '#ffffff'),
                                   width: colWidth,
                                   height: rowHeight,
