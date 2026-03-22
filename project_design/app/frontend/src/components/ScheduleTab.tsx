@@ -2286,7 +2286,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
   const handleCellClick = async (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => {
     if (isViewer) {
-      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
+      // 뷰어: 셀 클릭 시 해당 단계 투입인력 읽기전용 모달 열기
+      const proj = projectMap.get(badge.projectId);
+      const ph = phaseMapLocal.get(badge.phaseId);
+      if (proj && ph) {
+        setEditTarget({ project: { ...proj }, phase: { ...ph } });
+      }
       return;
     }
     if (scheduleIsLocked) {
