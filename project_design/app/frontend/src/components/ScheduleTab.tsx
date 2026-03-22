@@ -1365,7 +1365,7 @@ const DayRow = React.memo(function DayRow({
                 title={cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)}
               >
-                {isToggling ? '…' : isHatActualCell ? '🎩' : ''}
+                {isToggling ? '…' : ''}
               </td>
             );
           }
