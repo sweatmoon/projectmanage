@@ -112,10 +112,15 @@ async def bulk_toggle_cells(
                         status=new_entry.status,
                     ))
 
-        # Collect unique staffing project_ids for audit
+        # ── 감사 로그: 변경된 셀 상세 정보 수집 ──────────────────
         staffing_ids_affected = list({c.staffing_id for c in request.cells})
-        # Fetch project_id for the first staffing for context
+
+        # 첫 번째 staffing에서 project_id, person_name, project_name 조회
         project_id_for_log = None
+        person_name_for_log = None
+        project_name_for_log = None
+        phase_name_for_log = None
+
         if staffing_ids_affected:
             s_res = await db.execute(
                 select(Staffing).where(Staffing.id == staffing_ids_affected[0])
@@ -123,19 +128,70 @@ async def bulk_toggle_cells(
             s_obj = s_res.scalar_one_or_none()
             if s_obj:
                 project_id_for_log = s_obj.project_id
+                person_name_for_log = s_obj.person_name_text
+
+                # person_name_text 없으면 People 테이블 조회
+                if not person_name_for_log and s_obj.person_id:
+                    from models.people import People
+                    p_res = await db.execute(
+                        select(People.person_name).where(People.id == s_obj.person_id)
+                    )
+                    person_name_for_log = p_res.scalar_one_or_none()
+
+                # project_name 조회
+                if s_obj.project_id:
+                    proj_res = await db.execute(
+                        select(Projects.project_name).where(Projects.id == s_obj.project_id)
+                    )
+                    project_name_for_log = proj_res.scalar_one_or_none()
+
+                # phase_name 조회
+                if s_obj.phase_id:
+                    phase_res = await db.execute(
+                        select(Phases.phase_name).where(Phases.id == s_obj.phase_id)
+                    )
+                    phase_name_for_log = phase_res.scalar_one_or_none()
+
+        # 변경 전/후 셀 상태를 before_data에 기록 (롤백 참고용)
+        before_cells = [
+            {"staffing_id": c.staffing_id, "entry_date": str(c.entry_date)}
+            for c in request.cells
+        ]
+        after_cells = [
+            {"staffing_id": r.staffing_id, "entry_date": str(r.entry_date), "status": r.status}
+            for r in results
+        ]
+
+        # description: 누가 어느 사업의 일정을 몇 개 변경했는지
+        desc_parts = []
+        if project_name_for_log:
+            desc_parts.append(f"[{project_name_for_log}]")
+        if phase_name_for_log:
+            desc_parts.append(phase_name_for_log)
+        if person_name_for_log:
+            desc_parts.append(person_name_for_log)
+        context = " > ".join(desc_parts) if desc_parts else None
+
+        description = (
+            f"{context} — " if context else ""
+        ) + f"일정 셀 {len(request.cells)}개 변경"
+
+        # entity_id: 단일 staffing이면 staffing_id, 복수면 None
+        log_entity_id = staffing_ids_affected[0] if len(staffing_ids_affected) == 1 else None
 
         await write_audit_log(
             db,
             event_type=EventType.UPDATE,
             entity_type=EntityType.CALENDAR_ENTRY,
-            entity_id=None,
+            entity_id=log_entity_id,
             project_id=project_id_for_log,
-            after_obj={
-                "cells_count": len(request.cells),
-                "staffing_ids": staffing_ids_affected[:20],  # limit for readability
-            },
+            before_obj={"cells": before_cells},
+            after_obj={"cells": after_cells, "cells_count": len(request.cells)},
             request=http_request,
-            description=f"캘린더 셀 일괄 토글: {len(request.cells)}개 셀 변경",
+            project_name=project_name_for_log,
+            phase_name=phase_name_for_log,
+            person_name=person_name_for_log,
+            description=description,
         )
         await db.commit()
         return results

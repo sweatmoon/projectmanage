@@ -738,18 +738,27 @@ export default function AdminPage() {
                               {/* 롤백 버튼 */}
                               {['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'].includes(log.event_type) && (
                                 <div className="pt-2 border-t border-blue-100">
-                                  <button
-                                    onClick={() => handleRollback(log)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                                               bg-orange-50 text-orange-700 border border-orange-200
-                                               hover:bg-orange-100 transition-colors"
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    이 시점으로 롤백
-                                  </button>
-                                  <p className="mt-1 text-xs text-gray-400">
-                                    ⚠️ 이 레코드를 해당 이벤트 발생 직전 상태로 복원합니다. 신중하게 사용하세요.
-                                  </p>
+                                  {log.entity_type === 'calendar_entry' && !log.entity_id ? (
+                                    <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                                      ⚠️ 일정 셀은 여러 개를 일괄 변경하므로 자동 롤백이 불가합니다.
+                                      위 변경 필드에서 before_data를 확인하여 수동으로 되돌려 주세요.
+                                    </p>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={() => handleRollback(log)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                                                   bg-orange-50 text-orange-700 border border-orange-200
+                                                   hover:bg-orange-100 transition-colors"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        이 시점으로 롤백
+                                      </button>
+                                      <p className="mt-1 text-xs text-gray-400">
+                                        ⚠️ 이 레코드를 해당 이벤트 발생 직전 상태로 복원합니다. 신중하게 사용하세요.
+                                      </p>
+                                    </>
+                                  )}
                                 </div>
                               )}
                             </div>

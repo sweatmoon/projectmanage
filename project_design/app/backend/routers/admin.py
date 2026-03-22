@@ -711,6 +711,15 @@ async def rollback_audit_log(
     event_type_val = audit_log.event_type
 
     if not entity_id:
+        # calendar_entry 일괄 토글은 여러 셀을 한 번에 변경하므로 단건 롤백 불가
+        if entity_type == "calendar_entry":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "일정 셀은 한 번에 여러 개를 일괄 변경하므로 자동 롤백이 불가합니다.\n"
+                    "before_data의 셀 목록을 확인하여 수동으로 되돌려 주세요."
+                )
+            )
         raise HTTPException(status_code=400, detail="entity_id가 없어 롤백할 수 없습니다.")
 
     # 2) 모델 클래스 조회
