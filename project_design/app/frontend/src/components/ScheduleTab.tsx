@@ -23,6 +23,7 @@ interface Project {
   organization: string;
   status: string;
   updated_at?: string;
+  color_hue?: number | null;
 }
 
 interface Phase {
@@ -79,6 +80,19 @@ const PROJECT_COLORS = [
   { bg: '#ffedd5', border: '#f97316', text: '#9a3412', cell: '#fed7aa', available: '#fff7ed' },
   { bg: '#e0e7ff', border: '#6366f1', text: '#3730a3', cell: '#c7d2fe', available: '#eef2ff' },
 ];
+
+/** HSL hue값으로 PROJECT_COLORS 형태의 색상 객체 생성 */
+function hueToProjectColor(hue: number): typeof PROJECT_COLORS[0] {
+  const h = hue;
+  const hsl = (s: number, l: number) => `hsl(${h}, ${s}%, ${l}%)`;
+  return {
+    bg:        hsl(70, 90),
+    border:    hsl(70, 48),
+    text:      hsl(70, 25),
+    cell:      hsl(70, 80),
+    available: hsl(70, 96),
+  };
+}
 
 const MIN_SUB_COLS = 3;
 const DEFAULT_COL_WIDTH = 23;
@@ -1689,7 +1703,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const map = new Map<number, typeof PROJECT_COLORS[0]>();
     const uniqueIds = [...new Set(localProjects.map((p) => p.id))];
     uniqueIds.forEach((pid, idx) => {
-      map.set(pid, PROJECT_COLORS[idx % PROJECT_COLORS.length]);
+      const project = localProjects.find((p) => p.id === pid);
+      if (project?.color_hue != null) {
+        map.set(pid, hueToProjectColor(project.color_hue));
+      } else {
+        // color_hue 없는 경우 기존 팔레트 폴백
+        map.set(pid, PROJECT_COLORS[idx % PROJECT_COLORS.length]);
+      }
     });
     return map;
   }, [localProjects]);

@@ -4,14 +4,17 @@ CREATE/UPDATE/DELETE(soft) 이벤트 자동 기록
 """
 import json
 import logging
+import math
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from models.projects import Projects
 from services.projects import ProjectsService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
 
@@ -44,8 +47,37 @@ class ProjectsResponse(BaseModel):
     deadline: Optional[datetime] = None
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
+    color_hue: Optional[int] = None
     class Config:
         from_attributes = True
+
+
+async def assign_color_hue(db: AsyncSession) -> int:
+    """기존 프로젝트들의 Hue와 가장 멀리 떨어진 Hue 자동 배정"""
+    result = await db.execute(
+        select(Projects.color_hue).where(
+            Projects.deleted_at.is_(None),
+            Projects.color_hue.isnot(None)
+        )
+    )
+    existing_hues = sorted([r[0] for r in result.fetchall()])
+
+    if not existing_hues:
+        return 0
+
+    # 현재 Hue들 사이에서 가장 넓은 간격의 중간점 탐색
+    best_hue = 0
+    best_gap = 0
+    n = len(existing_hues)
+    for i in range(n):
+        h1 = existing_hues[i]
+        h2 = existing_hues[(i + 1) % n]
+        gap = (h2 - h1) % 360
+        if gap > best_gap:
+            best_gap = gap
+            best_hue = (h1 + gap // 2) % 360
+
+    return best_hue
 
 class ProjectsListResponse(BaseModel):
     items: List[ProjectsResponse]
@@ -101,7 +133,9 @@ async def create_projects(
     data: ProjectsData, request: Request, db: AsyncSession = Depends(get_db)
 ):
     service = ProjectsService(db)
-    result = await service.create(data.model_dump())
+    project_data = data.model_dump()
+    project_data['color_hue'] = await assign_color_hue(db)
+    result = await service.create(project_data)
     if not result:
         raise HTTPException(status_code=400, detail="Failed to create projects")
     await write_audit_log(
@@ -109,7 +143,7 @@ async def create_projects(
         entity_id=result.id, after_obj=result, request=request,
     )
     await db.commit()
-    logger.info(f"[AUDIT] Project {result.id} created")
+    logger.info(f"[AUDIT] Project {result.id} created with color_hue={result.color_hue}")
     return result
 
 
@@ -120,7 +154,9 @@ async def create_projectss_batch(
     service = ProjectsService(db)
     results = []
     for item_data in req.items:
-        r = await service.create(item_data.model_dump())
+        project_data = item_data.model_dump()
+        project_data['color_hue'] = await assign_color_hue(db)
+        r = await service.create(project_data)
         if r:
             results.append(r)
             await write_audit_log(

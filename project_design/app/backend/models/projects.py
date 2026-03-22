@@ -14,3 +14,4 @@ class Projects(Base):
     notes        = Column(String,  nullable=True)
     updated_at   = Column(DateTime(timezone=True), nullable=True)
     deleted_at   = Column(DateTime(timezone=True), nullable=True, index=True)  # soft-delete
+    color_hue    = Column(Integer, nullable=True)  # 0~359, HSL 색상환 Hue값
