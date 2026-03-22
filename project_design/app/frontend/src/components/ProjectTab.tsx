@@ -86,39 +86,29 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
     try {
       const idsToDelete = Array.from(selectedIds);
 
-      // Use batch delete API for performance
-      try {
-        await client.apiCall.invoke({
-          url: '/api/v1/projects/batch_delete',
-          method: 'POST',
-          data: { project_ids: idsToDelete },
-        });
-      } catch {
-        // Fallback: delete one by one if batch API fails
-        for (const pid of idsToDelete) {
-          try {
-            const phasesRes = await client.entities.phases.query({ query: { project_id: pid }, limit: 100 });
-            const phaseItems = phasesRes?.data?.items || [];
-            // Collect all staffing IDs for batch operations
-            const allStaffIds: number[] = [];
-            await Promise.all(phaseItems.map(async (phase: { id: number }) => {
-              const staffRes = await client.entities.staffing.query({ query: { phase_id: phase.id }, limit: 500 });
-              const staffItems = staffRes?.data?.items || [];
-              staffItems.forEach((s: { id: number }) => allStaffIds.push(s.id));
-            }));
-            // Batch delete staffing and calendar entries
-            if (allStaffIds.length > 0) {
-              await Promise.all(allStaffIds.map((sid) =>
-                client.entities.staffing.delete({ id: String(sid) }).catch(() => {})
-              ));
-            }
-            // Delete phases
-            await Promise.all(phaseItems.map((phase: { id: number }) =>
-              client.entities.phases.delete({ id: String(phase.id) }).catch(() => {})
+      // 각 프로젝트를 개별 삭제 (soft-delete → 감사 로그 자동 기록)
+      for (const pid of idsToDelete) {
+        try {
+          // 관련 단계/투입공수 먼저 소프트 삭제
+          const phasesRes = await client.entities.phases.query({ query: { project_id: pid }, limit: 100 });
+          const phaseItems = phasesRes?.data?.items || [];
+          const allStaffIds: number[] = [];
+          await Promise.all(phaseItems.map(async (phase: { id: number }) => {
+            const staffRes = await client.entities.staffing.query({ query: { phase_id: phase.id }, limit: 500 });
+            const staffItems = staffRes?.data?.items || [];
+            staffItems.forEach((s: { id: number }) => allStaffIds.push(s.id));
+          }));
+          if (allStaffIds.length > 0) {
+            await Promise.all(allStaffIds.map((sid) =>
+              client.entities.staffing.delete({ id: String(sid) }).catch(() => {})
             ));
-          } catch { /* continue */ }
-          await client.entities.projects.delete({ id: String(pid) });
-        }
+          }
+          await Promise.all(phaseItems.map((phase: { id: number }) =>
+            client.entities.phases.delete({ id: String(phase.id) }).catch(() => {})
+          ));
+        } catch { /* continue */ }
+        // 프로젝트 소프트 삭제 — 감사 로그에 기록됨
+        await client.entities.projects.delete({ id: String(pid) });
       }
 
       toast.success(`${idsToDelete.length}개 프로젝트가 삭제되었습니다.`);
