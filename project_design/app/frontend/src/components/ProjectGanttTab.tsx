@@ -565,6 +565,7 @@ function EditModal({
   onHatDelete,
   onClose,
   onSave,
+  readOnly = false,
 }: {
   project: Project;
   phase: Phase;
@@ -578,6 +579,7 @@ function EditModal({
   onHatDelete: (staffingId: number) => Promise<void>;
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
+  readOnly?: boolean;
 }) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null);
@@ -747,19 +749,22 @@ function EditModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div className="bg-white rounded-lg shadow-xl w-[680px] max-w-[95vw] max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h3 className="text-base font-semibold">프로젝트/단계/투입인력 수정</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold">{readOnly ? '프로젝트/단계/투입인력 조회' : '프로젝트/단계/투입인력 수정'}</h3>
+            {readOnly && <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full border">읽기 전용</span>}
+          </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="h-4 w-4" /></button>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">프로젝트 정보</h4>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">사업명</Label><Input value={projectName} onChange={(e) => setProjectName(e.target.value)} className="h-8 text-sm" /></div>
-              <div><Label className="text-xs">발주기관</Label><Input value={organization} onChange={(e) => setOrganization(e.target.value)} className="h-8 text-sm" /></div>
+              <div><Label className="text-xs">사업명</Label><Input value={projectName} onChange={(e) => setProjectName(e.target.value)} className="h-8 text-sm" disabled={readOnly} /></div>
+              <div><Label className="text-xs">발주기관</Label><Input value={organization} onChange={(e) => setOrganization(e.target.value)} className="h-8 text-sm" disabled={readOnly} /></div>
             </div>
             <div>
               <Label className="text-xs">상태</Label>
-              <Select value={projectStatus} onValueChange={setProjectStatus}>
+              <Select value={projectStatus} onValueChange={setProjectStatus} disabled={readOnly}>
                 <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="감리">감리 (A)</SelectItem>
@@ -772,17 +777,17 @@ function EditModal({
           </div>
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">단계 정보</h4>
-            <div><Label className="text-xs">단계명</Label><Input value={phaseName} onChange={(e) => setPhaseName(e.target.value)} className="h-8 text-sm" /></div>
+            <div><Label className="text-xs">단계명</Label><Input value={phaseName} onChange={(e) => setPhaseName(e.target.value)} className="h-8 text-sm" disabled={readOnly} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">시작일</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-sm" /></div>
-              <div><Label className="text-xs">종료일</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-sm" /></div>
+              <div><Label className="text-xs">시작일</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-sm" disabled={readOnly} /></div>
+              <div><Label className="text-xs">종료일</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-sm" disabled={readOnly} /></div>
             </div>
             {businessDays !== null && <p className="text-[10px] text-muted-foreground">영업일: {businessDays}일</p>}
           </div>
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">
               투입인력 ({activeCount}명)
-              {deletedIds.size > 0 && <span className="text-red-500 text-[10px] ml-2">({deletedIds.size}명 삭제 예정)</span>}
+              {!readOnly && deletedIds.size > 0 && <span className="text-red-500 text-[10px] ml-2">({deletedIds.size}명 삭제 예정)</span>}
             </h4>
             {phaseStaffing.length === 0 ? (
               <p className="text-xs text-muted-foreground italic py-2">배정된 인력이 없습니다.</p>
@@ -801,6 +806,8 @@ function EditModal({
                             <span className="text-[10px] text-muted-foreground w-[70px] truncate flex-shrink-0" title={s.field}>{s.field}</span>
                             {isDeleted ? (
                               <span className="flex-1 text-xs text-red-500 line-through">{getDisplayPerson(s)}</span>
+                            ) : readOnly ? (
+                              <span className="flex-1 text-xs text-gray-700 px-1">{getDisplayPerson(s)}</span>
                             ) : (
                               <PersonCombobox
                                 value={getCurrentPersonId(s)}
@@ -815,12 +822,21 @@ function EditModal({
                             <div className="flex items-center gap-1 flex-shrink-0">
                               {isDeleted ? (
                                 <span className="text-[10px] text-red-400 w-[50px] text-right">{currentMd != null ? `${currentMd}MD` : '-'}</span>
+                              ) : readOnly ? (
+                                <span className="text-xs text-gray-700 w-[52px] text-right">{currentMd != null ? currentMd : '-'}</span>
                               ) : (
                                 <input type="number" min={0} max={businessDays ?? 999} value={currentMd ?? ''} onChange={(e) => handleMdChange(s.id, e.target.value)} className="w-[52px] h-7 px-1.5 text-xs text-right border rounded focus:outline-none focus:ring-1 focus:ring-blue-400" placeholder="-" />
                               )}
                               <span className="text-[9px] text-muted-foreground">MD</span>
                             </div>
-                            {isDeleted ? (
+                            {readOnly ? (
+                              hatMap.has(s.id) ? (
+                                <span className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0" title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대신 투입 중`}>
+                                  <HardHat className="h-3 w-3" />
+                                  <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
+                                </span>
+                              ) : null
+                            ) : isDeleted ? (
                               <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.delete(s.id); return n; })} className="p-1 text-blue-500 hover:bg-blue-50 rounded flex-shrink-0" title="삭제 취소"><span className="text-[10px]">↩</span></button>
                             ) : (
                               <>
@@ -833,10 +849,17 @@ function EditModal({
                                     onClear={() => saveHatInline(s.id, '', null)}
                                     onCancel={() => setHatEditId(null)}
                                   />
+                                ) : hatMap.has(s.id) ? (
+                                  <button type="button" onClick={() => openHatInline(s.id)}
+                                    title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
+                                    className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors">
+                                    <HardHat className="h-3 w-3 flex-shrink-0" />
+                                    <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
+                                  </button>
                                 ) : (
                                   <button type="button" onClick={() => openHatInline(s.id)}
-                                    title={hatMap.has(s.id) ? `🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정` : '모자(대체인력) 씌우기'}
-                                    className={`p-1 rounded flex-shrink-0 transition-colors ${ hatMap.has(s.id) ? 'text-orange-500 hover:bg-orange-50' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'}`}>
+                                    title="모자(대체인력) 씌우기"
+                                    className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50">
                                     <HardHat className="h-3.5 w-3.5" />
                                   </button>
                                 )}
@@ -854,8 +877,14 @@ function EditModal({
           </div>
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
-          <Button variant="outline" size="sm" onClick={onClose}>취소</Button>
-          <Button size="sm" onClick={handleSave}>저장</Button>
+          {readOnly ? (
+            <Button variant="outline" size="sm" onClick={onClose}>닫기</Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={onClose}>취소</Button>
+              <Button size="sm" onClick={handleSave}>저장</Button>
+            </>
+          )}
         </div>
       </div>
     </div>
