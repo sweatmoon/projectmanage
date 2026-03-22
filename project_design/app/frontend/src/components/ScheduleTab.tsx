@@ -291,6 +291,130 @@ function calcBizDays(startStr: string, endStr: string): number {
 
 interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
 
+/* ── HatPersonCombobox: 대체인력 선택 드롭다운 ── */
+function HatPersonCombobox({
+  currentName,
+  allPeople,
+  onChange,
+  onClear,
+  onCancel,
+}: {
+  currentName: string;
+  allPeople: People[];
+  onChange: (personId: number | null, personName: string) => void;
+  onClear: () => void;
+  onCancel: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filtered = allPeople.filter((p) =>
+    p.person_name.toLowerCase().includes(search.toLowerCase()) ||
+    (p.team || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.grade || '').toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => a.person_name.localeCompare(b.person_name, 'ko'));
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        onCancel();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onCancel]);
+
+  const handleSelect = (personId: number | null, personName: string) => {
+    onChange(personId, personName);
+  };
+
+  return (
+    <div className="relative flex-1 min-w-[160px]" ref={dropdownRef}>
+      <div className="w-full bg-white border border-orange-300 rounded-lg shadow-lg z-[100] max-h-[280px] flex flex-col">
+        <div className="p-1.5 border-b">
+          <input
+            type="text"
+            placeholder="이름/팀/등급 검색..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
+            className="w-full h-7 px-2 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+            autoFocus
+          />
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {currentName && (
+            <div className="px-2 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-50 border-b">
+              🎩 현재: {currentName}
+            </div>
+          )}
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-1 ${currentName === p.person_name ? 'bg-orange-50 font-semibold' : ''}`}
+              onClick={() => handleSelect(p.id, p.person_name)}
+            >
+              {p.person_name}
+              {p.grade && <span className="text-muted-foreground text-[9px]">({p.grade})</span>}
+              {p.team && <span className="text-muted-foreground text-[9px]">· {p.team}</span>}
+              {currentName === p.person_name && <span className="ml-auto text-orange-500">✓</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-3 py-2 text-xs text-muted-foreground">검색 결과 없음</div>
+          )}
+          <div className="border-t">
+            {!showCustomInput ? (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-xs text-amber-600 hover:bg-amber-50"
+                onClick={() => { setShowCustomInput(true); setCustomName(search); }}
+              >
+                + 직접 입력 (외부 인력){search ? ` "${search}"` : ''}
+              </button>
+            ) : (
+              <div className="p-1.5 flex gap-1">
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customName.trim()) handleSelect(null, customName.trim());
+                    if (e.key === 'Escape') setShowCustomInput(false);
+                  }}
+                  placeholder="이름 직접 입력"
+                  className="flex-1 h-7 px-2 text-xs border border-amber-300 rounded focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="px-2 h-7 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                  disabled={!customName.trim()}
+                  onClick={() => { if (customName.trim()) handleSelect(null, customName.trim()); }}
+                >확인</button>
+              </div>
+            )}
+          </div>
+          {currentName && (
+            <div className="border-t">
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                onClick={onClear}
+              >
+                ✕ 모자 해제
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface EditModalProps {
   project: Project;
   phase: Phase;
@@ -523,27 +647,20 @@ function PersonCombobox({
 function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, hatMap, onHatSave, onHatDelete, onClose, onSave }: EditModalProps) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null); // staffing_id
-  const [hatDraftName, setHatDraftName] = useState('');
-  const [savingHatInline, setSavingHatInline] = useState(false);
 
   const openHatInline = (staffingId: number) => {
-    setHatDraftName(hatMap.get(staffingId)?.actual_person_name || '');
     setHatEditId(staffingId);
   };
 
-  const saveHatInline = async (staffingId: number) => {
-    setSavingHatInline(true);
+  const saveHatInline = async (staffingId: number, name: string, personId: number | null) => {
     try {
-      const name = hatDraftName.trim();
-      if (name) {
-        const matched = allPeople.find((p) => p.person_name === name);
-        await onHatSave(staffingId, name, matched?.id ?? null);
+      if (name.trim()) {
+        await onHatSave(staffingId, name.trim(), personId);
       } else {
         await onHatDelete(staffingId);
       }
-      setHatEditId(null);
     } finally {
-      setSavingHatInline(false);
+      setHatEditId(null);
     }
   };
   const [projectName, setProjectName] = useState(project.project_name);
@@ -866,32 +983,13 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                               <>
                                 {/* 🎩 모자 버튼 */}
                                 {hatEditId === s.id ? (
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    <input
-                                      type="text"
-                                      value={hatDraftName}
-                                      onChange={(e) => setHatDraftName(e.target.value)}
-                                      placeholder="대체인력 이름"
-                                      className="w-[90px] h-6 px-1.5 text-[10px] border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
-                                      list={`hat-dl-${s.id}`}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') saveHatInline(s.id); if (e.key === 'Escape') setHatEditId(null); }}
-                                      autoFocus
-                                    />
-                                    <datalist id={`hat-dl-${s.id}`}>
-                                      {allPeople.map((p) => <option key={p.id} value={p.person_name} />)}
-                                    </datalist>
-                                    <button
-                                      type="button"
-                                      onClick={() => saveHatInline(s.id)}
-                                      disabled={savingHatInline}
-                                      className="text-[10px] px-1.5 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
-                                    >
-                                      {savingHatInline ? '...' : '저장'}
-                                    </button>
-                                    <button type="button" onClick={() => setHatEditId(null)} className="text-slate-400 hover:text-slate-600">
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
+                                  <HatPersonCombobox
+                                    currentName={hatMap.get(s.id)?.actual_person_name || ''}
+                                    allPeople={allPeople}
+                                    onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
+                                    onClear={() => saveHatInline(s.id, '', null)}
+                                    onCancel={() => setHatEditId(null)}
+                                  />
                                 ) : (
                                   <button
                                     type="button"
@@ -1531,8 +1629,45 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
       map.set(person.id, items);
     }
+
+    // 🎩 Hat 실제 투입자의 sub-column 추가
+    // hatMap: staffing_id → HatRecord(actual_person_id, actual_person_name)
+    // 실제 투입자가 allPeople에 있으면 해당 인력의 items에 hat 가상 badge 항목 추가
+    for (const [staffingId, hatRecord] of hatMap) {
+      if (!hatRecord.actual_person_id) continue;
+      const officialStaffing = localStaffing.find((s) => s.id === staffingId);
+      if (!officialStaffing) continue;
+      const badge = (() => {
+        const b = new Map<number, PhaseBadgeInfo>();
+        phaseBadges.forEach((pb) => b.set(pb.phaseId, pb));
+        return b.get(officialStaffing.phase_id);
+      })();
+      if (!badge) continue;
+      const actualPerson = allPeople.find((p) => p.id === hatRecord.actual_person_id);
+      if (!actualPerson) continue;
+      const existingItems = map.get(actualPerson.id) || [];
+      // hat 배지 – status에 '🎩' 접두어 추가, staffing ID는 공식 인력의 staffing ID 사용
+      const hatBadge: PhaseBadgeInfo = {
+        ...badge,
+        status: `🎩${badge.status}`,
+      };
+      const hatItem: StaffingWithBadge & { slotIndex?: number; isHatItem?: boolean; hatForPersonName?: string } = {
+        staffing: officialStaffing,
+        badge: hatBadge,
+        isHatItem: true,
+        hatForPersonName: officialStaffing.person_name_text || '공식인력',
+      };
+      // slotIndex 배정: 기존 items와 겹치지 않는 슬롯 찾기
+      const usedSlots = existingItems.map((it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex ?? 0);
+      let slot = 0;
+      while (usedSlots.includes(slot)) slot++;
+      hatItem.slotIndex = slot;
+      existingItems.push(hatItem);
+      map.set(actualPerson.id, existingItems);
+    }
+
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, calendarEntries, year, month, projectMap, projectColorMap]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, calendarEntries, year, month, projectMap, projectColorMap, hatMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
@@ -1649,6 +1784,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
       if (!item) return null;
 
+      const isHatItem = !!(item as StaffingWithBadge & { isHatItem?: boolean }).isHatItem;
+      const hatForPersonName = (item as StaffingWithBadge & { hatForPersonName?: string }).hatForPersonName;
       const entryKey = `${item.staffing.id}_${dateStr}`;
       const entry = entryLookup.get(entryKey);
       const isSelected = !!entry?.status;
@@ -1662,6 +1799,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         md: item.staffing.md || 0,
         dateStr,
         entryKey,
+        isHatItem,
+        hatForPersonName,
       };
     },
     [personStaffings, year, month, entryLookup]
@@ -1674,6 +1813,17 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
     if (scheduleIsLocked) {
       toast.error('다른 사용자가 열람 중입니다. 잠시 후 다시 시도하세요.');
+      return;
+    }
+    // 🎩 모자가 씌워진 셀은 직접 수정 불가 (투입공수 원장에서 모자 해제 후 수정 가능)
+    if (hatMap.has(staffingId)) {
+      const hatRecord = hatMap.get(staffingId)!;
+      toast.warning(`🎩 이 일정은 "${hatRecord.actual_person_name}"이(가) 대신 투입 중입니다. 투입공수 원장에서 모자를 해제하면 수정할 수 있습니다.`);
+      return;
+    }
+    // 🎩 hat 실제 투입자 셀 (badge.status에 🎩 포함) 클릭 잠금
+    if (badge.status.includes('🎩')) {
+      toast.warning('🎩 이 일정은 모자(대체인력)에 의해 생성된 일정입니다. 투입공수 원장에서 모자를 해제하면 수정할 수 있습니다.');
       return;
     }
     const cellKey = `${staffingId}_${dateStr}`;
@@ -2774,8 +2924,17 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
                             // Build tooltip text for cell
                             const tooltipInfo = cellData ? staffingTooltipInfo.get(cellData.staffingId) : null;
+                            // 🎩 hat 정보 조회
+                            const hatRecord = cellData ? hatMap.get(cellData.staffingId) : undefined;
+                            const isHatCell = !!hatRecord && !cellData?.isHatItem; // 공식 인력 셀 (hat 씌워진)
+                            const isHatActualCell = !!cellData?.isHatItem; // 실제 투입자 셀
+
                             const cellTooltip = tooltipInfo
-                              ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
+                              ? isHatCell
+                                ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)`
+                                : isHatActualCell
+                                  ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)`
+                                  : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
                               : undefined;
 
                             const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
@@ -2799,10 +2958,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             if (cellData && cellData.isSelected) {
                               // 공휴일/주말에 투입된 경우 경고 표시 (연한 배경에 빨간 테두리)
                               const isNonWorkSelected = !cellData.isAvailable;
+                              const isLockedCell = isHatCell || isHatActualCell;
                               return (
                                 <td
                                   key={`${p.id}-${d}-${si}`}
-                                  className={`text-center cursor-pointer select-none hover:brightness-90 transition-all ${isToggling ? 'opacity-50' : ''}`}
+                                  className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'}`}
                                   style={{
                                     backgroundColor: isNonWorkSelected
                                       ? (cellData.isHoliday ? '#fee2e2' : '#f3f4f6')
@@ -2816,11 +2976,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                     fontSize: 10,
                                     fontWeight: 700,
                                     ...borderStyle,
-                                    ...(isNonWorkSelected
-                                      ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
-                                      : isHoveredBadgeCell
-                                        ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
-                                        : isFocused ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
+                                    ...(isHatCell
+                                      ? { opacity: 0.75 }
+                                      : isNonWorkSelected
+                                        ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
+                                        : isHoveredBadgeCell
+                                          ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
+                                          : isFocused ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
                                   }}
                                   title={isNonWorkSelected
                                     ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)`
@@ -2829,7 +2991,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                     handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)
                                   }
                                 >
-                                  {isToggling ? '…' : (isNonWorkSelected ? '✕' : cellData.badge.status)}
+                                  {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : cellData.badge.status)}
                                 </td>
                               );
                             }
@@ -2839,9 +3001,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                               return (
                                 <td
                                   key={`${p.id}-${d}-${si}`}
-                                  className={`text-center cursor-pointer select-none hover:brightness-95 transition-all ${isToggling ? 'opacity-50' : ''}`}
+                                  className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
                                   style={{
-                                    backgroundColor: isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
+                                    backgroundColor: isHatCell
+                                      ? (cellData.badge.color.available || '#f9fafb')
+                                      : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
                                     width: colWidth,
                                     height: rowHeight,
                                     padding: 0,
@@ -2855,6 +3019,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                                       if (isLastSub) return baseRight;
                                       return `1px ${dashedBorder} ${cellData.badge.color.border}`;
                                     })(),
+                                    ...(isHatCell ? { opacity: 0.6 } : {}),
                                   }}
                                   title={cellTooltip}
                                   onClick={() =>

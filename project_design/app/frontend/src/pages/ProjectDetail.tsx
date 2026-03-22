@@ -307,6 +307,157 @@ function PersonComboboxInline({
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   HatPersonCombobox – 대체인력 선택 드롭다운
+   PersonComboboxInline과 동일한 UX, + 직접 입력(외부인력) 지원
+   + "해제" 옵션 추가
+───────────────────────────────────────────────────────────── */
+function HatPersonCombobox({
+  currentName,
+  allPeople,
+  onChange,
+  onClear,
+  onCancel,
+}: {
+  currentName: string;
+  allPeople: People[];
+  onChange: (personId: number | null, personName: string) => void;
+  onClear: () => void;
+  onCancel?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filtered = allPeople.filter((p) =>
+    p.person_name.toLowerCase().includes(search.toLowerCase()) ||
+    (p.team || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.grade || '').toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => a.person_name.localeCompare(b.person_name, 'ko'));
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false); setSearch(''); setShowCustomInput(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleSelect = (personId: number | null, personName: string) => {
+    onChange(personId, personName);
+    setOpen(false); setSearch(''); setShowCustomInput(false);
+  };
+
+  return (
+    <div className="relative flex-1" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setSearch(''); setShowCustomInput(false); }}
+        className={`flex items-center justify-between w-full h-7 px-2 text-xs border rounded transition-colors ${
+          currentName
+            ? 'border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100'
+            : 'bg-white border-slate-200 hover:bg-gray-50 text-slate-400'
+        }`}
+      >
+        <span className="truncate">{currentName || '대체인력 선택...'}</span>
+        <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 w-[240px] bg-white border rounded-lg shadow-lg z-[100] max-h-[300px] flex flex-col">
+          <div className="p-1.5 border-b">
+            <input
+              type="text"
+              placeholder="이름/팀/등급 검색..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+              className="w-full h-7 px-2 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+              autoFocus
+            />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {/* 현재 선택된 인력 강조 */}
+            {currentName && (
+              <div className="px-2 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-50 border-b">
+                🎩 현재 대체인력
+              </div>
+            )}
+            {/* 인력 목록 */}
+            {filtered.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-1 ${
+                  currentName === p.person_name ? 'bg-orange-50 font-semibold' : ''
+                }`}
+                onClick={() => handleSelect(p.id, p.person_name)}
+              >
+                {p.person_name}
+                {p.grade && <span className="text-muted-foreground text-[9px]">({p.grade})</span>}
+                {p.team && <span className="text-muted-foreground text-[9px]">· {p.team}</span>}
+                {currentName === p.person_name && <span className="ml-auto text-orange-500">✓</span>}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">검색 결과 없음</div>
+            )}
+            {/* 외부 인력 직접 입력 */}
+            <div className="border-t">
+              {!showCustomInput ? (
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-1.5 text-xs text-amber-600 hover:bg-amber-50"
+                  onClick={() => { setShowCustomInput(true); setCustomName(search); }}
+                >
+                  + 직접 입력 (외부 인력){search ? ` "${search}"` : ''}
+                </button>
+              ) : (
+                <div className="p-1.5 flex gap-1">
+                  <input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && customName.trim()) handleSelect(null, customName.trim());
+                      if (e.key === 'Escape') setShowCustomInput(false);
+                    }}
+                    placeholder="이름 직접 입력"
+                    className="flex-1 h-7 px-2 text-xs border border-amber-300 rounded focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="px-2 h-7 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                    disabled={!customName.trim()}
+                    onClick={() => { if (customName.trim()) handleSelect(null, customName.trim()); }}
+                  >확인</button>
+                </div>
+              )}
+            </div>
+            {/* 모자 해제 */}
+            {currentName && (
+              <div className="border-t">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                  onClick={() => { onClear(); setOpen(false); }}
+                >
+                  ✕ 모자 해제
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Classify field into 단계감리팀 or 전문가팀 ── */
 const TEAM_FIELD_ORDER: { pattern: RegExp; order: number }[] = [
   { pattern: /사업관리/, order: 0 },
@@ -2337,43 +2488,24 @@ export default function ProjectDetail() {
                 const phase = phases.find((p) => p.id === staffing.phase_id);
                 const phaseName = phase?.phase_name || `단계 ${staffing.phase_id}`;
                 const currentName = hatDraft.get(sid) || '';
-                const hasHat = !!currentName.trim();
                 return (
                   <div key={sid} className="flex items-center gap-3">
                     <div className="w-20 text-xs font-medium text-slate-600 shrink-0 truncate" title={phaseName}>
                       {phaseName}
                     </div>
-                    <div className="flex-1 relative">
-                      <input
-                        type="text"
-                        value={currentName}
-                        onChange={(e) => setHatDraft((prev) => new Map(prev).set(sid, e.target.value))}
-                        placeholder="대체 투입자 이름 (비우면 해제)"
-                        className={`w-full border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 ${
-                          hasHat ? 'border-orange-300 bg-orange-50' : 'border-slate-200'
-                        }`}
-                        list={`hat-datalist-${sid}`}
+                    <div className="flex-1">
+                      <HatPersonCombobox
+                        currentName={currentName}
+                        allPeople={people}
+                        onChange={(_personId, personName) => setHatDraft((prev) => new Map(prev).set(sid, personName))}
+                        onClear={() => setHatDraft((prev) => new Map(prev).set(sid, ''))}
                       />
-                      <datalist id={`hat-datalist-${sid}`}>
-                        {people.map((p) => (
-                          <option key={p.id} value={p.person_name} />
-                        ))}
-                      </datalist>
                     </div>
-                    {hasHat && (
-                      <button
-                        onClick={() => setHatDraft((prev) => new Map(prev).set(sid, ''))}
-                        className="text-slate-400 hover:text-red-500 shrink-0"
-                        title="해제"
-                      >
-                        ✕
-                      </button>
-                    )}
                   </div>
                 );
               })}
               <p className="text-xs text-slate-400 pt-1">
-                💡 이름을 비워두면 해당 단계의 모자가 해제됩니다. 시스템 등록 인력 외 외부인력도 직접 입력 가능합니다.
+                💡 대체인력을 선택하거나 직접 입력하세요. 모자 해제는 드롭다운에서 '✕ 모자 해제'를 선택하세요.
               </p>
             </div>
             <DialogFooter>

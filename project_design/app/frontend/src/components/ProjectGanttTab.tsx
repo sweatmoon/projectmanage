@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -427,6 +427,130 @@ function PersonCombobox({
 
 interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
 
+/* ── HatPersonCombobox: 대체인력 선택 드롭다운 ── */
+function HatPersonCombobox({
+  currentName,
+  allPeople,
+  onChange,
+  onClear,
+  onCancel,
+}: {
+  currentName: string;
+  allPeople: People[];
+  onChange: (personId: number | null, personName: string) => void;
+  onClear: () => void;
+  onCancel: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filtered = allPeople.filter((p) =>
+    p.person_name.toLowerCase().includes(search.toLowerCase()) ||
+    (p.team || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.grade || '').toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => a.person_name.localeCompare(b.person_name, 'ko'));
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        onCancel();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onCancel]);
+
+  const handleSelect = (personId: number | null, personName: string) => {
+    onChange(personId, personName);
+  };
+
+  return (
+    <div className="relative flex-1 min-w-[160px]" ref={dropdownRef}>
+      <div className="w-full bg-white border border-orange-300 rounded-lg shadow-lg z-[100] max-h-[280px] flex flex-col">
+        <div className="p-1.5 border-b">
+          <input
+            type="text"
+            placeholder="이름/팀/등급 검색..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
+            className="w-full h-7 px-2 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+            autoFocus
+          />
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {currentName && (
+            <div className="px-2 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-50 border-b">
+              🎩 현재: {currentName}
+            </div>
+          )}
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-1 ${currentName === p.person_name ? 'bg-orange-50 font-semibold' : ''}`}
+              onClick={() => handleSelect(p.id, p.person_name)}
+            >
+              {p.person_name}
+              {p.grade && <span className="text-muted-foreground text-[9px]">({p.grade})</span>}
+              {p.team && <span className="text-muted-foreground text-[9px]">· {p.team}</span>}
+              {currentName === p.person_name && <span className="ml-auto text-orange-500">✓</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-3 py-2 text-xs text-muted-foreground">검색 결과 없음</div>
+          )}
+          <div className="border-t">
+            {!showCustomInput ? (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-xs text-amber-600 hover:bg-amber-50"
+                onClick={() => { setShowCustomInput(true); setCustomName(search); }}
+              >
+                + 직접 입력 (외부 인력){search ? ` "${search}"` : ''}
+              </button>
+            ) : (
+              <div className="p-1.5 flex gap-1">
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customName.trim()) handleSelect(null, customName.trim());
+                    if (e.key === 'Escape') setShowCustomInput(false);
+                  }}
+                  placeholder="이름 직접 입력"
+                  className="flex-1 h-7 px-2 text-xs border border-amber-300 rounded focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="px-2 h-7 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                  disabled={!customName.trim()}
+                  onClick={() => { if (customName.trim()) handleSelect(null, customName.trim()); }}
+                >확인</button>
+              </div>
+            )}
+          </div>
+          {currentName && (
+            <div className="border-t">
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                onClick={onClear}
+              >
+                ✕ 모자 해제
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ───────── EditModal ───────── */
 function EditModal({
   project,
@@ -457,27 +581,20 @@ function EditModal({
 }) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null);
-  const [hatDraftName, setHatDraftName] = useState('');
-  const [savingHatInline, setSavingHatInline] = useState(false);
 
   const openHatInline = (staffingId: number) => {
-    setHatDraftName(hatMap.get(staffingId)?.actual_person_name || '');
     setHatEditId(staffingId);
   };
 
-  const saveHatInline = async (staffingId: number) => {
-    setSavingHatInline(true);
+  const saveHatInline = async (staffingId: number, name: string, personId: number | null) => {
     try {
-      const name = hatDraftName.trim();
-      if (name) {
-        const matched = allPeople.find((p) => p.person_name === name);
-        await onHatSave(staffingId, name, matched?.id ?? null);
+      if (name.trim()) {
+        await onHatSave(staffingId, name.trim(), personId);
       } else {
         await onHatDelete(staffingId);
       }
-      setHatEditId(null);
     } finally {
-      setSavingHatInline(false);
+      setHatEditId(null);
     }
   };
   const [projectName, setProjectName] = useState(project.project_name);
@@ -709,26 +826,13 @@ function EditModal({
                               <>
                                 {/* 🎩 모자 버튼 */}
                                 {hatEditId === s.id ? (
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    <input
-                                      type="text"
-                                      value={hatDraftName}
-                                      onChange={(e) => setHatDraftName(e.target.value)}
-                                      placeholder="대체인력 이름"
-                                      className="w-[90px] h-6 px-1.5 text-[10px] border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
-                                      list={`hat-dl-${s.id}`}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') saveHatInline(s.id); if (e.key === 'Escape') setHatEditId(null); }}
-                                      autoFocus
-                                    />
-                                    <datalist id={`hat-dl-${s.id}`}>
-                                      {allPeople.map((p) => <option key={p.id} value={p.person_name} />)}
-                                    </datalist>
-                                    <button type="button" onClick={() => saveHatInline(s.id)} disabled={savingHatInline}
-                                      className="text-[10px] px-1.5 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50">
-                                      {savingHatInline ? '...' : '저장'}
-                                    </button>
-                                    <button type="button" onClick={() => setHatEditId(null)} className="text-slate-400 hover:text-slate-600"><X className="h-3 w-3" /></button>
-                                  </div>
+                                  <HatPersonCombobox
+                                    currentName={hatMap.get(s.id)?.actual_person_name || ''}
+                                    allPeople={allPeople}
+                                    onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
+                                    onClear={() => saveHatInline(s.id, '', null)}
+                                    onCancel={() => setHatEditId(null)}
+                                  />
                                 ) : (
                                   <button type="button" onClick={() => openHatInline(s.id)}
                                     title={hatMap.has(s.id) ? `🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정` : '모자(대체인력) 씌우기'}
