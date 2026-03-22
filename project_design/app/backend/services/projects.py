@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from sqlalchemy import select, func
@@ -106,15 +107,16 @@ class ProjectsService:
             raise
 
     async def delete(self, obj_id: int) -> bool:
-        """Delete projects"""
+        """Soft-delete projects (deleted_at 설정 — 감사 로그 보존)"""
         try:
             obj = await self.get_by_id(obj_id)
             if not obj:
                 logger.warning(f"Projects {obj_id} not found for deletion")
                 return False
-            await self.db.delete(obj)
+            from datetime import timezone
+            obj.deleted_at = datetime.now(timezone.utc)
             await self.db.commit()
-            logger.info(f"Deleted projects {obj_id}")
+            logger.info(f"Soft-deleted projects {obj_id}")
             return True
         except Exception as e:
             await self.db.rollback()
