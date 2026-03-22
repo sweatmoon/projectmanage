@@ -414,9 +414,57 @@ export default function AdminPage() {
       toast.success(
         `롤백 완료: ${res.entity_type}/${res.entity_id} — 복원 필드: ${res.rolled_back_fields.join(', ')}`
       );
-      fetchAuditLogs(auditSkip); // 목록 새로고침
+      fetchAuditLogs(auditSkip);
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? '롤백 실패');
+    }
+  };
+
+  // ── 사업 전체 롤백 ──────────────────────────────────────
+  const handleProjectRollback = async (log: AuditLogItem) => {
+    if (!log.entity_id) { toast.error('entity_id가 없습니다.'); return; }
+    const projectId = parseInt(log.entity_id);
+    const projectName = log.description ?? `사업 #${projectId}`;
+    const isDelete = log.event_type === 'DELETE';
+    const action = isDelete ? '복원' : '삭제';
+    if (!confirm(
+      `[사업 전체 ${action} 확인]\n\n` +
+      `"${projectName}"\n\n` +
+      `이 사업과 하위 단계/투입공수/일정을 모두 ${action}하겠습니까?\n\n` +
+      `⚠️ 즉시 DB에 반영되며 되돌릴 수 없습니다.`
+    )) return;
+    try {
+      const res = await client.admin.projectRollback(projectId);
+      toast.success(
+        `사업 전체 ${action} 완료 — 단계 ${res.restored.phases}개, 투입공수 ${res.restored.staffing}개, 일정 ${res.restored.calendar}개`
+      );
+      fetchAuditLogs(auditSkip);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '사업 롤백 실패');
+    }
+  };
+
+  // ── 단계 전체 롤백 ──────────────────────────────────────
+  const handlePhaseRollback = async (log: AuditLogItem) => {
+    if (!log.entity_id) { toast.error('entity_id가 없습니다.'); return; }
+    const phaseId = parseInt(log.entity_id);
+    const phaseName = log.description ?? `단계 #${phaseId}`;
+    const isDelete = log.event_type === 'DELETE';
+    const action = isDelete ? '복원' : '삭제';
+    if (!confirm(
+      `[단계 전체 ${action} 확인]\n\n` +
+      `"${phaseName}"\n\n` +
+      `이 단계와 하위 투입공수/일정을 모두 ${action}하겠습니까?\n\n` +
+      `⚠️ 즉시 DB에 반영되며 되돌릴 수 없습니다.`
+    )) return;
+    try {
+      const res = await client.admin.phaseRollback(phaseId);
+      toast.success(
+        `단계 전체 ${action} 완료 — 투입공수 ${res.restored.staffing}개, 일정 ${res.restored.calendar}개`
+      );
+      fetchAuditLogs(auditSkip);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '단계 롤백 실패');
     }
   };
 
@@ -737,13 +785,47 @@ export default function AdminPage() {
 
                               {/* 롤백 버튼 */}
                               {['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'].includes(log.event_type) && (
-                                <div className="pt-2 border-t border-blue-100">
+                                <div className="pt-2 border-t border-blue-100 space-y-2">
+                                  {/* 캘린더 셀: 자동 롤백 불가 안내 */}
                                   {log.entity_type === 'calendar_entry' && !log.entity_id ? (
                                     <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                                       ⚠️ 일정 셀은 여러 개를 일괄 변경하므로 자동 롤백이 불가합니다.
                                       위 변경 필드에서 before_data를 확인하여 수동으로 되돌려 주세요.
                                     </p>
+                                  ) : log.entity_type === 'project' ? (
+                                    /* 사업: 전체 통째 롤백 버튼 */
+                                    <>
+                                      <button
+                                        onClick={() => handleProjectRollback(log)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                                                   bg-red-50 text-red-700 border border-red-200
+                                                   hover:bg-red-100 transition-colors"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        사업 전체 {log.event_type === 'DELETE' ? '복원' : '삭제'} (단계·투입공수·일정 포함)
+                                      </button>
+                                      <p className="text-xs text-gray-400">
+                                        ⚠️ 이 사업과 하위 모든 데이터를 한 번에 {log.event_type === 'DELETE' ? '복원' : '삭제'}합니다.
+                                      </p>
+                                    </>
+                                  ) : log.entity_type === 'phase' ? (
+                                    /* 단계: 전체 통째 롤백 버튼 */
+                                    <>
+                                      <button
+                                        onClick={() => handlePhaseRollback(log)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                                                   bg-red-50 text-red-700 border border-red-200
+                                                   hover:bg-red-100 transition-colors"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        단계 전체 {log.event_type === 'DELETE' ? '복원' : '삭제'} (투입공수·일정 포함)
+                                      </button>
+                                      <p className="text-xs text-gray-400">
+                                        ⚠️ 이 단계와 하위 투입공수·일정을 한 번에 {log.event_type === 'DELETE' ? '복원' : '삭제'}합니다.
+                                      </p>
+                                    </>
                                   ) : (
+                                    /* staffing / people 등 단건 롤백 */
                                     <>
                                       <button
                                         onClick={() => handleRollback(log)}
@@ -754,7 +836,7 @@ export default function AdminPage() {
                                         <RotateCcw className="w-3.5 h-3.5" />
                                         이 시점으로 롤백
                                       </button>
-                                      <p className="mt-1 text-xs text-gray-400">
+                                      <p className="text-xs text-gray-400">
                                         ⚠️ 이 레코드를 해당 이벤트 발생 직전 상태로 복원합니다. 신중하게 사용하세요.
                                       </p>
                                     </>
