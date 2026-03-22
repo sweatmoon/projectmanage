@@ -1,6 +1,7 @@
 """
 Staffing 라우터 — Audit Log 통합
 MD 변경/투입인력 추가·삭제 이벤트 기록, soft-delete 적용
+project_name / phase_name / person_name 컨텍스트 포함
 """
 import json
 import logging
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from services.staffing import StaffingService
-from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
+from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/staffing", tags=["staffing"])
@@ -124,10 +125,22 @@ async def create_staffing(
     result = await service.create(data.model_dump())
     if not result:
         raise HTTPException(status_code=400, detail="Failed to create staffing")
+    ctx = await get_audit_context(
+        db,
+        project_id=result.project_id,
+        phase_id=result.phase_id,
+        person_id=result.person_id,
+    )
+    # person_name_text 우선
+    person_name = result.person_name_text or ctx["person_name"]
     await write_audit_log(
         db, event_type=EventType.CREATE, entity_type=EntityType.STAFFING,
         entity_id=result.id, project_id=result.project_id,
         after_obj=result, request=request,
+        project_name=ctx["project_name"],
+        phase_name=ctx["phase_name"],
+        person_name=person_name,
+        field_name=result.field,
     )
     await db.commit()
     logger.info(f"[AUDIT] Staffing {result.id} created")
@@ -144,10 +157,18 @@ async def create_staffings_batch(
         r = await service.create(item_data.model_dump())
         if r:
             results.append(r)
+            ctx = await get_audit_context(
+                db, project_id=r.project_id, phase_id=r.phase_id, person_id=r.person_id,
+            )
+            person_name = r.person_name_text or ctx["person_name"]
             await write_audit_log(
                 db, event_type=EventType.CREATE, entity_type=EntityType.STAFFING,
                 entity_id=r.id, project_id=r.project_id,
                 after_obj=r, request=request,
+                project_name=ctx["project_name"],
+                phase_name=ctx["phase_name"],
+                person_name=person_name,
+                field_name=r.field,
             )
     await db.commit()
     return results
@@ -165,10 +186,18 @@ async def update_staffings_batch(
         r = await service.update(item.id, update_dict)
         if r:
             results.append(r)
+            ctx = await get_audit_context(
+                db, project_id=r.project_id, phase_id=r.phase_id, person_id=r.person_id,
+            )
+            person_name = r.person_name_text or ctx["person_name"]
             await write_audit_log(
                 db, event_type=EventType.UPDATE, entity_type=EntityType.STAFFING,
                 entity_id=r.id, project_id=r.project_id,
                 before_obj=before, after_obj=r, request=request,
+                project_name=ctx["project_name"],
+                phase_name=ctx["phase_name"],
+                person_name=person_name,
+                field_name=r.field,
             )
     await db.commit()
     return results
@@ -184,10 +213,18 @@ async def update_staffing(
         raise HTTPException(status_code=404, detail="Staffing not found")
     update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
     result = await service.update(id, update_dict)
+    ctx = await get_audit_context(
+        db, project_id=result.project_id, phase_id=result.phase_id, person_id=result.person_id,
+    )
+    person_name = result.person_name_text or ctx["person_name"]
     await write_audit_log(
         db, event_type=EventType.UPDATE, entity_type=EntityType.STAFFING,
         entity_id=id, project_id=result.project_id,
         before_obj=before, after_obj=result, request=request,
+        project_name=ctx["project_name"],
+        phase_name=ctx["phase_name"],
+        person_name=person_name,
+        field_name=result.field,
     )
     await db.commit()
     return result
@@ -204,10 +241,18 @@ async def delete_staffings_batch(
         if obj:
             soft_delete(obj)
             deleted_count += 1
+            ctx = await get_audit_context(
+                db, project_id=obj.project_id, phase_id=obj.phase_id, person_id=obj.person_id,
+            )
+            person_name = obj.person_name_text or ctx["person_name"]
             await write_audit_log(
                 db, event_type=EventType.DELETE, entity_type=EntityType.STAFFING,
                 entity_id=item_id, project_id=obj.project_id,
                 before_obj=obj, request=request,
+                project_name=ctx["project_name"],
+                phase_name=ctx["phase_name"],
+                person_name=person_name,
+                field_name=obj.field,
             )
     await db.commit()
     return {"message": f"Deleted {deleted_count} staffings", "deleted_count": deleted_count}
@@ -222,10 +267,18 @@ async def delete_staffing(
     if not obj:
         raise HTTPException(status_code=404, detail="Staffing not found")
     soft_delete(obj)
+    ctx = await get_audit_context(
+        db, project_id=obj.project_id, phase_id=obj.phase_id, person_id=obj.person_id,
+    )
+    person_name = obj.person_name_text or ctx["person_name"]
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.STAFFING,
         entity_id=id, project_id=obj.project_id,
         before_obj=obj, request=request,
+        project_name=ctx["project_name"],
+        phase_name=ctx["phase_name"],
+        person_name=person_name,
+        field_name=obj.field,
     )
     await db.commit()
     return {"message": "Staffing deleted", "id": id}
@@ -242,10 +295,18 @@ async def restore_staffing(id: int, request: Request, db: AsyncSession = Depends
     if obj.deleted_at is None:
         raise HTTPException(status_code=400, detail="이미 활성 상태입니다.")
     obj.deleted_at = None
+    ctx = await get_audit_context(
+        db, project_id=obj.project_id, phase_id=obj.phase_id, person_id=obj.person_id,
+    )
+    person_name = obj.person_name_text or ctx["person_name"]
     await write_audit_log(
         db, event_type=EventType.RESTORE, entity_type=EntityType.STAFFING,
         entity_id=id, project_id=obj.project_id,
         after_obj=obj, request=request,
+        project_name=ctx["project_name"],
+        phase_name=ctx["phase_name"],
+        person_name=person_name,
+        field_name=obj.field,
     )
     await db.commit()
     return {"message": "Staffing restored", "id": id}

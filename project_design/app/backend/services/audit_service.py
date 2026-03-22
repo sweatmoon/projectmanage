@@ -3,7 +3,7 @@
 - 모든 CRUD 이벤트를 audit_logs 테이블에 기록
 - diff 추출: 변경 전후 JSON 비교 → changed_fields
 - soft-delete 유틸: deleted_at 필드 처리
-- 아카이빙: 6개월 이상 로그 → audit_logs_archive 이관
+- 아카이빙: 12개월 이상 로그 → audit_logs_archive 이관 (매일 새벽 자동 실행)
 """
 import json
 import logging
@@ -18,6 +18,68 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.audit import AuditLog, AuditLogArchive
 
 logger = logging.getLogger(__name__)
+
+
+# ── 컨텍스트 이름 조회 헬퍼 ──────────────────────────────────
+async def get_audit_context(
+    db: AsyncSession,
+    *,
+    project_id: Optional[int] = None,
+    phase_id: Optional[int] = None,
+    staffing_id: Optional[int] = None,
+    person_id: Optional[int] = None,
+) -> Dict[str, Optional[str]]:
+    """
+    감사 로그에 사용할 사업명/단계명/인원명을 DB에서 조회.
+    없으면 None 반환 (오류 무시).
+    """
+    result: Dict[str, Optional[str]] = {
+        "project_name": None,
+        "phase_name": None,
+        "person_name": None,
+        "field_name": None,
+    }
+    try:
+        from models.projects import Projects
+        from models.phases import Phases
+        from models.staffing import Staffing
+        from models.people import People
+        from sqlalchemy import select
+
+        if project_id:
+            r = await db.execute(select(Projects.project_name).where(Projects.id == project_id))
+            row = r.scalar_one_or_none()
+            if row:
+                result["project_name"] = row
+
+        if phase_id:
+            r = await db.execute(select(Phases.phase_name).where(Phases.id == phase_id))
+            row = r.scalar_one_or_none()
+            if row:
+                result["phase_name"] = row
+
+        if staffing_id:
+            r = await db.execute(
+                select(Staffing.person_name_text, Staffing.field, Staffing.person_id)
+                .where(Staffing.id == staffing_id)
+            )
+            row = r.one_or_none()
+            if row:
+                result["person_name"] = row[0]
+                result["field_name"] = row[1]
+                if not result["person_name"] and row[2]:
+                    person_id = row[2]
+
+        if person_id and not result["person_name"]:
+            r = await db.execute(select(People.person_name).where(People.id == person_id))
+            row = r.scalar_one_or_none()
+            if row:
+                result["person_name"] = row
+
+    except Exception as e:
+        logger.debug(f"[AUDIT] 컨텍스트 조회 실패 (무시): {e}")
+
+    return result
 
 # ── 이벤트 타입 상수 ──────────────────────────────────────────
 class EventType:
@@ -112,6 +174,11 @@ async def write_audit_log(
     is_system_action: bool = False,
     description: Optional[str] = None,
     request_id: Optional[str] = None,
+    # 사람이 읽기 좋은 컨텍스트 이름 (선택)
+    project_name: Optional[str] = None,   # 사업명
+    phase_name: Optional[str] = None,     # 단계명
+    person_name: Optional[str] = None,    # 인원명
+    field_name: Optional[str] = None,     # 분야명
     # 직접 지정 (request 없는 경우)
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
@@ -158,7 +225,11 @@ async def write_audit_log(
         # 자동 요약문 생성
         if description is None:
             description = _build_description(
-                event_type, entity_type, entity_id, changed_fields
+                event_type, entity_type, entity_id, changed_fields,
+                project_name=project_name,
+                phase_name=phase_name,
+                person_name=person_name,
+                field_name=field_name,
             )
 
         log = AuditLog(
@@ -195,51 +266,125 @@ def _build_description(
     entity_type: str,
     entity_id: Any,
     changed_fields: Dict,
+    *,
+    project_name: Optional[str] = None,
+    phase_name: Optional[str] = None,
+    person_name: Optional[str] = None,
+    field_name: Optional[str] = None,
 ) -> str:
-    """사람이 읽기 좋은 요약문 자동 생성"""
-    etype_kr = {
-        "project": "프로젝트", "phase": "단계", "staffing": "투입공수",
-        "calendar_entry": "일정셀", "people": "인력", "user": "사용자",
-    }.get(entity_type, entity_type)
+    """사람이 읽기 좋은 요약문 자동 생성 (사업명/단계명/인원명 포함)"""
 
     action_kr = {
-        EventType.CREATE:          "생성",
-        EventType.UPDATE:          "수정",
-        EventType.DELETE:          "삭제",
-        EventType.RESTORE:         "복원",
-        EventType.STATUS_CHANGE:   "상태 변경",
-        EventType.BULK_IMPORT:     "일괄 가져오기",
-        EventType.BULK_OVERWRITE:  "일괄 덮어쓰기",
-        EventType.SYNC:            "자동 동기화",
-        EventType.LOGIN:           "로그인",
-        EventType.LOGOUT:          "로그아웃",
-        EventType.USER_ROLE_CHANGE:"권한 변경",
+        EventType.CREATE:           "생성",
+        EventType.UPDATE:           "수정",
+        EventType.DELETE:           "삭제",
+        EventType.RESTORE:          "복원",
+        EventType.STATUS_CHANGE:    "상태 변경",
+        EventType.BULK_IMPORT:      "일괄 가져오기",
+        EventType.BULK_OVERWRITE:   "일괄 덮어쓰기",
+        EventType.SYNC:             "자동 동기화",
+        EventType.LOGIN:            "로그인",
+        EventType.LOGOUT:           "로그아웃",
+        EventType.USER_ROLE_CHANGE: "권한 변경",
     }.get(event_type, event_type)
 
-    base = f"{etype_kr}({entity_id}) {action_kr}"
+    # ── 컨텍스트 경로 구성 ──────────────────────────────────
+    # 예: [한국도로공사] > 2단계 > 이현우(사업관리)
+    context_parts = []
+    if project_name:
+        context_parts.append(f"[{project_name}]")
+    if phase_name:
+        context_parts.append(phase_name)
+    if person_name:
+        if field_name:
+            context_parts.append(f"{person_name}({field_name})")
+        else:
+            context_parts.append(person_name)
+    context = " > ".join(context_parts) if context_parts else None
 
-    # 특별 케이스: MD 변경
-    if "md" in changed_fields:
-        md_diff = changed_fields["md"]
-        base += f" — MD {md_diff['before']}→{md_diff['after']}"
+    # ── 엔티티별 변경 내용 요약 ────────────────────────────
+    detail_parts = []
 
-    # 특별 케이스: 상태 변경
-    if "status" in changed_fields:
-        st_diff = changed_fields["status"]
-        base += f" — {st_diff['before']}→{st_diff['after']}"
+    if entity_type == "project":
+        if "project_name" in changed_fields:
+            d = changed_fields["project_name"]
+            detail_parts.append(f"사업명 {d['before']}→{d['after']}")
+        if "status" in changed_fields:
+            d = changed_fields["status"]
+            detail_parts.append(f"유형 {d['before']}→{d['after']}")
+        if "organization" in changed_fields:
+            d = changed_fields["organization"]
+            detail_parts.append(f"기관 {d['before']}→{d['after']}")
+        if "deadline" in changed_fields:
+            d = changed_fields["deadline"]
+            detail_parts.append(f"마감일 {d['before']}→{d['after']}")
 
-    # 특별 케이스: 날짜 변경
-    if "start_date" in changed_fields or "end_date" in changed_fields:
-        parts = []
+    elif entity_type == "phase":
+        if "phase_name" in changed_fields:
+            d = changed_fields["phase_name"]
+            detail_parts.append(f"단계명 {d['before']}→{d['after']}")
         if "start_date" in changed_fields:
             d = changed_fields["start_date"]
-            parts.append(f"시작일 {d['before']}→{d['after']}")
+            detail_parts.append(f"시작일 {d['before']}→{d['after']}")
         if "end_date" in changed_fields:
             d = changed_fields["end_date"]
-            parts.append(f"종료일 {d['before']}→{d['after']}")
-        base += " — " + ", ".join(parts)
+            detail_parts.append(f"종료일 {d['before']}→{d['after']}")
 
-    return base
+    elif entity_type == "staffing":
+        if "md" in changed_fields:
+            d = changed_fields["md"]
+            detail_parts.append(f"MD {d['before']}→{d['after']}")
+        if "person_id" in changed_fields or "person_name_text" in changed_fields:
+            key = "person_name_text" if "person_name_text" in changed_fields else "person_id"
+            d = changed_fields[key]
+            detail_parts.append(f"배정인력 {d['before']}→{d['after']}")
+        if "field" in changed_fields:
+            d = changed_fields["field"]
+            detail_parts.append(f"분야 {d['before']}→{d['after']}")
+
+    elif entity_type == "calendar_entry":
+        if "status" in changed_fields:
+            d = changed_fields["status"]
+            status_map = {"A": "실제", "P": "계획", None: "미입력"}
+            b = status_map.get(d["before"], d["before"])
+            a = status_map.get(d["after"], d["after"])
+            detail_parts.append(f"일정 {b}→{a}")
+        if "entry_date" in changed_fields:
+            d = changed_fields["entry_date"]
+            detail_parts.append(f"날짜 {d.get('after') or d.get('before')}")
+
+    elif entity_type == "people":
+        if "person_name" in changed_fields:
+            d = changed_fields["person_name"]
+            detail_parts.append(f"이름 {d['before']}→{d['after']}")
+        if "grade" in changed_fields:
+            d = changed_fields["grade"]
+            detail_parts.append(f"등급 {d['before']}→{d['after']}")
+        if "employment_status" in changed_fields:
+            d = changed_fields["employment_status"]
+            detail_parts.append(f"상태 {d['before']}→{d['after']}")
+
+    elif entity_type == "user":
+        if "role" in changed_fields:
+            d = changed_fields["role"]
+            detail_parts.append(f"권한 {d['before']}→{d['after']}")
+
+    detail = ", ".join(detail_parts) if detail_parts else None
+
+    # ── 최종 조합 ──────────────────────────────────────────
+    # 예: [한국도로공사] > 2단계 > 이현우(사업관리) — MD 3→5 수정
+    if context and detail:
+        return f"{context} — {detail} {action_kr}"
+    elif context:
+        return f"{context} — {action_kr}"
+    elif detail:
+        return f"{detail} {action_kr}"
+    else:
+        etype_kr = {
+            "project": "사업", "phase": "단계", "staffing": "인력배정",
+            "calendar_entry": "일정셀", "people": "인력", "user": "사용자",
+        }.get(entity_type, entity_type)
+        return f"{etype_kr}({entity_id}) {action_kr}"
 
 
 # ── soft-delete 헬퍼 ─────────────────────────────────────────
@@ -255,7 +400,7 @@ def is_deleted(obj: Any) -> bool:
 
 
 # ── 아카이빙 ─────────────────────────────────────────────────
-async def archive_old_logs(db: AsyncSession, months: int = 6) -> int:
+async def archive_old_logs(db: AsyncSession, months: int = 12) -> int:
     """
     months 개월 이상 된 로그를 audit_logs_archive로 이관.
     반환값: 이관된 건수

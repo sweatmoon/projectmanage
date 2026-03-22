@@ -49,3 +49,7 @@ services:
       - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=${NOTIFY_SMTP_PASS:-}
       - TZ=Asia/Seoul
     command: gantt-app   # 이 컨테이너만 모니터링
+
+networks:
+  gantt-net:
+    driver: bridge

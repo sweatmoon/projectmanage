@@ -19,6 +19,8 @@ services:
     image: sweatmoon/gantt-app:${IMAGE_TAG:-latest}
     container_name: gantt-app
     restart: unless-stopped
+    networks:
+      - gantt-net
     volumes:
       - app_logs:/app/logs
     environment:
@@ -49,6 +51,8 @@ services:
     image: postgres:16-alpine
     container_name: gantt-db
     restart: unless-stopped
+    networks:
+      - gantt-net
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -68,6 +72,8 @@ services:
     image: postgres:16-alpine
     container_name: gantt-backup
     restart: unless-stopped
+    networks:
+      - gantt-net
     volumes:
       - backup_data:/backups
     environment:
@@ -78,13 +84,23 @@ services:
       db:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-c",
-      "while true; do
+      "echo '[시작] db 준비 대기 중...';
+       until pg_isready -h db -U gantt -q; do
+         echo '[대기] db 아직 준비 안 됨, 5초 후 재시도...';
+         sleep 5;
+       done;
+       echo '[완료] db 연결 확인 - 백업 스케줄러 시작 (6시간 주기)';
+       while true; do
          pg_dump -h db -U gantt -d ganttdb | gzip > /backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
          && echo \"[$(date)] ✅ 백업 완료\"
          || echo \"[$(date)] ❌ 백업 실패\";
          find /backups -name '*.sql.gz' -mtime +${BACKUP_KEEP_DAYS:-30} -delete;
-         sleep 86400;
+         sleep 21600;
        done"]
+
+networks:
+  gantt-net:
+    driver: bridge
 
 volumes:
   postgres_data:

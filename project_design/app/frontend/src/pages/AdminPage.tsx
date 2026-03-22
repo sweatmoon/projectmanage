@@ -5,7 +5,7 @@ import {
   Shield, Users, Activity, LogIn, Clock, RefreshCw,
   ChevronDown, ChevronUp, Search, Download, Archive,
   FileText, GitBranch, Filter, X, ChevronLeft, ChevronRight,
-  UserCheck, ToggleLeft, ToggleRight, Trash2, PlusCircle,
+  UserCheck, ToggleLeft, ToggleRight, Trash2, PlusCircle, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -103,6 +103,7 @@ function eventTypeBadge(et: string) {
     LOGIN:           'bg-green-100 text-green-800',
     LOGOUT:          'bg-gray-100 text-gray-600',
     USER_ROLE_CHANGE:'bg-purple-100 text-purple-700',
+    ROLLBACK:        'bg-orange-200 text-orange-800',
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[et] ?? 'bg-gray-100 text-gray-500'}`}>
@@ -384,12 +385,38 @@ export default function AdminPage() {
 
   // ── 아카이브 실행 ──────────────────────────────────────────
   const handleArchive = async () => {
-    if (!confirm('6개월 이상 된 감사 로그를 아카이브 테이블로 이관하시겠습니까?')) return;
+    if (!confirm('12개월 이상 된 감사 로그를 아카이브 테이블로 이관하시겠습니까?')) return;
     try {
-      const res = await client.admin.triggerArchive(6);
+      const res = await client.admin.triggerArchive(12);
       toast.success(res.message);
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? '아카이브 실패');
+    }
+  };
+
+  // ── 단건 롤백 ────────────────────────────────────────────
+  const handleRollback = async (log: AuditLogItem) => {
+    const rollbackTargets = ['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'];
+    if (!rollbackTargets.includes(log.event_type)) {
+      toast.error(`'${log.event_type}' 이벤트는 롤백할 수 없습니다.`);
+      return;
+    }
+    const entityLabel = log.description ?? `${log.entity_type}(${log.entity_id})`;
+    if (!confirm(
+      `[롤백 확인]\n\n` +
+      `"${entityLabel}"\n\n` +
+      `이 작업을 이전 상태로 되돌리겠습니까?\n` +
+      `(${log.event_type} 이벤트 → 복원)\n\n` +
+      `⚠️ 이 작업은 즉시 DB에 반영되며 되돌릴 수 없습니다.`
+    )) return;
+    try {
+      const res = await client.admin.rollbackAuditLog(log.event_id);
+      toast.success(
+        `롤백 완료: ${res.entity_type}/${res.entity_id} — 복원 필드: ${res.rolled_back_fields.join(', ')}`
+      );
+      fetchAuditLogs(auditSkip); // 목록 새로고침
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '롤백 실패');
     }
   };
 
@@ -706,6 +733,24 @@ export default function AdminPage() {
                                   after={log.after_data}
                                   changed={log.changed_fields}
                                 />
+                              )}
+
+                              {/* 롤백 버튼 */}
+                              {['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'].includes(log.event_type) && (
+                                <div className="pt-2 border-t border-blue-100">
+                                  <button
+                                    onClick={() => handleRollback(log)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                                               bg-orange-50 text-orange-700 border border-orange-200
+                                               hover:bg-orange-100 transition-colors"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    이 시점으로 롤백
+                                  </button>
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    ⚠️ 이 레코드를 해당 이벤트 발생 직전 상태로 복원합니다. 신중하게 사용하세요.
+                                  </p>
+                                </div>
                               )}
                             </div>
                           </td>

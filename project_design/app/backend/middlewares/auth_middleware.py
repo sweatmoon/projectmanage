@@ -82,10 +82,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # JWT 검증
+        # 1) Authorization: Bearer <token> 헤더 우선
+        # 2) ?token= 쿼리파라미터 fallback (CSV 내보내기 등 window.open 용)
         auth_header = request.headers.get("Authorization", "")
         token = None
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
+
+        if not token:
+            token = request.query_params.get("token", None)
 
         if not token:
             return JSONResponse(

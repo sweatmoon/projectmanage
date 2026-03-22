@@ -1,6 +1,6 @@
 """
 Phases 라우터 — Audit Log 통합
-단계 생성/수정/삭제/복원 이벤트 기록
+단계 생성/수정/삭제/복원 이벤트 기록 (project_name 컨텍스트 포함)
 """
 import json
 import logging
@@ -9,11 +9,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from services.phases import PhasesService
-from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
+from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/phases", tags=["phases"])
@@ -88,9 +89,11 @@ async def create_phases(
     result = await service.create(data.model_dump())
     if not result:
         raise HTTPException(status_code=400, detail="Failed to create phases")
+    ctx = await get_audit_context(db, project_id=result.project_id)
     await write_audit_log(
         db, event_type=EventType.CREATE, entity_type=EntityType.PHASE,
         entity_id=result.id, project_id=result.project_id, after_obj=result, request=request,
+        project_name=ctx["project_name"], phase_name=result.phase_name,
     )
     await db.commit()
     return result
@@ -106,9 +109,11 @@ async def create_phasess_batch(
         r = await service.create(item_data.model_dump())
         if r:
             results.append(r)
+            ctx = await get_audit_context(db, project_id=r.project_id)
             await write_audit_log(
                 db, event_type=EventType.CREATE, entity_type=EntityType.PHASE,
                 entity_id=r.id, project_id=r.project_id, after_obj=r, request=request,
+                project_name=ctx["project_name"], phase_name=r.phase_name,
             )
     await db.commit()
     return results
@@ -126,10 +131,12 @@ async def update_phasess_batch(
         r = await service.update(item.id, update_dict)
         if r:
             results.append(r)
+            ctx = await get_audit_context(db, project_id=r.project_id)
             await write_audit_log(
                 db, event_type=EventType.UPDATE, entity_type=EntityType.PHASE,
                 entity_id=r.id, project_id=r.project_id,
                 before_obj=before, after_obj=r, request=request,
+                project_name=ctx["project_name"], phase_name=r.phase_name,
             )
     await db.commit()
     return results
@@ -145,10 +152,12 @@ async def update_phases(
         raise HTTPException(status_code=404, detail="Phases not found")
     update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
     result = await service.update(id, update_dict)
+    ctx = await get_audit_context(db, project_id=result.project_id)
     await write_audit_log(
         db, event_type=EventType.UPDATE, entity_type=EntityType.PHASE,
         entity_id=id, project_id=result.project_id,
         before_obj=before, after_obj=result, request=request,
+        project_name=ctx["project_name"], phase_name=result.phase_name,
     )
     await db.commit()
     return result
@@ -165,9 +174,11 @@ async def delete_phasess_batch(
         if obj:
             soft_delete(obj)
             deleted_count += 1
+            ctx = await get_audit_context(db, project_id=obj.project_id)
             await write_audit_log(
                 db, event_type=EventType.DELETE, entity_type=EntityType.PHASE,
                 entity_id=item_id, project_id=obj.project_id, before_obj=obj, request=request,
+                project_name=ctx["project_name"], phase_name=obj.phase_name,
             )
     await db.commit()
     return {"message": f"Deleted {deleted_count} phases", "deleted_count": deleted_count}
@@ -180,9 +191,11 @@ async def delete_phases(id: int, request: Request, db: AsyncSession = Depends(ge
     if not obj:
         raise HTTPException(status_code=404, detail="Phases not found")
     soft_delete(obj)
+    ctx = await get_audit_context(db, project_id=obj.project_id)
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PHASE,
         entity_id=id, project_id=obj.project_id, before_obj=obj, request=request,
+        project_name=ctx["project_name"], phase_name=obj.phase_name,
     )
     await db.commit()
     return {"message": "Phases deleted", "id": id}
@@ -191,7 +204,6 @@ async def delete_phases(id: int, request: Request, db: AsyncSession = Depends(ge
 @router.post("/{id}/restore")
 async def restore_phases(id: int, request: Request, db: AsyncSession = Depends(get_db)):
     from models.phases import Phases
-    from sqlalchemy import select
     result = await db.execute(select(Phases).where(Phases.id == id))
     obj = result.scalar_one_or_none()
     if not obj:
@@ -199,9 +211,11 @@ async def restore_phases(id: int, request: Request, db: AsyncSession = Depends(g
     if obj.deleted_at is None:
         raise HTTPException(status_code=400, detail="이미 활성 상태입니다.")
     obj.deleted_at = None
+    ctx = await get_audit_context(db, project_id=obj.project_id)
     await write_audit_log(
         db, event_type=EventType.RESTORE, entity_type=EntityType.PHASE,
         entity_id=id, project_id=obj.project_id, after_obj=obj, request=request,
+        project_name=ctx["project_name"], phase_name=obj.phase_name,
     )
     await db.commit()
     return {"message": "Phase restored", "id": id}
