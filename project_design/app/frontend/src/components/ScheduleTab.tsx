@@ -2276,7 +2276,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       </div>
 
       {/* Aggregation */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="hidden grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* 왼쪽: 일정 없는 인력 */}
         <Card>
           <CardHeader className="pb-2 pt-3 px-4">
