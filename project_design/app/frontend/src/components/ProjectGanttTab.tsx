@@ -1190,10 +1190,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   };
 
   const handleBadgeClick = (project: Project, phase: Phase) => {
-    if (isViewer) {
-      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
-      return;
-    }
+    // 뷰어도 투입인력 조회를 위해 readOnly 모달 허용
     setEditTarget({ project: { ...project }, phase: { ...phase } });
   };
 
@@ -1991,6 +1988,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
           onHatDelete={handleHatDelete}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
+          readOnly={isViewer}
         />
       )}
 
