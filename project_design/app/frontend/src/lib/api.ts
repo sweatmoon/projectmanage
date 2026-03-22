@@ -340,5 +340,20 @@ export const client = {
         rollback_audit_event_id: string;
       };
     },
+    async bulkRollback(eventIds: string[]) {
+      const res = await http.post('/admin/audit/bulk-rollback', { event_ids: eventIds });
+      return res.data as {
+        total: number;
+        success: number;
+        failed: number;
+        results: Array<{
+          event_id: string;
+          entity_type: string;
+          entity_id: string | null;
+          ok: boolean;
+          message: string;
+        }>;
+      };
+    },
   },
 };
