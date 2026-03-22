@@ -287,7 +287,8 @@ export const client = {
       if (params) Object.entries(params).forEach(([k, v]) => {
         if (v !== undefined && v !== '') qs.append(k, String(v));
       });
-      return `${base}/admin/audit/export/csv?${qs.toString()}&_token=${token}`;
+      // ?token= 파라미터: 미들웨어에서 Authorization 헤더 없이도 JWT 인증 허용
+      return `${base}/admin/audit/export/csv?${qs.toString()}&token=${token}`;
     },
     async triggerArchive(months = 6) {
       const res = await http.post('/admin/audit/archive', null, { params: { months } });
@@ -309,6 +310,17 @@ export const client = {
     async deleteAllowedUser(userId: string) {
       const res = await http.delete(`/admin/allowed-users/${encodeURIComponent(userId)}`);
       return res.data;
+    },
+    async rollbackAuditLog(eventId: string) {
+      const res = await http.post(`/admin/audit/rollback/${encodeURIComponent(eventId)}`);
+      return res.data as {
+        ok: boolean;
+        event_id: string;
+        entity_type: string;
+        entity_id: string;
+        rolled_back_fields: string[];
+        rollback_audit_event_id: string;
+      };
     },
   },
 };

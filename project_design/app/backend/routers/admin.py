@@ -1,13 +1,14 @@
 """
 관리자 전용 API 라우터
 접근 권한: role == 'admin' 만 허용
-- /admin/stats          : 시스템 통계
-- /admin/logs           : 접속 로그 (legacy)
-- /admin/users          : 사용자 목록
-- /admin/users/{id}/role: 역할 변경 (audit log 기록)
-- /admin/audit          : 감사 로그 조회 (필터, 페이징)
-- /admin/audit/export   : CSV/Excel 내보내기
-- /admin/audit/archive  : 오래된 로그 아카이빙
+- /admin/stats               : 시스템 통계
+- /admin/logs                : 접속 로그 (legacy)
+- /admin/users               : 사용자 목록
+- /admin/users/{id}/role     : 역할 변경 (audit log 기록)
+- /admin/audit               : 감사 로그 조회 (필터, 페이징)
+- /admin/audit/export/csv    : CSV 내보내기
+- /admin/audit/archive       : 오래된 로그 아카이빙
+- /admin/audit/rollback/{id} : 단건 레코드 롤백 (before_data 복원)
 """
 import csv
 import io
@@ -468,7 +469,7 @@ async def trigger_archive(
     request: Request,
     db: AsyncSession = Depends(get_db),
     _: Request = Depends(require_admin_only),
-    months: int = Query(6, ge=1, le=24, description="몇 개월 이상 된 로그를 아카이브할지"),
+    months: int = Query(12, ge=1, le=24, description="몇 개월 이상 된 로그를 아카이브할지"),
 ):
     count = await archive_old_logs(db, months=months)
     return {
@@ -635,3 +636,196 @@ async def delete_allowed_user(
     admin_id = getattr(request.state, "user_id", "system")
     logger.info(f"AllowedUser deleted: {user_id} by {admin_id}")
     return {"ok": True, "deleted": user_id}
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 단건 레코드 롤백 API ─────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+# 롤백 가능한 엔티티 → (테이블 모델, 제외 필드)
+_ROLLBACK_SKIP_FIELDS = {
+    "id", "deleted_at",   # id·삭제상태는 복원하지 않음
+}
+
+# 엔티티별 복원 제외 필드 (자동 관리 필드)
+_ENTITY_SKIP = {
+    "project":       {"id", "deleted_at", "color_hue"},
+    "phase":         {"id", "deleted_at"},
+    "staffing":      {"id", "deleted_at"},
+    "people":        {"id", "deleted_at"},
+    "calendar_entry": {"id", "deleted_at"},
+}
+
+
+async def _get_model_class(entity_type: str):
+    """entity_type 문자열 → SQLAlchemy 모델 클래스"""
+    mapping = {
+        "project":        ("models.projects",        "Projects"),
+        "phase":          ("models.phases",           "Phases"),
+        "staffing":       ("models.staffing",         "Staffing"),
+        "people":         ("models.people",           "People"),
+        "calendar_entry": ("models.calendar_entries", "CalendarEntries"),
+    }
+    if entity_type not in mapping:
+        return None
+    module_name, class_name = mapping[entity_type]
+    import importlib
+    mod = importlib.import_module(module_name)
+    return getattr(mod, class_name, None)
+
+
+class RollbackResponse(BaseModel):
+    ok: bool
+    event_id: str
+    entity_type: str
+    entity_id: str
+    rolled_back_fields: List[str]
+    rollback_audit_event_id: str
+
+
+@router.post("/audit/rollback/{event_id}", response_model=RollbackResponse)
+async def rollback_audit_log(
+    event_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """
+    감사 로그 단건 롤백.
+    해당 이벤트의 before_data를 사용하여 레코드를 이전 상태로 복원.
+
+    - DELETE 이벤트: soft-delete 해제 (deleted_at = None) + before_data 복원
+    - CREATE 이벤트: soft-delete (삭제 처리)
+    - UPDATE / STATUS_CHANGE 이벤트: before_data 필드들을 현재 레코드에 덮어씀
+    """
+    # 1) 감사 로그 조회
+    log_result = await db.execute(
+        select(AuditLog).where(AuditLog.event_id == event_id)
+    )
+    audit_log = log_result.scalar_one_or_none()
+    if not audit_log:
+        raise HTTPException(status_code=404, detail="감사 로그를 찾을 수 없습니다.")
+
+    entity_type = audit_log.entity_type
+    entity_id = audit_log.entity_id
+    event_type_val = audit_log.event_type
+
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id가 없어 롤백할 수 없습니다.")
+
+    # 2) 모델 클래스 조회
+    ModelClass = await _get_model_class(entity_type)
+    if ModelClass is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{entity_type}' 엔티티는 롤백을 지원하지 않습니다."
+        )
+
+    # 3) 현재 레코드 조회
+    try:
+        entity_id_int = int(entity_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="entity_id가 정수가 아닙니다.")
+
+    obj_result = await db.execute(
+        select(ModelClass).where(ModelClass.id == entity_id_int)
+    )
+    obj = obj_result.scalar_one_or_none()
+
+    rolled_back_fields: List[str] = []
+
+    if event_type_val == "CREATE":
+        # CREATE 롤백 = 레코드 soft-delete
+        if obj is None:
+            raise HTTPException(status_code=404, detail="대상 레코드를 찾을 수 없습니다.")
+        if not hasattr(obj, "deleted_at"):
+            raise HTTPException(status_code=400, detail="이 엔티티는 soft-delete를 지원하지 않습니다.")
+        obj.deleted_at = datetime.now(timezone.utc)
+        rolled_back_fields = ["deleted_at"]
+
+    else:
+        # UPDATE / STATUS_CHANGE / DELETE 롤백 = before_data 복원
+        if not audit_log.before_data:
+            raise HTTPException(
+                status_code=400,
+                detail="before_data가 없습니다. 이 이벤트는 롤백할 수 없습니다."
+            )
+
+        before_dict: dict = json.loads(audit_log.before_data)
+        skip_fields = _ENTITY_SKIP.get(entity_type, _ROLLBACK_SKIP_FIELDS)
+
+        if obj is None:
+            raise HTTPException(status_code=404, detail="대상 레코드를 찾을 수 없습니다.")
+
+        # DELETE 롤백: soft-delete 해제
+        if event_type_val == "DELETE" and hasattr(obj, "deleted_at"):
+            obj.deleted_at = None
+            rolled_back_fields.append("deleted_at(복원)")
+
+        # before_data 필드 적용
+        for field, val in before_dict.items():
+            if field in skip_fields:
+                continue
+            if not hasattr(obj, field):
+                continue
+            # date/datetime 문자열 파싱
+            col = ModelClass.__table__.columns.get(field)
+            if col is not None and val is not None:
+                import sqlalchemy
+                if isinstance(col.type, (sqlalchemy.DateTime,)):
+                    try:
+                        from datetime import datetime as dt
+                        val = dt.fromisoformat(str(val))
+                    except Exception:
+                        pass
+                elif isinstance(col.type, sqlalchemy.Date):
+                    try:
+                        from datetime import date as d
+                        val = d.fromisoformat(str(val))
+                    except Exception:
+                        pass
+            setattr(obj, field, val)
+            rolled_back_fields.append(field)
+
+    # 4) 롤백 자체도 감사 로그에 기록
+    new_event_id = str(__import__("uuid").uuid4())
+    rollback_log = AuditLog(
+        event_id         = new_event_id,
+        event_type       = "ROLLBACK",
+        entity_type      = entity_type,
+        entity_id        = entity_id,
+        project_id       = audit_log.project_id,
+        user_id          = getattr(request.state, "user_id", None),
+        user_name        = getattr(request.state, "user_name", None),
+        user_role        = getattr(request.state, "user_role", None),
+        timestamp        = datetime.now(timezone.utc),
+        client_ip        = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                           or (request.client.host if request.client else ""),
+        user_agent       = request.headers.get("User-Agent", ""),
+        request_path     = str(request.url.path),
+        request_id       = str(__import__("uuid").uuid4()),
+        before_data      = audit_log.after_data,   # 롤백 전 = 이전 이벤트의 after
+        after_data       = audit_log.before_data,  # 롤백 후 = 이전 이벤트의 before
+        changed_fields   = json.dumps({"rolled_back_from_event": event_id}, ensure_ascii=False),
+        is_system_action = False,
+        description      = (
+            f"롤백: event_id={event_id} ({event_type_val} → 복원), "
+            f"필드: {', '.join(rolled_back_fields)}"
+        ),
+    )
+    db.add(rollback_log)
+    await db.commit()
+
+    logger.info(
+        f"[ROLLBACK] entity={entity_type}/{entity_id} "
+        f"event={event_id} fields={rolled_back_fields}"
+    )
+
+    return RollbackResponse(
+        ok=True,
+        event_id=event_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        rolled_back_fields=rolled_back_fields,
+        rollback_audit_event_id=new_event_id,
+    )

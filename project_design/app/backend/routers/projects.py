@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from models.projects import Projects
 from services.projects import ProjectsService
-from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
+from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/projects", tags=["projects"])
@@ -141,6 +141,7 @@ async def create_projects(
     await write_audit_log(
         db, event_type=EventType.CREATE, entity_type=EntityType.PROJECT,
         entity_id=result.id, after_obj=result, request=request,
+        project_name=result.project_name,
     )
     await db.commit()
     logger.info(f"[AUDIT] Project {result.id} created with color_hue={result.color_hue}")
@@ -202,6 +203,7 @@ async def update_projects(
     await write_audit_log(
         db, event_type=event_type, entity_type=EntityType.PROJECT,
         entity_id=id, before_obj=before, after_obj=result, request=request,
+        project_name=result.project_name,
     )
     await db.commit()
     return result
@@ -236,6 +238,7 @@ async def delete_projects(id: int, request: Request, db: AsyncSession = Depends(
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PROJECT,
         entity_id=id, before_obj=obj, request=request,
+        project_name=obj.project_name,
     )
     await db.commit()
     return {"message": "Projects deleted", "id": id}

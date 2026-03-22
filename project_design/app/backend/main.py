@@ -2,9 +2,10 @@ import importlib
 import logging
 import os
 import pkgutil
+import asyncio
 import traceback
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.config import settings
@@ -21,6 +22,38 @@ from services.database import initialize_database, close_database
 from services.auth import initialize_admin_user
 from middlewares.auth_middleware import AuthMiddleware
 # MODULE_IMPORTS_END
+
+
+async def _auto_archive_scheduler():
+    """매일 새벽 3시(KST)에 12개월 이상 감사 로그 자동 아카이브"""
+    logger = logging.getLogger(__name__)
+    logger.info("[SCHEDULER] 감사 로그 자동 아카이브 스케줄러 시작")
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # 다음 새벽 3시(KST = UTC+9 → UTC 18:00) 계산
+            from datetime import timedelta
+            target_hour_utc = 18  # KST 03:00 = UTC 18:00
+            next_run = now.replace(hour=target_hour_utc, minute=0, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(f"[SCHEDULER] 다음 아카이브 실행: {next_run.isoformat()} (대기 {int(wait_seconds)}초)")
+            await asyncio.sleep(wait_seconds)
+
+            # 아카이브 실행
+            from core.database import db_manager
+            from services.audit_service import archive_old_logs
+            if db_manager.async_session_maker:
+                async with db_manager.async_session_maker() as session:
+                    count = await archive_old_logs(session, months=12)
+                    logger.info(f"[SCHEDULER] 자동 아카이브 완료: {count}건 이관")
+        except asyncio.CancelledError:
+            logger.info("[SCHEDULER] 아카이브 스케줄러 종료")
+            break
+        except Exception as e:
+            logger.error(f"[SCHEDULER] 아카이브 실패: {e}")
+            await asyncio.sleep(3600)  # 오류 시 1시간 후 재시도
 
 
 def setup_logging():
@@ -68,9 +101,17 @@ async def lifespan(app: FastAPI):
     await initialize_admin_user()
     # MODULE_STARTUP_END
 
+    # 감사 로그 자동 아카이브 스케줄러 시작
+    archive_task = asyncio.create_task(_auto_archive_scheduler())
+
     logger.info("=== Application startup completed successfully ===")
     yield
     # MODULE_SHUTDOWN_START
+    archive_task.cancel()
+    try:
+        await archive_task
+    except asyncio.CancelledError:
+        pass
     await close_database()
     # MODULE_SHUTDOWN_END
 

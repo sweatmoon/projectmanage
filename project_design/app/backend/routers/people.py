@@ -1,6 +1,7 @@
 """
 People 라우터 — Audit Log 통합
 인력 생성/수정/삭제/복원 이벤트 기록, soft-delete 적용
+person_name 컨텍스트 포함
 """
 import json
 import logging
@@ -8,6 +9,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -114,6 +116,7 @@ async def create_people(
     await write_audit_log(
         db, event_type=EventType.CREATE, entity_type=EntityType.PEOPLE,
         entity_id=result.id, after_obj=result, request=request,
+        person_name=result.person_name,
     )
     await db.commit()
     logger.info(f"[AUDIT] People {result.id} created")
@@ -133,6 +136,7 @@ async def create_peoples_batch(
             await write_audit_log(
                 db, event_type=EventType.CREATE, entity_type=EntityType.PEOPLE,
                 entity_id=r.id, after_obj=r, request=request,
+                person_name=r.person_name,
             )
     await db.commit()
     return results
@@ -153,6 +157,7 @@ async def update_peoples_batch(
             await write_audit_log(
                 db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,
                 entity_id=r.id, before_obj=before, after_obj=r, request=request,
+                person_name=r.person_name,
             )
     await db.commit()
     return results
@@ -171,6 +176,7 @@ async def update_people(
     await write_audit_log(
         db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,
         entity_id=id, before_obj=before, after_obj=result, request=request,
+        person_name=result.person_name,
     )
     await db.commit()
     return result
@@ -190,6 +196,7 @@ async def delete_peoples_batch(
             await write_audit_log(
                 db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
                 entity_id=item_id, before_obj=obj, request=request,
+                person_name=obj.person_name,
             )
     await db.commit()
     return {"message": f"Deleted {deleted_count} people", "deleted_count": deleted_count}
@@ -207,6 +214,7 @@ async def delete_people(
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
         entity_id=id, before_obj=obj, request=request,
+        person_name=obj.person_name,
     )
     await db.commit()
     return {"message": "People deleted", "id": id}
@@ -215,7 +223,6 @@ async def delete_people(
 @router.post("/{id}/restore")
 async def restore_people(id: int, request: Request, db: AsyncSession = Depends(get_db)):
     from models.people import People
-    from sqlalchemy import select
     result = await db.execute(select(People).where(People.id == id))
     obj = result.scalar_one_or_none()
     if not obj:
@@ -226,6 +233,7 @@ async def restore_people(id: int, request: Request, db: AsyncSession = Depends(g
     await write_audit_log(
         db, event_type=EventType.RESTORE, entity_type=EntityType.PEOPLE,
         entity_id=id, after_obj=obj, request=request,
+        person_name=obj.person_name,
     )
     await db.commit()
     return {"message": "People restored", "id": id}
