@@ -14,6 +14,7 @@ from models.phases import Phases
 from models.staffing import Staffing
 from models.people import People
 from models.calendar_entries import Calendar_entries
+from models.staffing_hat import StaffingHat
 from utils.holidays import count_business_days, get_consecutive_business_days
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,8 @@ class PhaseTextImportResponse(BaseModel):
 
 class ProjectExportResponse(BaseModel):
     text: str
+    actual_text: str = ''   # 모자(대체인력) 반영된 실제 버전
+    has_hat: bool = False   # 모자 데이터 존재 여부
     project_name: str
     organization: str
     status: str
@@ -508,8 +511,52 @@ async def export_project_to_text(
             if person_name and person_name not in section_map_out:
                 section_map_out[person_name] = s.category or '단계감리팀'
 
+        # ── 모자(hat) 데이터 조회 → 실제 버전 생성 ──────────────
+        staffing_ids = [s.id for s in all_staffing]
+        hat_by_staffing: Dict[int, str] = {}  # staffing_id → actual_person_name
+        if staffing_ids:
+            hat_stmt = select(StaffingHat).where(
+                and_(
+                    StaffingHat.staffing_id.in_(staffing_ids),
+                    StaffingHat.deleted_at.is_(None),
+                )
+            )
+            hat_result = await db.execute(hat_stmt)
+            for hat in hat_result.scalars().all():
+                hat_by_staffing[hat.staffing_id] = hat.actual_person_name
+
+        has_hat = bool(hat_by_staffing)
+
+        # 실제 버전 라인 생성 (hat 적용)
+        actual_lines = []
+        for phase in phases:
+            start_str = phase.start_date.strftime('%Y%m%d') if phase.start_date else ''
+            end_str = phase.end_date.strftime('%Y%m%d') if phase.end_date else ''
+            total_biz_days = 0
+            if phase.start_date and phase.end_date:
+                total_biz_days = count_business_days(phase.start_date, phase.end_date)
+
+            phase_staffing = staffing_by_phase.get(phase.id, [])
+            person_entries = []
+            for s in phase_staffing:
+                # 모자가 있으면 실제 투입자 이름으로 교체
+                person_name = hat_by_staffing.get(s.id) or s.person_name_text or ''
+                if not person_name and s.person_id:
+                    person_name = people_by_id.get(s.person_id, '')
+                field_name = s.field or ''
+                actual_md = actual_counts.get(s.id, s.md or 0)
+                if actual_md == total_biz_days:
+                    person_entries.append(f"{person_name}:{field_name}")
+                else:
+                    person_entries.append(f"{person_name}:{field_name}:{actual_md}")
+
+            parts = [phase.phase_name, start_str, end_str] + person_entries
+            actual_lines.append(', '.join(parts))
+
         return ProjectExportResponse(
             text='\n'.join(lines),
+            actual_text='\n'.join(actual_lines),
+            has_hat=has_hat,
             project_name=project.project_name,
             organization=project.organization or '',
             status=project.status or '',

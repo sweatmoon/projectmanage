@@ -358,6 +358,8 @@ export default function ProjectDetail() {
   // Text export dialog
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportText, setExportText] = useState('');
+  const [exportActualText, setExportActualText] = useState('');
+  const [exportHasHat, setExportHasHat] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
   // Text edit dialog (overwrite phases)
@@ -1253,6 +1255,8 @@ export default function ProjectDetail() {
       });
       // client.apiCall.invoke는 이미 res.data를 반환하므로 .data 중복 접근 불필요
       setExportText(res?.text || '');
+      setExportActualText(res?.actual_text || '');
+      setExportHasHat(res?.has_hat || false);
       setShowExportDialog(true);
     } catch (err) {
       console.error(err);
@@ -1954,33 +1958,115 @@ export default function ProjectDetail() {
 
         {/* Text Export Dialog */}
         <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={`max-h-[90vh] overflow-y-auto ${exportHasHat ? 'max-w-5xl' : 'max-w-2xl'}`}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 텍스트 내보내기
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                아래 텍스트를 복사하여 다른 프로젝트에 붙여넣거나 백업할 수 있습니다.
-              </p>
-              <Textarea
-                value={exportText}
-                readOnly
-                rows={12}
-                className="font-mono text-xs"
-              />
-            </div>
+
+            {exportHasHat ? (
+              /* ── 모자 있는 경우: 좌우 분할 ── */
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  🎩 대체인력이 있습니다. 공식 버전과 실제 버전을 확인하세요. 주황색 줄은 대체인력이 적용된 라인입니다.
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* 공식 버전 */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-600">📄 공식 버전 (기관 제출용)</span>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+                          onClick={() => { navigator.clipboard.writeText(exportText); toast.success('공식 버전 복사됨'); }}>
+                          <Copy className="h-3 w-3 mr-1" />복사
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+                          onClick={() => { const b = new Blob([exportText], { type: 'text/plain;charset=utf-8' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `${project?.project_name || 'project'}_공식.txt`; a.click(); URL.revokeObjectURL(u); }}>
+                          <Download className="h-3 w-3 mr-1" />저장
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="border rounded-md overflow-hidden font-mono text-xs bg-white">
+                      {exportText.split('\n').map((line, i) => (
+                        <div key={i} className="px-3 py-0.5 border-b border-slate-50 last:border-b-0 whitespace-pre-wrap break-all leading-5">
+                          {line || <span className="text-slate-200">—</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 실제 버전 */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-orange-600">🎩 실제 버전 (내부 관리용)</span>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+                          onClick={() => { navigator.clipboard.writeText(exportActualText); toast.success('실제 버전 복사됨'); }}>
+                          <Copy className="h-3 w-3 mr-1" />복사
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+                          onClick={() => { const b = new Blob([exportActualText], { type: 'text/plain;charset=utf-8' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `${project?.project_name || 'project'}_실제.txt`; a.click(); URL.revokeObjectURL(u); }}>
+                          <Download className="h-3 w-3 mr-1" />저장
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="border border-orange-100 rounded-md overflow-hidden font-mono text-xs bg-white">
+                      {(() => {
+                        const officialLines = exportText.split('\n');
+                        const actualLines = exportActualText.split('\n');
+                        return actualLines.map((line, i) => {
+                          const changed = line !== officialLines[i];
+                          return (
+                            <div
+                              key={i}
+                              className={`px-3 py-0.5 border-b border-slate-50 last:border-b-0 whitespace-pre-wrap break-all leading-5 ${
+                                changed ? 'bg-orange-50 text-orange-800 font-semibold' : ''
+                              }`}
+                            >
+                              {line || <span className="text-slate-200">—</span>}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ── 모자 없는 경우: 기존 단일 뷰 ── */
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  아래 텍스트를 복사하여 다른 프로젝트에 붙여넣거나 백업할 수 있습니다.
+                </p>
+                <Textarea
+                  value={exportText}
+                  readOnly
+                  rows={12}
+                  className="font-mono text-xs"
+                />
+              </div>
+            )}
+
             <DialogFooter>
-              <Button variant="outline" onClick={handleDownloadExport}>
-                <Download className="h-4 w-4 mr-1" />
-                파일 다운로드
-              </Button>
-              <Button onClick={handleCopyExport}>
-                <Copy className="h-4 w-4 mr-1" />
-                클립보드 복사
-              </Button>
+              {!exportHasHat && (
+                <>
+                  <Button variant="outline" onClick={handleDownloadExport}>
+                    <Download className="h-4 w-4 mr-1" />
+                    파일 다운로드
+                  </Button>
+                  <Button onClick={handleCopyExport}>
+                    <Copy className="h-4 w-4 mr-1" />
+                    클립보드 복사
+                  </Button>
+                </>
+              )}
+              {exportHasHat && (
+                <Button variant="outline" onClick={() => setShowExportDialog(false)}>
+                  닫기
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
