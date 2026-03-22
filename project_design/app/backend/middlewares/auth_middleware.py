@@ -124,6 +124,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/calendar/range",
             "/api/v1/calendar/by_staffing_ids",
             "/api/v1/calendar/entries_by_person_ids",
+            "/api/v1/calendar/staffing-total-count",   # 뷰어 달력 MD 카운트 조회
         }
         if (
             request.state.user_role == "viewer"
