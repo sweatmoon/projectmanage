@@ -3155,7 +3155,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     {allPeople.map((p, pi) => {
                       const pStaffings = personStaffings.get(p.id) || [];
                       const totalMd = pStaffings.reduce((sum, ps) => sum + (ps.staffing.md || 0), 0);
-                      const usedMd = pStaffings.reduce((sum, ps) => sum + (totalMdCount.get(ps.staffing.id) || 0), 0);
+                      const usedMd = pStaffings.reduce((sum, ps) => sum + (staffingDayCount.get(ps.staffing.id) || 0), 0);
                       const isFocused = focusedPersonId === p.id;
                       const isInChecked = checkedProjectPeople.has(p.id);
                       const isLastPerson = pi === allPeople.length - 1;
@@ -3182,7 +3182,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             borderTop: '1px solid #d1d5db',
                             borderBottom: isInChecked ? '2px solid #818cf8' : '1px solid #d1d5db',
                           }}
-                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}\n전체기간 투입: ${usedMd}/${totalMd}MD\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
+                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}\n이번달 투입: ${usedMd}MD\n전체기간 투입: ${pStaffings.reduce((sum, ps) => sum + (totalMdCount.get(ps.staffing.id) || 0), 0)}/${totalMd}MD\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
                           onClick={() => handlePersonHeaderClick(p.id)}
                         >
                           <div className="leading-tight">
