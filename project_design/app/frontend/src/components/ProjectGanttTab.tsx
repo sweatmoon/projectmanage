@@ -1931,13 +1931,13 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setProjectInfoTarget(null)}>
             <div className="bg-white rounded-xl shadow-2xl w-[420px] max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderLeft: `4px solid ${projColor.border}` }}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-bold text-sm truncate">{proj.project_name}</span>
+              <div className="flex items-start justify-between px-5 py-4 border-b gap-2" style={{ borderLeft: `4px solid ${projColor.border}` }}>
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="font-bold text-sm break-words">{proj.project_name}</span>
                   <span className="text-[10px] font-bold rounded px-1.5 py-0.5 text-white flex-shrink-0"
                     style={{ backgroundColor: statusColors[proj.status] || '#6b7280' }}>{proj.status}</span>
                 </div>
-                <button type="button" onClick={() => setProjectInfoTarget(null)} className="p-1 hover:bg-gray-100 rounded flex-shrink-0"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setProjectInfoTarget(null)} className="p-1 hover:bg-gray-100 rounded flex-shrink-0 mt-0.5"><X className="h-4 w-4" /></button>
               </div>
               <div className="px-5 py-4 border-b grid grid-cols-2 gap-3 text-xs">
                 <div><div className="text-muted-foreground mb-0.5">발주기관</div><div className="font-medium">{proj.organization || '-'}</div></div>

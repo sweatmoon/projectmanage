@@ -443,6 +443,7 @@ interface EditModalProps {
   onHatDelete: (staffingId: number) => Promise<void>;
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
+  readOnly?: boolean; // 뷰어 계정: 조회 전용
 }
 
 /* ── Searchable Person Combobox ── */
@@ -658,7 +659,7 @@ function PersonCombobox({
   );
 }
 
-function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, hatMap, onHatSave, onHatDelete, onClose, onSave }: EditModalProps) {
+function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, hatMap, onHatSave, onHatDelete, onClose, onSave, readOnly = false }: EditModalProps) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null); // staffing_id
 
@@ -864,7 +865,10 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h3 className="text-base font-semibold">프로젝트/단계/투입인력 수정</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold">{readOnly ? '프로젝트/단계/투입인력 조회' : '프로젝트/단계/투입인력 수정'}</h3>
+            {readOnly && <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full border">읽기 전용</span>}
+          </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
             <X className="h-4 w-4" />
           </button>
@@ -876,16 +880,16 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">사업명</Label>
-                <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} className="h-8 text-sm" />
+                <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} className="h-8 text-sm" readOnly={readOnly} disabled={readOnly} />
               </div>
               <div>
                 <Label className="text-xs">발주기관</Label>
-                <Input value={organization} onChange={(e) => setOrganization(e.target.value)} className="h-8 text-sm" />
+                <Input value={organization} onChange={(e) => setOrganization(e.target.value)} className="h-8 text-sm" readOnly={readOnly} disabled={readOnly} />
               </div>
             </div>
             <div>
               <Label className="text-xs">상태</Label>
-              <Select value={projectStatus} onValueChange={setProjectStatus}>
+              <Select value={projectStatus} onValueChange={setProjectStatus} disabled={readOnly}>
                 <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -904,16 +908,16 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">단계 정보</h4>
             <div>
               <Label className="text-xs">단계명</Label>
-              <Input value={phaseName} onChange={(e) => setPhaseName(e.target.value)} className="h-8 text-sm" />
+              <Input value={phaseName} onChange={(e) => setPhaseName(e.target.value)} className="h-8 text-sm" readOnly={readOnly} disabled={readOnly} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">시작일</Label>
-                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-sm" />
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-sm" readOnly={readOnly} disabled={readOnly} />
               </div>
               <div>
                 <Label className="text-xs">종료일</Label>
-                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-sm" />
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-sm" readOnly={readOnly} disabled={readOnly} />
               </div>
             </div>
             {businessDays !== null && (
@@ -925,10 +929,10 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">
               투입인력 ({activeCount}명)
-              {deletedIds.size > 0 && (
+              {!readOnly && deletedIds.size > 0 && (
                 <span className="text-red-500 text-[10px] ml-2">({deletedIds.size}명 삭제 예정)</span>
               )}
-              <span className="text-[10px] font-normal text-muted-foreground ml-2">검색/직접입력 가능 · MD 편집 가능</span>
+              {!readOnly && <span className="text-[10px] font-normal text-muted-foreground ml-2">검색/직접입력 가능 · MD 편집 가능</span>}
             </h4>
             {phaseStaffing.length === 0 ? (
               <p className="text-xs text-muted-foreground italic py-2">배정된 인력이 없습니다.</p>
@@ -956,6 +960,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                             </span>
                             {isDeleted ? (
                               <span className="flex-1 text-xs text-red-500 line-through">{getDisplayPerson(s)}</span>
+                            ) : readOnly ? (
+                              <span className="flex-1 text-xs text-gray-700 px-1">{getDisplayPerson(s)}</span>
                             ) : (
                               <PersonCombobox
                                 value={getCurrentPersonId(s)}
@@ -970,6 +976,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                             <div className="flex items-center gap-1 flex-shrink-0">
                               {isDeleted ? (
                                 <span className="text-[10px] text-red-400 w-[50px] text-right">{currentMd != null ? `${currentMd}MD` : '-'}</span>
+                              ) : readOnly ? (
+                                <span className="text-xs text-gray-700 w-[52px] text-right">{currentMd != null ? currentMd : '-'}</span>
                               ) : (
                                 <input
                                   type="number"
@@ -984,7 +992,7 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                               )}
                               <span className="text-[9px] text-muted-foreground">MD</span>
                             </div>
-                            {isDeleted ? (
+                            {!readOnly && (isDeleted ? (
                               <button
                                 type="button"
                                 onClick={() => handleUndoDelete(s.id)}
@@ -1027,7 +1035,7 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                                   <X className="h-3 w-3" />
                                 </button>
                               </>
-                            )}
+                            ))}
                           </div>
                         );
                       })}
@@ -1039,8 +1047,14 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
           </div>
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
-          <Button variant="outline" size="sm" onClick={onClose}>취소</Button>
-          <Button size="sm" onClick={handleSave}>저장</Button>
+          {readOnly ? (
+            <Button variant="outline" size="sm" onClick={onClose}>닫기</Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={onClose}>취소</Button>
+              <Button size="sm" onClick={handleSave}>저장</Button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -2522,7 +2536,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
     if (isViewer) {
-      toast.error('조회 전용 계정입니다. 일정을 수정할 수 없습니다.');
+      // 뷰어: 읽기전용 모달로 투입인력 조회 허용
+      const proj = projectMap.get(badge.projectId);
+      const ph = phaseMapLocal.get(badge.phaseId);
+      if (proj && ph) {
+        setEditTarget({ project: { ...proj }, phase: { ...ph } });
+      }
       return;
     }
     if (scheduleIsLocked) {
@@ -3401,6 +3420,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           hatMap={hatMap}
           onHatSave={handleHatSave}
           onHatDelete={handleHatDelete}
+          readOnly={isViewer}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
         />
