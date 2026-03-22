@@ -3378,9 +3378,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         return (
           <div
             ref={badgeContextMenuRef}
-            className="fixed z-[100] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[240px] max-w-[340px]"
+            className="fixed z-[100] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[240px] max-w-[480px] w-max"
             style={{
-              left: Math.min(badgeContextMenu.x, window.innerWidth - 360),
+              left: Math.min(badgeContextMenu.x, window.innerWidth - 500),
               top: Math.min(badgeContextMenu.y, window.innerHeight - 300),
             }}
           >
@@ -3393,7 +3393,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                 className="w-2 h-2 rounded-full flex-shrink-0"
                 style={{ backgroundColor: color.border }}
               />
-              <span className="text-[11px] font-bold truncate" style={{ color: color.text }}>
+              <span className="text-[11px] font-bold break-words" style={{ color: color.text, maxWidth: 380 }}>
                 📋 {badgeContextMenu.projectName}
               </span>
               <span className="text-[9px] text-muted-foreground ml-auto">
