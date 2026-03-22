@@ -3046,7 +3046,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               배정된 인력이 없습니다.
             </div>
           ) : (
-            <div className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <div className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch' }} onScroll={() => setBadgeContextMenu(null)}>
               <table className="text-xs" style={{ tableLayout: 'fixed', minWidth: tableMinWidth, borderCollapse: 'separate', borderSpacing: 0 }}>
                 <colgroup>
                   <col style={{ width: badgeColW }} />
