@@ -330,6 +330,8 @@ function HatPersonCombobox({
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customName, setCustomName] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const filtered = allPeople.filter((p) =>
     p.person_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -339,8 +341,14 @@ function HatPersonCombobox({
 
   useEffect(() => {
     if (!open) return;
+    // 버튼 위치 기준으로 fixed 드롭다운 좌표 계산
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 240) });
+    }
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+          && buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
         setOpen(false); setSearch(''); setShowCustomInput(false);
       }
     };
@@ -354,8 +362,9 @@ function HatPersonCombobox({
   };
 
   return (
-    <div className="relative flex-1" ref={dropdownRef}>
+    <div className="relative flex-1">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => { setOpen(!open); setSearch(''); setShowCustomInput(false); }}
         className={`flex items-center justify-between w-full h-7 px-2 text-xs border rounded transition-colors ${
@@ -367,8 +376,12 @@ function HatPersonCombobox({
         <span className="truncate">{currentName || '대체인력 선택...'}</span>
         <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
       </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-[240px] bg-white border rounded-lg shadow-lg z-[100] max-h-[300px] flex flex-col">
+      {open && dropPos && (
+        <div
+          ref={dropdownRef}
+          className="fixed bg-white border rounded-lg shadow-xl z-[9999] max-h-[300px] flex flex-col"
+          style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}
+        >
           <div className="p-1.5 border-b">
             <input
               type="text"
@@ -2474,14 +2487,14 @@ export default function ProjectDetail() {
 
         {/* ── 🎩 모자(대체인력) 모달 ────────────────────────────────── */}
         <Dialog open={hatModalOpen} onOpenChange={(o) => { if (!savingHat) setHatModalOpen(o); }}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg min-h-[420px] flex flex-col overflow-visible">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <HardHat className="h-5 w-5 text-orange-500" />
                 대체인력(모자) 관리
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-3 py-2 flex-1 overflow-visible">
               {hatModalStaffingIds.map((sid) => {
                 const staffing = staffingList.find((s) => s.id === sid);
                 if (!staffing) return null;
