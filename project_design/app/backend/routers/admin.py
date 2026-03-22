@@ -1,14 +1,16 @@
 """
 관리자 전용 API 라우터
 접근 권한: role == 'admin' 만 허용
-- /admin/stats               : 시스템 통계
-- /admin/logs                : 접속 로그 (legacy)
-- /admin/users               : 사용자 목록
-- /admin/users/{id}/role     : 역할 변경 (audit log 기록)
-- /admin/audit               : 감사 로그 조회 (필터, 페이징)
-- /admin/audit/export/csv    : CSV 내보내기
-- /admin/audit/archive       : 오래된 로그 아카이빙
-- /admin/audit/rollback/{id} : 단건 레코드 롤백 (before_data 복원)
+- /admin/stats                            : 시스템 통계
+- /admin/logs                             : 접속 로그 (legacy)
+- /admin/users                            : 사용자 목록
+- /admin/users/{id}/role                  : 역할 변경 (audit log 기록)
+- /admin/audit                            : 감사 로그 조회 (필터, 페이징)
+- /admin/audit/export/csv                 : CSV 내보내기
+- /admin/audit/archive                    : 오래된 로그 아카이빙
+- /admin/audit/rollback/{id}              : 단건 레코드 롤백 (before_data 복원)
+- /admin/audit/project-rollback/{id}      : 사업 단위 통째 롤백 (project+phases+staffing+calendar)
+- /admin/audit/phase-rollback/{id}        : 단계 단위 통째 롤백 (phase+staffing+calendar)
 """
 import csv
 import io
@@ -836,5 +838,289 @@ async def rollback_audit_log(
         entity_type=entity_type,
         entity_id=entity_id,
         rolled_back_fields=rolled_back_fields,
+        rollback_audit_event_id=new_event_id,
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 사업 단위 통째 롤백 API ──────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+class ProjectRollbackResponse(BaseModel):
+    ok: bool
+    project_id: int
+    restored: dict       # { "project": bool, "phases": int, "staffing": int, "calendar": int }
+    rollback_audit_event_id: str
+
+
+async def _restore_calendar_for_staffing_ids(db: AsyncSession, staffing_ids: List[int]) -> int:
+    """
+    복원된 staffing의 캘린더 항목을 phase 날짜 범위 기반으로 재생성한다.
+    calendar_entries에 deleted_at 컬럼이 없으므로 hard-delete 후 재생성 방식 사용.
+    """
+    from models.calendar_entries import Calendar_entries
+    from models.staffing import Staffing
+    from models.phases import Phases
+    from utils.holidays import get_consecutive_business_days
+    import sqlalchemy
+
+    restored_count = 0
+    for sid in staffing_ids:
+        # 기존 항목 삭제
+        await db.execute(
+            sqlalchemy.delete(Calendar_entries).where(
+                Calendar_entries.staffing_id == sid
+            )
+        )
+        # staffing 정보 조회
+        staffing_result = await db.execute(
+            select(Staffing).where(Staffing.id == sid, Staffing.deleted_at.is_(None))
+        )
+        staffing = staffing_result.scalar_one_or_none()
+        if not staffing or not staffing.md or staffing.md <= 0:
+            continue
+
+        # phase 날짜 범위 조회
+        phase_result = await db.execute(
+            select(Phases).where(Phases.id == staffing.phase_id, Phases.deleted_at.is_(None))
+        )
+        phase = phase_result.scalar_one_or_none()
+        if not phase or not phase.start_date or not phase.end_date:
+            continue
+
+        # 영업일 MD 수만큼 캘린더 재생성
+        biz_days = get_consecutive_business_days(phase.start_date, phase.end_date, staffing.md)
+        new_entries = [
+            Calendar_entries(staffing_id=sid, entry_date=d, status="")
+            for d in biz_days
+        ]
+        if new_entries:
+            db.add_all(new_entries)
+            restored_count += len(new_entries)
+
+    return restored_count
+
+
+@router.post("/audit/project-rollback/{project_id}", response_model=ProjectRollbackResponse)
+async def project_rollback(
+    project_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """
+    사업 단위 통째 롤백.
+
+    project_id에 해당하는 사업과 그 하위 모든 데이터를 복원/삭제한다.
+
+    - 사업이 soft-delete 상태 (deleted_at 있음)  → 복원 (project + phases + staffing + calendar 재생성)
+    - 사업이 활성 상태 (deleted_at 없음)          → 전체 soft-delete (project + phases + staffing + calendar 삭제)
+    """
+    from models.projects import Projects
+    from models.phases import Phases
+    from models.staffing import Staffing
+    from models.calendar_entries import Calendar_entries
+    import sqlalchemy
+
+    # 1) 사업 조회 (soft-delete 포함해서)
+    proj_result = await db.execute(select(Projects).where(Projects.id == project_id))
+    project = proj_result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail=f"사업 ID {project_id}를 찾을 수 없습니다.")
+
+    is_deleted = project.deleted_at is not None
+    action = "RESTORE" if is_deleted else "DELETE"
+    now = datetime.now(timezone.utc)
+
+    restored = {"project": False, "phases": 0, "staffing": 0, "calendar": 0}
+
+    # 2) 사업 복원 or 삭제
+    project.deleted_at = None if is_deleted else now
+    restored["project"] = True
+
+    # 3) 하위 단계 모두 복원 or 삭제 (soft-delete 포함 전체)
+    phases_result = await db.execute(
+        select(Phases).where(Phases.project_id == project_id)
+    )
+    phases = phases_result.scalars().all()
+    phase_ids = [p.id for p in phases]
+
+    for phase in phases:
+        phase.deleted_at = None if is_deleted else now
+        restored["phases"] += 1
+
+    # 4) 하위 투입공수 모두 복원 or 삭제
+    staffing_ids: List[int] = []
+    if phase_ids:
+        staffing_result = await db.execute(
+            select(Staffing).where(Staffing.phase_id.in_(phase_ids))
+        )
+        staffings = staffing_result.scalars().all()
+        for s in staffings:
+            s.deleted_at = None if is_deleted else now
+            staffing_ids.append(s.id)
+            restored["staffing"] += 1
+
+    # 5) 캘린더 처리
+    if staffing_ids:
+        if is_deleted:
+            # 복원 시: 캘린더 재생성
+            cal_count = await _restore_calendar_for_staffing_ids(db, staffing_ids)
+            restored["calendar"] = cal_count
+        else:
+            # 삭제 시: calendar_entries는 hard-delete (deleted_at 없음)
+            del_result = await db.execute(
+                sqlalchemy.delete(Calendar_entries).where(
+                    Calendar_entries.staffing_id.in_(staffing_ids)
+                )
+            )
+            restored["calendar"] = del_result.rowcount
+
+    # 6) 감사 로그 기록
+    new_event_id = str(__import__("uuid").uuid4())
+    rollback_log = AuditLog(
+        event_id         = new_event_id,
+        event_type       = "ROLLBACK",
+        entity_type      = "project",
+        entity_id        = str(project_id),
+        project_id       = project_id,
+        user_id          = getattr(request.state, "user_id", None),
+        user_name        = getattr(request.state, "user_name", None),
+        user_role        = getattr(request.state, "user_role", None),
+        timestamp        = now,
+        client_ip        = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                           or (request.client.host if request.client else ""),
+        user_agent       = request.headers.get("User-Agent", ""),
+        request_path     = str(request.url.path),
+        request_id       = str(__import__("uuid").uuid4()),
+        changed_fields   = json.dumps({"action": action, "restored": restored}, ensure_ascii=False),
+        is_system_action = False,
+        description      = (
+            f"[사업 전체 {'복원' if is_deleted else '삭제'}] {project.project_name} — "
+            f"단계 {restored['phases']}개, 투입공수 {restored['staffing']}개, "
+            f"일정 {restored['calendar']}개"
+        ),
+    )
+    db.add(rollback_log)
+    await db.commit()
+
+    logger.info(
+        f"[PROJECT ROLLBACK] project_id={project_id} action={action} restored={restored}"
+    )
+
+    return ProjectRollbackResponse(
+        ok=True,
+        project_id=project_id,
+        restored=restored,
+        rollback_audit_event_id=new_event_id,
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 단계 단위 통째 롤백 API ──────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+class PhaseRollbackResponse(BaseModel):
+    ok: bool
+    phase_id: int
+    restored: dict       # { "phase": bool, "staffing": int, "calendar": int }
+    rollback_audit_event_id: str
+
+
+@router.post("/audit/phase-rollback/{phase_id}", response_model=PhaseRollbackResponse)
+async def phase_rollback(
+    phase_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """
+    단계 단위 통째 롤백.
+
+    phase_id에 해당하는 단계와 그 하위 투입공수/캘린더를 복원/삭제한다.
+
+    - 단계가 soft-delete 상태 (deleted_at 있음)  → 복원
+    - 단계가 활성 상태 (deleted_at 없음)          → 전체 soft-delete
+    """
+    from models.phases import Phases
+    from models.staffing import Staffing
+    from models.calendar_entries import Calendar_entries
+    import sqlalchemy
+
+    # 1) 단계 조회 (soft-delete 포함)
+    phase_result = await db.execute(select(Phases).where(Phases.id == phase_id))
+    phase = phase_result.scalar_one_or_none()
+    if not phase:
+        raise HTTPException(status_code=404, detail=f"단계 ID {phase_id}를 찾을 수 없습니다.")
+
+    is_deleted = phase.deleted_at is not None
+    action = "RESTORE" if is_deleted else "DELETE"
+    now = datetime.now(timezone.utc)
+
+    restored = {"phase": False, "staffing": 0, "calendar": 0}
+
+    # 2) 단계 복원 or 삭제
+    phase.deleted_at = None if is_deleted else now
+    restored["phase"] = True
+
+    # 3) 하위 투입공수 모두 복원 or 삭제
+    staffing_result = await db.execute(
+        select(Staffing).where(Staffing.phase_id == phase_id)
+    )
+    staffings = staffing_result.scalars().all()
+    staffing_ids: List[int] = []
+    for s in staffings:
+        s.deleted_at = None if is_deleted else now
+        staffing_ids.append(s.id)
+        restored["staffing"] += 1
+
+    # 4) 캘린더 처리
+    if staffing_ids:
+        if is_deleted:
+            cal_count = await _restore_calendar_for_staffing_ids(db, staffing_ids)
+            restored["calendar"] = cal_count
+        else:
+            del_result = await db.execute(
+                sqlalchemy.delete(Calendar_entries).where(
+                    Calendar_entries.staffing_id.in_(staffing_ids)
+                )
+            )
+            restored["calendar"] = del_result.rowcount
+
+    # 5) 감사 로그 기록
+    new_event_id = str(__import__("uuid").uuid4())
+    rollback_log = AuditLog(
+        event_id         = new_event_id,
+        event_type       = "ROLLBACK",
+        entity_type      = "phase",
+        entity_id        = str(phase_id),
+        project_id       = phase.project_id,
+        user_id          = getattr(request.state, "user_id", None),
+        user_name        = getattr(request.state, "user_name", None),
+        user_role        = getattr(request.state, "user_role", None),
+        timestamp        = now,
+        client_ip        = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                           or (request.client.host if request.client else ""),
+        user_agent       = request.headers.get("User-Agent", ""),
+        request_path     = str(request.url.path),
+        request_id       = str(__import__("uuid").uuid4()),
+        changed_fields   = json.dumps({"action": action, "restored": restored}, ensure_ascii=False),
+        is_system_action = False,
+        description      = (
+            f"[단계 전체 {'복원' if is_deleted else '삭제'}] {phase.phase_name} — "
+            f"투입공수 {restored['staffing']}개, 일정 {restored['calendar']}개"
+        ),
+    )
+    db.add(rollback_log)
+    await db.commit()
+
+    logger.info(
+        f"[PHASE ROLLBACK] phase_id={phase_id} action={action} restored={restored}"
+    )
+
+    return PhaseRollbackResponse(
+        ok=True,
+        phase_id=phase_id,
+        restored=restored,
         rollback_audit_event_id=new_event_id,
     )

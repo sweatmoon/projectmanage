@@ -322,5 +322,23 @@ export const client = {
         rollback_audit_event_id: string;
       };
     },
+    async projectRollback(projectId: number) {
+      const res = await http.post(`/admin/audit/project-rollback/${projectId}`);
+      return res.data as {
+        ok: boolean;
+        project_id: number;
+        restored: { project: boolean; phases: number; staffing: number; calendar: number };
+        rollback_audit_event_id: string;
+      };
+    },
+    async phaseRollback(phaseId: number) {
+      const res = await http.post(`/admin/audit/phase-rollback/${phaseId}`);
+      return res.data as {
+        ok: boolean;
+        phase_id: number;
+        restored: { phase: boolean; staffing: number; calendar: number };
+        rollback_audit_event_id: string;
+      };
+    },
   },
 };
