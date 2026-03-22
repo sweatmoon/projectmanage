@@ -2691,7 +2691,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     <th
                       className="sticky left-0 bg-slate-100 border-r-2 border-r-slate-400 border border-gray-300 text-center text-[10px] font-semibold py-1.5" 
                       rowSpan={2}
-                      style={{ width: badgeColW, zIndex: 60 }}
+                      style={{ width: badgeColW, maxWidth: badgeColW, overflow: 'hidden', zIndex: 60 }}
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span>📌 주간별 사업</span>
@@ -2826,7 +2826,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     return (
                       <tr
                         key={d}
-                        className={`${isNonW ? 'bg-red-50/30' : ''} ${isTd ? 'bg-blue-50/30' : ''}`}
+                        className=""
                         style={isWeekStart ? { borderTop: '3px solid #475569' } : undefined}
                       >
                         {/* Badge column */}
@@ -2837,6 +2837,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             }`}
                             style={{
                               width: badgeColW,
+                              maxWidth: badgeColW,
+                              overflow: 'hidden',
                               padding: '2px 3px',
                               verticalAlign: 'top',
                               zIndex: 25,
@@ -2955,7 +2957,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         ) : !isFirstDayOfWeek ? null : (
                           <td
                             className="sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
-                            style={{ width: badgeColW, padding: '2px 3px', zIndex: 25 }}
+                            style={{ width: badgeColW, maxWidth: badgeColW, overflow: 'hidden', padding: '2px 3px', zIndex: 25 }}
                           >
                             <span className="text-[8px] text-gray-400 italic">-</span>
                           </td>
@@ -2965,7 +2967,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           className={`sticky border border-gray-300 text-center font-semibold text-[11px] ${
                             isTd ? 'bg-blue-100 text-blue-800' : isHol ? 'bg-red-50 text-red-600' : isWe ? 'bg-gray-100' : 'bg-white'
                           }`}
-                          style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight, zIndex: 25 }}
+                          style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight, zIndex: 20 }}
                           title={holidayName ?? undefined}
                         >
                           {d}
@@ -2976,7 +2978,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           className={`sticky border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
                             isHol ? 'text-red-500' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'
                           } ${isTd ? 'bg-blue-100' : isHol ? 'bg-red-50' : isWe ? 'bg-gray-100' : 'bg-white'}`}
-                          style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0', zIndex: 25 }}
+                          style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0', zIndex: 20 }}
                         >
                           {dow}
                         </td>
