@@ -249,6 +249,9 @@ export default function AdminPage() {
   const [auditSearch, setAuditSearch] = useState('');
   const [expandedAudit, setExpandedAudit] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  // 체크박스 선택 상태
+  const [selectedEventIds, setSelectedEventIds] = useState<Set<string>>(new Set());
+  const [bulkRollingBack, setBulkRollingBack] = useState(false);
 
   // ── fetch 함수들 ───────────────────────────────────────────
   const fetchStats = async () => {
@@ -395,6 +398,52 @@ export default function AdminPage() {
   };
 
   // ── 단건 롤백 ────────────────────────────────────────────
+  // ── 체크박스 토글 ────────────────────────────────────────
+  const toggleSelectLog = (eventId: string) => {
+    setSelectedEventIds(prev => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId); else next.add(eventId);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    const rollbackable = auditLogs.filter(l =>
+      ['CREATE','UPDATE','DELETE','STATUS_CHANGE'].includes(l.event_type)
+    );
+    const allSelected = rollbackable.every(l => selectedEventIds.has(l.event_id));
+    setSelectedEventIds(allSelected ? new Set() : new Set(rollbackable.map(l => l.event_id)));
+  };
+
+  // ── 일괄 롤백 ────────────────────────────────────────────
+  const handleBulkRollback = async () => {
+    if (selectedEventIds.size === 0) return;
+    if (!confirm(
+      `[일괄 롤백 확인]\n\n선택한 ${selectedEventIds.size}개 항목을 롤백하겠습니까?\n\n` +
+      `• project/phase 이벤트는 하위 데이터(단계·투입공수·일정) 포함 복원/삭제\n` +
+      `• 같은 사업/단계가 여러 번 선택된 경우 1번만 처리됩니다\n\n` +
+      `⚠️ 즉시 DB에 반영되며 되돌릴 수 없습니다.`
+    )) return;
+    setBulkRollingBack(true);
+    try {
+      const res = await client.admin.bulkRollback(Array.from(selectedEventIds));
+      const failedItems = res.results.filter(r => !r.ok);
+      if (failedItems.length === 0) {
+        toast.success(`일괄 롤백 완료: ${res.success}/${res.total}개 성공`);
+      } else {
+        toast.warning(
+          `일괄 롤백 부분 완료: ${res.success}/${res.total}개 성공, ${res.failed}개 실패\n` +
+          failedItems.map(f => `• ${f.entity_type}/${f.entity_id}: ${f.message}`).join('\n')
+        );
+      }
+      setSelectedEventIds(new Set());
+      fetchAuditLogs(auditSkip);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '일괄 롤백 실패');
+    } finally {
+      setBulkRollingBack(false);
+    }
+  };
+
   const handleRollback = async (log: AuditLogItem) => {
     const rollbackTargets = ['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'];
     if (!rollbackTargets.includes(log.event_type)) {
@@ -690,6 +739,21 @@ export default function AdminPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
+                    <th className="px-3 py-3 w-8">
+                      {/* 전체 선택 체크박스 */}
+                      <input
+                        type="checkbox"
+                        className="w-3.5 h-3.5 rounded border-gray-300 accent-purple-600"
+                        checked={(() => {
+                          const rollbackable = auditLogs.filter(l =>
+                            ['CREATE','UPDATE','DELETE','STATUS_CHANGE'].includes(l.event_type)
+                          );
+                          return rollbackable.length > 0 && rollbackable.every(l => selectedEventIds.has(l.event_id));
+                        })()}
+                        onChange={toggleSelectAll}
+                        title="롤백 가능한 항목 전체 선택"
+                      />
+                    </th>
                     <th className="text-left px-3 py-3 text-gray-600 font-medium w-36">시간 (KST)</th>
                     <th className="text-left px-3 py-3 text-gray-600 font-medium">이벤트</th>
                     <th className="text-left px-3 py-3 text-gray-600 font-medium">대상</th>
@@ -700,14 +764,29 @@ export default function AdminPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {auditLogs.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center text-gray-400 py-8">감사 로그가 없습니다</td></tr>
+                    <tr><td colSpan={7} className="text-center text-gray-400 py-8">감사 로그가 없습니다</td></tr>
                   ) : auditLogs.map(log => (
                     <>
                       <tr
                         key={log.event_id}
-                        className={`hover:bg-gray-50 transition-colors cursor-pointer ${log.is_system_action ? 'bg-gray-50/50' : ''}`}
+                        className={`hover:bg-gray-50 transition-colors cursor-pointer ${
+                          selectedEventIds.has(log.event_id) ? 'bg-purple-50/40' :
+                          log.is_system_action ? 'bg-gray-50/50' : ''}`}
                         onClick={() => setExpandedAudit(expandedAudit === log.event_id ? null : log.event_id)}
                       >
+                        {/* 체크박스 셀 */}
+                        <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                          {['CREATE','UPDATE','DELETE','STATUS_CHANGE'].includes(log.event_type) ? (
+                            <input
+                              type="checkbox"
+                              className="w-3.5 h-3.5 rounded border-gray-300 accent-purple-600"
+                              checked={selectedEventIds.has(log.event_id)}
+                              onChange={() => toggleSelectLog(log.event_id)}
+                            />
+                          ) : (
+                            <span className="w-3.5 h-3.5 block" />
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
                           {formatDateTime(log.timestamp)}
                           {log.is_system_action && (
@@ -752,7 +831,7 @@ export default function AdminPage() {
                       {/* 확장 상세 행 */}
                       {expandedAudit === log.event_id && (
                         <tr key={`${log.event_id}-detail`} className="bg-blue-50/30">
-                          <td colSpan={6} className="px-4 py-3">
+                          <td colSpan={7} className="px-4 py-3">
                             <div className="space-y-3">
                               {/* 메타 정보 */}
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -873,6 +952,37 @@ export default function AdminPage() {
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm border border-gray-200 disabled:opacity-40 hover:bg-gray-100"
               >
                 다음 <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ── 일괄 롤백 플로팅 바 ── */}
+          {selectedEventIds.size > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
+                            flex items-center gap-4 px-5 py-3
+                            bg-gray-900 text-white rounded-2xl shadow-2xl border border-gray-700
+                            animate-in slide-in-from-bottom-4 duration-200">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 flex items-center justify-center bg-purple-500 rounded-full text-xs font-bold">
+                  {selectedEventIds.size}
+                </span>
+                <span className="text-sm font-medium">개 항목 선택됨</span>
+              </div>
+              <div className="w-px h-5 bg-gray-600" />
+              <button
+                onClick={handleBulkRollback}
+                disabled={bulkRollingBack}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium
+                           bg-red-500 hover:bg-red-400 disabled:opacity-50 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                {bulkRollingBack ? '롤백 중...' : '일괄 롤백'}
+              </button>
+              <button
+                onClick={() => setSelectedEventIds(new Set())}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-3.5 h-3.5" /> 선택 해제
               </button>
             </div>
           )}

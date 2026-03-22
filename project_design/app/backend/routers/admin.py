@@ -1124,3 +1124,341 @@ async def phase_rollback(
         restored=restored,
         rollback_audit_event_id=new_event_id,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 일괄 롤백 API ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+class BulkRollbackRequest(BaseModel):
+    event_ids: List[str]   # 선택된 감사 로그 event_id 목록
+
+
+class BulkRollbackItemResult(BaseModel):
+    event_id: str
+    entity_type: str
+    entity_id: Optional[str]
+    ok: bool
+    message: str
+
+
+class BulkRollbackResponse(BaseModel):
+    total: int
+    success: int
+    failed: int
+    results: List[BulkRollbackItemResult]
+
+
+@router.post("/audit/bulk-rollback", response_model=BulkRollbackResponse)
+async def bulk_rollback_audit_logs(
+    body: BulkRollbackRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """
+    감사 로그 일괄 롤백.
+
+    선택한 event_id 목록을 순서대로 롤백한다.
+    - entity_type=project  → project_rollback (하위 전체)
+    - entity_type=phase    → phase_rollback   (하위 전체)
+    - 그 외                → 단건 롤백 (before_data 복원)
+
+    중복 제거:
+    - 같은 project_id의 project 이벤트는 최초 1번만 실행
+    - 같은 phase_id의 phase 이벤트는 최초 1번만 실행
+    """
+    from models.projects import Projects
+    from models.phases import Phases
+    from models.staffing import Staffing
+    from models.calendar_entries import Calendar_entries
+    import sqlalchemy as sa
+
+    results: List[BulkRollbackItemResult] = []
+    seen_project_ids: set = set()
+    seen_phase_ids: set = set()
+
+    now = datetime.now(timezone.utc)
+    user_id   = getattr(request.state, "user_id", None)
+    user_name = getattr(request.state, "user_name", None)
+    user_role = getattr(request.state, "user_role", None)
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or (request.client.host if request.client else "")
+    )
+    user_agent = request.headers.get("User-Agent", "")
+
+    for event_id in body.event_ids:
+        # 1) 감사 로그 조회
+        log_result = await db.execute(select(AuditLog).where(AuditLog.event_id == event_id))
+        audit_log = log_result.scalar_one_or_none()
+        if not audit_log:
+            results.append(BulkRollbackItemResult(
+                event_id=event_id, entity_type="?", entity_id=None,
+                ok=False, message="감사 로그를 찾을 수 없습니다."
+            ))
+            continue
+
+        entity_type   = audit_log.entity_type
+        entity_id_str = audit_log.entity_id
+        event_type_val = audit_log.event_type
+
+        # 롤백 불가 이벤트 타입 건너뜀
+        if event_type_val not in ("CREATE", "UPDATE", "DELETE", "STATUS_CHANGE"):
+            results.append(BulkRollbackItemResult(
+                event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                ok=False, message=f"'{event_type_val}' 이벤트는 롤백할 수 없습니다."
+            ))
+            continue
+
+        try:
+            # ── project: 통째 롤백 ─────────────────────────────
+            if entity_type == "project" and entity_id_str:
+                pid = int(entity_id_str)
+                if pid in seen_project_ids:
+                    results.append(BulkRollbackItemResult(
+                        event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                        ok=True, message=f"project #{pid} 이미 처리됨 (중복 건너뜀)"
+                    ))
+                    continue
+                seen_project_ids.add(pid)
+
+                proj_result = await db.execute(select(Projects).where(Projects.id == pid))
+                project = proj_result.scalar_one_or_none()
+                if not project:
+                    results.append(BulkRollbackItemResult(
+                        event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                        ok=False, message=f"project #{pid} 없음"
+                    ))
+                    continue
+
+                is_deleted = project.deleted_at is not None
+                action = "RESTORE" if is_deleted else "DELETE"
+                project.deleted_at = None if is_deleted else now
+
+                phases_result = await db.execute(select(Phases).where(Phases.project_id == pid))
+                phases = phases_result.scalars().all()
+                phase_ids_list = [p.id for p in phases]
+                for p in phases:
+                    p.deleted_at = None if is_deleted else now
+                    seen_phase_ids.add(p.id)  # 하위 phase는 중복 처리 필요 없음
+
+                staffing_ids: List[int] = []
+                if phase_ids_list:
+                    stf_result = await db.execute(
+                        select(Staffing).where(Staffing.phase_id.in_(phase_ids_list))
+                    )
+                    for s in stf_result.scalars().all():
+                        s.deleted_at = None if is_deleted else now
+                        staffing_ids.append(s.id)
+
+                cal_count = 0
+                if staffing_ids:
+                    if is_deleted:
+                        cal_count = await _restore_calendar_for_staffing_ids(db, staffing_ids)
+                    else:
+                        dr = await db.execute(
+                            sa.delete(Calendar_entries).where(
+                                Calendar_entries.staffing_id.in_(staffing_ids)
+                            )
+                        )
+                        cal_count = dr.rowcount
+
+                # 감사 로그
+                db.add(AuditLog(
+                    event_id=str(__import__("uuid").uuid4()),
+                    event_type="ROLLBACK", entity_type="project", entity_id=str(pid),
+                    project_id=pid, user_id=user_id, user_name=user_name, user_role=user_role,
+                    timestamp=now, client_ip=client_ip, user_agent=user_agent,
+                    request_path=str(request.url.path),
+                    request_id=str(__import__("uuid").uuid4()),
+                    changed_fields=json.dumps({"action": action, "bulk": True,
+                        "phases": len(phase_ids_list), "staffing": len(staffing_ids), "calendar": cal_count},
+                        ensure_ascii=False),
+                    is_system_action=False,
+                    description=(
+                        f"[일괄 롤백 - 사업 {'복원' if is_deleted else '삭제'}] {project.project_name} "
+                        f"— 단계 {len(phase_ids_list)}개, 투입공수 {len(staffing_ids)}개, 일정 {cal_count}개"
+                    ),
+                ))
+
+                results.append(BulkRollbackItemResult(
+                    event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                    ok=True,
+                    message=f"사업 {action}: 단계 {len(phase_ids_list)}, 투입공수 {len(staffing_ids)}, 일정 {cal_count}"
+                ))
+
+            # ── phase: 통째 롤백 ──────────────────────────────
+            elif entity_type == "phase" and entity_id_str:
+                phid = int(entity_id_str)
+                if phid in seen_phase_ids:
+                    results.append(BulkRollbackItemResult(
+                        event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                        ok=True, message=f"phase #{phid} 이미 처리됨 (중복 건너뜀)"
+                    ))
+                    continue
+                seen_phase_ids.add(phid)
+
+                phase_result = await db.execute(select(Phases).where(Phases.id == phid))
+                phase = phase_result.scalar_one_or_none()
+                if not phase:
+                    results.append(BulkRollbackItemResult(
+                        event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                        ok=False, message=f"phase #{phid} 없음"
+                    ))
+                    continue
+
+                is_deleted = phase.deleted_at is not None
+                action = "RESTORE" if is_deleted else "DELETE"
+                phase.deleted_at = None if is_deleted else now
+
+                stf_result = await db.execute(
+                    select(Staffing).where(Staffing.phase_id == phid)
+                )
+                stf_ids: List[int] = []
+                for s in stf_result.scalars().all():
+                    s.deleted_at = None if is_deleted else now
+                    stf_ids.append(s.id)
+
+                cal_count = 0
+                if stf_ids:
+                    if is_deleted:
+                        cal_count = await _restore_calendar_for_staffing_ids(db, stf_ids)
+                    else:
+                        dr = await db.execute(
+                            sa.delete(Calendar_entries).where(
+                                Calendar_entries.staffing_id.in_(stf_ids)
+                            )
+                        )
+                        cal_count = dr.rowcount
+
+                db.add(AuditLog(
+                    event_id=str(__import__("uuid").uuid4()),
+                    event_type="ROLLBACK", entity_type="phase", entity_id=str(phid),
+                    project_id=phase.project_id, user_id=user_id, user_name=user_name,
+                    user_role=user_role, timestamp=now, client_ip=client_ip,
+                    user_agent=user_agent, request_path=str(request.url.path),
+                    request_id=str(__import__("uuid").uuid4()),
+                    changed_fields=json.dumps({"action": action, "bulk": True,
+                        "staffing": len(stf_ids), "calendar": cal_count}, ensure_ascii=False),
+                    is_system_action=False,
+                    description=(
+                        f"[일괄 롤백 - 단계 {'복원' if is_deleted else '삭제'}] {phase.phase_name} "
+                        f"— 투입공수 {len(stf_ids)}개, 일정 {cal_count}개"
+                    ),
+                ))
+
+                results.append(BulkRollbackItemResult(
+                    event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                    ok=True,
+                    message=f"단계 {action}: 투입공수 {len(stf_ids)}, 일정 {cal_count}"
+                ))
+
+            # ── 단건 롤백 (staffing / people 등) ─────────────
+            elif entity_id_str:
+                ModelClass = await _get_model_class(entity_type)
+                if ModelClass is None:
+                    results.append(BulkRollbackItemResult(
+                        event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                        ok=False, message=f"'{entity_type}'은 롤백 미지원"
+                    ))
+                    continue
+
+                entity_id_int = int(entity_id_str)
+                obj_result = await db.execute(select(ModelClass).where(ModelClass.id == entity_id_int))
+                obj = obj_result.scalar_one_or_none()
+
+                rolled_fields: List[str] = []
+
+                if event_type_val == "CREATE":
+                    if obj is None or not hasattr(obj, "deleted_at"):
+                        results.append(BulkRollbackItemResult(
+                            event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                            ok=False, message="레코드 없음 또는 soft-delete 미지원"
+                        ))
+                        continue
+                    obj.deleted_at = now
+                    rolled_fields = ["deleted_at"]
+                else:
+                    if not audit_log.before_data or obj is None:
+                        results.append(BulkRollbackItemResult(
+                            event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                            ok=False, message="before_data 없음 또는 레코드 없음"
+                        ))
+                        continue
+
+                    before_dict: dict = json.loads(audit_log.before_data)
+                    skip_fields = _ENTITY_SKIP.get(entity_type, _ROLLBACK_SKIP_FIELDS)
+
+                    if event_type_val == "DELETE" and hasattr(obj, "deleted_at"):
+                        obj.deleted_at = None
+                        rolled_fields.append("deleted_at(복원)")
+
+                    for field, val in before_dict.items():
+                        if field in skip_fields or not hasattr(obj, field):
+                            continue
+                        col = ModelClass.__table__.columns.get(field)
+                        if col is not None and val is not None:
+                            import sqlalchemy as _sa
+                            if isinstance(col.type, _sa.DateTime):
+                                try:
+                                    from datetime import datetime as _dt
+                                    val = _dt.fromisoformat(str(val))
+                                except Exception:
+                                    pass
+                            elif isinstance(col.type, _sa.Date):
+                                try:
+                                    from datetime import date as _d
+                                    val = _d.fromisoformat(str(val))
+                                except Exception:
+                                    pass
+                        setattr(obj, field, val)
+                        rolled_fields.append(field)
+
+                db.add(AuditLog(
+                    event_id=str(__import__("uuid").uuid4()),
+                    event_type="ROLLBACK", entity_type=entity_type,
+                    entity_id=entity_id_str,
+                    project_id=audit_log.project_id,
+                    user_id=user_id, user_name=user_name, user_role=user_role,
+                    timestamp=now, client_ip=client_ip, user_agent=user_agent,
+                    request_path=str(request.url.path),
+                    request_id=str(__import__("uuid").uuid4()),
+                    before_data=audit_log.after_data, after_data=audit_log.before_data,
+                    changed_fields=json.dumps(
+                        {"rolled_back_from_event": event_id, "bulk": True}, ensure_ascii=False
+                    ),
+                    is_system_action=False,
+                    description=f"[일괄 롤백] {entity_type}/{entity_id_str} 복원, 필드: {', '.join(rolled_fields)}",
+                ))
+
+                results.append(BulkRollbackItemResult(
+                    event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                    ok=True, message=f"복원 필드: {', '.join(rolled_fields)}"
+                ))
+
+            else:
+                results.append(BulkRollbackItemResult(
+                    event_id=event_id, entity_type=entity_type, entity_id=entity_id_str,
+                    ok=False, message="entity_id 없음 (일괄 토글 등은 수동 처리 필요)"
+                ))
+
+        except Exception as e:
+            logger.error(f"[BULK ROLLBACK] event_id={event_id} error: {e}", exc_info=True)
+            results.append(BulkRollbackItemResult(
+                event_id=event_id, entity_type=entity_type if 'entity_type' in dir() else "?",
+                entity_id=entity_id_str if 'entity_id_str' in dir() else None,
+                ok=False, message=str(e)
+            ))
+
+    await db.commit()
+
+    success = sum(1 for r in results if r.ok)
+    logger.info(f"[BULK ROLLBACK] total={len(results)} success={success} failed={len(results)-success}")
+
+    return BulkRollbackResponse(
+        total=len(results),
+        success=success,
+        failed=len(results) - success,
+        results=results,
+    )
