@@ -584,3 +584,46 @@ async def get_entries_by_person_ids(
     except Exception as e:
         logger.error(f"Error querying entries by person_ids: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+# ── 전체 기간 staffing별 투입 MD 카운트 ──────────────────────────
+class StaffingTotalCountRequest(BaseModel):
+    staffing_ids: List[int]
+
+class StaffingTotalCountResponse(BaseModel):
+    counts: dict  # staffing_id(str) → 투입 MD 수
+
+
+@router.post("/staffing-total-count", response_model=StaffingTotalCountResponse)
+async def get_staffing_total_count(
+    request: StaffingTotalCountRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """staffing_ids별 전체 기간(월 무관) 투입 MD 카운트 반환"""
+    try:
+        if not request.staffing_ids:
+            return StaffingTotalCountResponse(counts={})
+
+        stmt = select(
+            Calendar_entries.staffing_id,
+            Calendar_entries.entry_date,
+        ).where(
+            Calendar_entries.staffing_id.in_(request.staffing_ids),
+            Calendar_entries.status.isnot(None),
+            Calendar_entries.status != '',
+        )
+        result = await db.execute(stmt)
+        rows = result.fetchall()
+
+        # staffing_id별 날짜 중복 제거 후 카운트
+        from collections import defaultdict
+        date_sets: dict = defaultdict(set)
+        for staffing_id, entry_date in rows:
+            date_sets[staffing_id].add(str(entry_date))
+
+        counts = {str(sid): len(dates) for sid, dates in date_sets.items()}
+        return StaffingTotalCountResponse(counts=counts)
+
+    except Exception as e:
+        logger.error(f"Error getting staffing total count: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")

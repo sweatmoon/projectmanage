@@ -1498,6 +1498,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   // Map<"staffing_id_date", CalendarEntry> — 셀 클릭 시 해당 key만 갱신, 전체 배열 교체 없음
   const [entryMap, setEntryMap] = useState<Map<string, CalendarEntry>>(new Map());
   const [loadingEntries, setLoadingEntries] = useState(false);
+  // 전체 기간 staffing별 투입 MD 카운트 (월 무관)
+  const [totalMdCount, setTotalMdCount] = useState<Map<number, number>>(new Map());
   const [togglingCell, setTogglingCell] = useState<string | null>(null);
   const [bulkFilling, setBulkFilling] = useState(false);
 
@@ -1600,23 +1602,40 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
     if (relevantStaffingIds.length === 0) {
       setEntryMap(new Map());
+      setTotalMdCount(new Map());
       return;
     }
 
     setLoadingEntries(true);
     try {
-      const res = await client.apiCall.invoke({
-        url: '/api/v1/calendar/month',
-        method: 'POST',
-        data: { year, month, staffing_ids: relevantStaffingIds },
-      });
-      const entries: CalendarEntry[] = res?.entries || [];
+      // 월별 entry + 전체 기간 카운트를 병렬 조회
+      const [monthRes, totalRes] = await Promise.all([
+        client.apiCall.invoke({
+          url: '/api/v1/calendar/month',
+          method: 'POST',
+          data: { year, month, staffing_ids: relevantStaffingIds },
+        }),
+        client.apiCall.invoke({
+          url: '/api/v1/calendar/staffing-total-count',
+          method: 'POST',
+          data: { staffing_ids: relevantStaffingIds },
+        }),
+      ]);
+
+      const entries: CalendarEntry[] = monthRes?.entries || [];
       const newMap = new Map<string, CalendarEntry>();
       entries.forEach((e) => newMap.set(`${e.staffing_id}_${e.entry_date}`, e));
       setEntryMap(newMap);
+
+      // 전체 기간 카운트 Map<staffingId, count>
+      const counts: Record<string, number> = totalRes?.counts || {};
+      const countMap = new Map<number, number>();
+      Object.entries(counts).forEach(([sid, cnt]) => countMap.set(Number(sid), cnt as number));
+      setTotalMdCount(countMap);
     } catch (err) {
       console.error('Failed to fetch calendar entries:', err);
       setEntryMap(new Map());
+      setTotalMdCount(new Map());
     } finally {
       setLoadingEntries(false);
     }
@@ -2287,9 +2306,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     if (!currentlySelected) {
       const s = staffingMap.get(staffingId);
       if (s && s.md !== null && s.md !== undefined) {
-        const currentCount = staffingDayCount.get(staffingId) || 0;
+        const currentCount = totalMdCount.get(staffingId) || 0;
         if (currentCount >= s.md) {
-          toast.error(`투입공수 한도 초과: ${s.md}일 중 ${currentCount}일 이미 선택됨`);
+          toast.error(`투입공수 한도 초과: 전체 기간 ${s.md}MD 중 ${currentCount}MD 이미 투입됨`);
           return;
         }
       }
@@ -2300,10 +2319,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
     // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
     const prevEntryMap = entryMap; // 롤백용 스냅샷
+    const prevTotalMdCount = totalMdCount; // 롤백용 스냅샷
     if (currentlySelected) {
       setEntryMap((prev) => { const next = new Map(prev); next.delete(cellKey); return next; });
+      setTotalMdCount((prev) => { const next = new Map(prev); next.set(staffingId, Math.max(0, (prev.get(staffingId) || 0) - 1)); return next; });
     } else {
       setEntryMap((prev) => { const next = new Map(prev); next.set(cellKey, { id: null, staffing_id: staffingId, entry_date: dateStr, status: newStatus }); return next; });
+      setTotalMdCount((prev) => { const next = new Map(prev); next.set(staffingId, (prev.get(staffingId) || 0) + 1); return next; });
     }
 
     try {
@@ -2318,7 +2340,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     } catch (err: any) {
       // 실패 시 이전 상태로 롤백
       setEntryMap(prevEntryMap);
-      console.error('Failed to toggle cell:', err);
+      setTotalMdCount(prevTotalMdCount);
       if (err?.response?.status === 401) {
         toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
       } else {
@@ -2342,7 +2364,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
       if (mode === 'fill') {
         // Collect all available (non-weekend, in-range, not-yet-selected) business days
-        const currentCount = staffingDayCount.get(staffingId) || 0;
+        const currentCount = totalMdCount.get(staffingId) || 0;
         let remaining = md > 0 ? md - currentCount : daysInMonth; // if no MD limit, fill all
 
         for (let d = 1; d <= daysInMonth && remaining > 0; d++) {
@@ -2379,18 +2401,21 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
       // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
       const prevEntryMap = entryMap; // 롤백용 스냅샷
+      const prevTotalMdCount = totalMdCount; // 롤백용 스냅샷
       if (mode === 'fill') {
         setEntryMap((prev) => {
           const next = new Map(prev);
           cells.forEach((c) => next.set(`${c.staffing_id}_${c.entry_date}`, { id: null, staffing_id: c.staffing_id, entry_date: c.entry_date, status: c.status }));
           return next;
         });
+        setTotalMdCount((prev) => { const next = new Map(prev); next.set(staffingId, (prev.get(staffingId) || 0) + cells.length); return next; });
       } else {
         setEntryMap((prev) => {
           const next = new Map(prev);
           cells.forEach((c) => next.delete(`${c.staffing_id}_${c.entry_date}`));
           return next;
         });
+        setTotalMdCount((prev) => { const next = new Map(prev); next.set(staffingId, Math.max(0, (prev.get(staffingId) || 0) - cells.length)); return next; });
       }
 
       // Send batch request
@@ -2408,6 +2433,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       } catch (err: any) {
         // 실패 시 이전 상태로 롤백
         setEntryMap(prevEntryMap);
+        setTotalMdCount(prevTotalMdCount);
         console.error('Bulk fill failed:', err);
         if (err?.response?.status === 401) {
           toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -3129,7 +3155,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     {allPeople.map((p, pi) => {
                       const pStaffings = personStaffings.get(p.id) || [];
                       const totalMd = pStaffings.reduce((sum, ps) => sum + (ps.staffing.md || 0), 0);
-                      const usedMd = pStaffings.reduce((sum, ps) => sum + (staffingDayCount.get(ps.staffing.id) || 0), 0);
+                      const usedMd = pStaffings.reduce((sum, ps) => sum + (totalMdCount.get(ps.staffing.id) || 0), 0);
                       const isFocused = focusedPersonId === p.id;
                       const isInChecked = checkedProjectPeople.has(p.id);
                       const isLastPerson = pi === allPeople.length - 1;
@@ -3156,7 +3182,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             borderTop: '1px solid #d1d5db',
                             borderBottom: isInChecked ? '2px solid #818cf8' : '1px solid #d1d5db',
                           }}
-                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}\n투입: ${usedMd}/${totalMd}일\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
+                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}\n전체기간 투입: ${usedMd}/${totalMd}MD\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
                           onClick={() => handlePersonHeaderClick(p.id)}
                         >
                           <div className="leading-tight">
