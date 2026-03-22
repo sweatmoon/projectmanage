@@ -992,7 +992,18 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                               )}
                               <span className="text-[9px] text-muted-foreground">MD</span>
                             </div>
-                            {!readOnly && (isDeleted ? (
+                            {readOnly ? (
+                              /* 읽기전용: 모자 씌워진 경우만 표시 */
+                              hatMap.has(s.id) ? (
+                                <span
+                                  className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0"
+                                  title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대신 투입 중`}
+                                >
+                                  <HardHat className="h-3 w-3" />
+                                  {hatMap.get(s.id)?.actual_person_name}
+                                </span>
+                              ) : null
+                            ) : (isDeleted ? (
                               <button
                                 type="button"
                                 onClick={() => handleUndoDelete(s.id)}
@@ -1013,18 +1024,28 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                                     onCancel={() => setHatEditId(null)}
                                   />
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => openHatInline(s.id)}
-                                    title={hatMap.has(s.id) ? `🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정` : '모자(대체인력) 씌우기'}
-                                    className={`p-1 rounded flex-shrink-0 transition-colors ${
-                                      hatMap.has(s.id)
-                                        ? 'text-orange-500 hover:bg-orange-50'
-                                        : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                                    }`}
-                                  >
-                                    <HardHat className="h-3.5 w-3.5" />
-                                  </button>
+                                  hatMap.has(s.id) ? (
+                                    /* 모자 씌워진 상태: 이름 + 아이콘 함께 표시, 클릭하면 수정 */
+                                    <button
+                                      type="button"
+                                      onClick={() => openHatInline(s.id)}
+                                      title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
+                                      className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors"
+                                    >
+                                      <HardHat className="h-3 w-3 flex-shrink-0" />
+                                      <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
+                                    </button>
+                                  ) : (
+                                    /* 모자 없는 상태: 아이콘만 */
+                                    <button
+                                      type="button"
+                                      onClick={() => openHatInline(s.id)}
+                                      title="모자(대체인력) 씌우기"
+                                      className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50"
+                                    >
+                                      <HardHat className="h-3.5 w-3.5" />
+                                    </button>
+                                  )
                                 )}
                                 <button
                                   type="button"
