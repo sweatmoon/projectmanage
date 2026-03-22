@@ -1145,6 +1145,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [checkedProjectIds, setCheckedProjectIds] = useState<Set<number>>(new Set());
   // 체크박스 변경 시점의 인력 순서를 고정 (셀 클릭으로 일정 변경 시 소팅 불변)
   const [frozenPeopleOrder, setFrozenPeopleOrder] = useState<Array<number | string> | null>(null);
+  // 인력 표시 범위: false = 해당 월 투입인력만(디폴트), true = 전체인력
+  const [showAllPeople, setShowAllPeople] = useState(false);
 
   // Badge hover highlight
   const [hoveredBadgePhaseId, setHoveredBadgePhaseId] = useState<number | null>(null);
@@ -1402,22 +1404,50 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [phaseBadges]);
 
   // Build unified person list: DB people + external (text-only) people
+  // ── 해당 월 투입인력: phase 기간이 이번 달에 걸치는 staffing 인력 + hat 실제 투입자
+  // ── 전체인력: people DB 전체 + staffing 외부 인력
   const allPeopleBase: UnifiedPerson[] = useMemo(() => {
+    const koSort = (a: UnifiedPerson, b: UnifiedPerson) =>
+      a.name.localeCompare(b.name, 'ko');
+
+    if (showAllPeople) {
+      // ── 전체인력 모드: 모든 DB 인력 + 외부인력, 가나다순 ──
+      const result: UnifiedPerson[] = [];
+      const seenDbIds = new Set<number>();
+      const seenExtNames = new Set<string>();
+
+      for (const p of people) {
+        if (!seenDbIds.has(p.id)) {
+          seenDbIds.add(p.id);
+          result.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
+        }
+      }
+      for (const s of localStaffing) {
+        if (!s.person_id && s.person_name_text) {
+          const extName = s.person_name_text.trim();
+          if (extName && !seenExtNames.has(extName)) {
+            seenExtNames.add(extName);
+            result.push({ id: `ext_${extName}`, name: extName, isExternal: true });
+          }
+        }
+      }
+      return result.sort(koSort);
+    }
+
+    // ── 해당 월 투입인력 모드(디폴트): phase 기간이 이번 달에 걸치는 인력 + hat 실제 투입자 ──
     const result: UnifiedPerson[] = [];
     const seenDbIds = new Set<number>();
     const seenExtNames = new Set<string>();
 
     for (const s of localStaffing) {
+      const ph = phaseMapLocal.get(s.phase_id);
+      if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
+
       if (s.person_id && !seenDbIds.has(s.person_id)) {
         seenDbIds.add(s.person_id);
         const p = people.find((pp) => pp.id === s.person_id);
-        if (p) {
-          result.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
-        }
+        if (p) result.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
       }
-    }
-
-    for (const s of localStaffing) {
       if (!s.person_id && s.person_name_text) {
         const extName = s.person_name_text.trim();
         if (extName && !seenExtNames.has(extName)) {
@@ -1425,34 +1455,21 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           result.push({ id: `ext_${extName}`, name: extName, isExternal: true });
         }
       }
-    }
 
-    for (const p of people) {
-      if (!seenDbIds.has(p.id)) {
-        result.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
+      // 🎩 hat 실제 투입자도 포함
+      const hatRecord = hatMap.get(s.id);
+      if (hatRecord?.actual_person_id && !seenDbIds.has(hatRecord.actual_person_id)) {
+        seenDbIds.add(hatRecord.actual_person_id);
+        const ap = people.find((pp) => pp.id === hatRecord.actual_person_id);
+        if (ap) result.push({ id: ap.id, name: ap.person_name, grade: ap.grade, isExternal: false });
       }
     }
 
-    // Sort by project's position index in localProjects array (reflects creation/display order)
-    const personMinProjectIndex = new Map<number | string, number>();
-    for (const s of localStaffing) {
-      const personKey = s.person_id ? s.person_id : `ext_${(s.person_name_text || '').trim()}`;
-      const projIdx = projectIndexMap.get(s.project_id) ?? 999999;
-      const existing = personMinProjectIndex.get(personKey);
-      if (existing === undefined || projIdx < existing) {
-        personMinProjectIndex.set(personKey, projIdx);
-      }
-    }
-    result.sort((a, b) => {
-      const aIdx = personMinProjectIndex.get(a.id) ?? 999999;
-      const bIdx = personMinProjectIndex.get(b.id) ?? 999999;
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      return a.name.localeCompare(b.name);
-    });
-    return result;
-  }, [localStaffing, people, localProjects]);
+    return result.sort(koSort);
+  }, [localStaffing, people, phaseMapLocal, year, month, showAllPeople, hatMap]);
 
   // People participating in checked projects (staffing 배정 기반 — calendarEntries 미의존)
+  // 🎩 hat 실제 투입자도 포함
   const checkedProjectPeople = useMemo(() => {
     if (checkedProjectIds.size === 0) return new Set<number | string>();
 
@@ -1463,9 +1480,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
       const personKey = s.person_id ? s.person_id : (s.person_name_text ? `ext_${s.person_name_text.trim()}` : null);
       if (personKey) personIds.add(personKey);
+      // hat 실제 투입자도 포함
+      const hatRecord = hatMap.get(s.id);
+      if (hatRecord?.actual_person_id) personIds.add(hatRecord.actual_person_id);
     }
     return personIds;
-  }, [checkedProjectIds, localStaffing, phaseMapLocal, year, month]);
+  }, [checkedProjectIds, localStaffing, phaseMapLocal, year, month, hatMap]);
 
   // Sort: checked project people first (by phase sort_order), then others
   // 결과를 frozenPeopleOrder 기준으로 안정 정렬 — 셀 클릭 시 순서 불변
@@ -1476,7 +1496,16 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     if (frozenPeopleOrder !== null) {
       const orderMap = new Map<number | string, number>();
       frozenPeopleOrder.forEach((id, idx) => orderMap.set(id, idx));
-      return [...allPeopleBase].sort((a, b) => {
+      // allPeopleBase에 없는 checkedProjectPeople(hat 실제투입자 포함)도 반영
+      const baseIds = new Set(allPeopleBase.map((p) => p.id));
+      const extra: UnifiedPerson[] = [];
+      for (const pid of checkedProjectPeople) {
+        if (!baseIds.has(pid) && typeof pid === 'number') {
+          const p = people.find((pp) => pp.id === pid);
+          if (p) extra.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
+        }
+      }
+      return [...allPeopleBase, ...extra].sort((a, b) => {
         const ia = orderMap.get(a.id) ?? 99999;
         const ib = orderMap.get(b.id) ?? 99999;
         return ia - ib;
@@ -1496,10 +1525,30 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (existing === undefined || key < existing) {
         personSortKey.set(personKey, key);
       }
+      // 🎩 hat 실제 투입자도 동일 sort key 부여 (공식 인력 바로 뒤에 오도록 +0.5 처리)
+      const hatRecord = hatMap.get(s.id);
+      if (hatRecord?.actual_person_id) {
+        const hatKey = key + 1; // 공식 인력 바로 다음
+        const existing2 = personSortKey.get(hatRecord.actual_person_id);
+        if (existing2 === undefined || hatKey < existing2) {
+          personSortKey.set(hatRecord.actual_person_id, hatKey);
+        }
+      }
     }
 
-    const checked = allPeopleBase.filter((p) => checkedProjectPeople.has(p.id));
-    const unchecked = allPeopleBase.filter((p) => !checkedProjectPeople.has(p.id));
+    // allPeopleBase에 없는 hat 실제 투입자 보완 추가
+    const baseIds = new Set(allPeopleBase.map((p) => p.id));
+    const extraPeople: UnifiedPerson[] = [];
+    for (const pid of checkedProjectPeople) {
+      if (!baseIds.has(pid) && typeof pid === 'number') {
+        const p = people.find((pp) => pp.id === pid);
+        if (p) extraPeople.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
+      }
+    }
+    const base = [...allPeopleBase, ...extraPeople];
+
+    const checked = base.filter((p) => checkedProjectPeople.has(p.id));
+    const unchecked = base.filter((p) => !checkedProjectPeople.has(p.id));
 
     checked.sort((a, b) => {
       const ka = personSortKey.get(a.id) ?? 9999;
@@ -1508,7 +1557,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     });
 
     return [...checked, ...unchecked];
-  }, [allPeopleBase, checkedProjectIds, checkedProjectPeople, localStaffing, phaseMapLocal, frozenPeopleOrder]);
+  }, [allPeopleBase, checkedProjectIds, checkedProjectPeople, localStaffing, phaseMapLocal, frozenPeopleOrder, hatMap, people]);
 
   // 체크박스 변경 직후 (frozenPeopleOrder === null) allPeople 순서를 고정
   // 이후 셀 클릭으로 calendarEntries가 바뀌어도 순서가 유지됨
@@ -2035,10 +2084,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   };
 
   const prevMonth = () => {
+    setFrozenPeopleOrder(null);
     if (month === 1) { setYear(year - 1); setMonth(12); }
     else setMonth(month - 1);
   };
   const nextMonth = () => {
+    setFrozenPeopleOrder(null);
     if (month === 12) { setYear(year + 1); setMonth(1); }
     else setMonth(month + 1);
   };
@@ -2642,7 +2693,28 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                       rowSpan={2}
                       style={{ width: badgeColW, zIndex: 60 }}
                     >
-                      📌 주간별 사업
+                      <div className="flex flex-col items-center gap-1">
+                        <span>📌 주간별 사업</span>
+                        {/* 인력 표시 범위 토글 */}
+                        <div className="flex items-center rounded overflow-hidden border border-slate-300 text-[8px]">
+                          <button
+                            type="button"
+                            onClick={() => { setShowAllPeople(false); setFrozenPeopleOrder(null); }}
+                            className={`px-1.5 py-0.5 transition-colors ${!showAllPeople ? 'bg-blue-500 text-white font-bold' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                            title="이번 달 배정 인력만 표시 (빠름)"
+                          >
+                            이번달
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setShowAllPeople(true); setFrozenPeopleOrder(null); }}
+                            className={`px-1.5 py-0.5 transition-colors ${showAllPeople ? 'bg-slate-600 text-white font-bold' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                            title="전체 인력 표시 (느림)"
+                          >
+                            전체
+                          </button>
+                        </div>
+                      </div>
                     </th>
                     <th
                       className="sticky bg-slate-100 border border-gray-300 text-center text-[10px] font-semibold py-1.5"
