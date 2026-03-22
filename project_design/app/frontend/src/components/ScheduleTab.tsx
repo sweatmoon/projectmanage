@@ -1053,6 +1053,367 @@ function saveMonth(year: number, month: number) {
   } catch { /* ignore */ }
 }
 
+/* ───────── DayRow (React.memo로 변경된 행만 재렌더) ───────── */
+interface DayRowProps {
+  d: number;
+  year: number;
+  month: number;
+  todayStr: string;
+  weekInfo: WeekInfo | undefined;
+  isFirstDayOfWeek: boolean;
+  isWeekStart: boolean;
+  allPeople: UnifiedPerson[];
+  personSubCols: Map<number | string, number>;
+  cellDataCache: Map<string, {
+    staffingId: number; badge: PhaseBadgeInfo; isSelected: boolean;
+    isAvailable: boolean; isHoliday: boolean; md: number;
+    dateStr: string; entryKey: string; isHatItem: boolean; hatForPersonName?: string;
+  } | null>;
+  togglingCell: string | null;
+  focusedPersonId: number | string | null;
+  checkedProjectPeople: Set<number | string>;
+  hoveredStaffingIds: Set<number>;
+  hoveredBadgePhaseId: number | null;
+  hatMap: Map<number, HatRecord>;
+  staffingTooltipInfo: Map<number, { label: string; team: string; field: string }>;
+  colWidth: number;
+  rowHeight: number;
+  badgeColW: number;
+  stickyLeftForDate: number;
+  stickyLeftForDow: number;
+  dateColW: number;
+  dowColW: number;
+  checkedProjectIds: Set<number>;
+  handleCellClick: (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => void;
+  handlePersonHeaderClick: (personId: number | string) => void;
+  handleSubColContextMenu: (e: React.MouseEvent, personId: number | string, subColIdx: number) => void;
+  toggleProjectCheck: (projectId: number) => void;
+  handleBadgeClick: (badge: PhaseBadgeInfo) => void;
+  handleBadgeContextMenu: (e: React.MouseEvent, badge: PhaseBadgeInfo) => void;
+  setHoveredBadgePhaseId: (id: number | null) => void;
+  handleWeekLabelClick: (weekInfo: WeekInfo) => void;
+}
+
+const DayRow = React.memo(function DayRow({
+  d, year, month, todayStr, weekInfo, isFirstDayOfWeek, isWeekStart,
+  allPeople, personSubCols, cellDataCache, togglingCell, focusedPersonId,
+  checkedProjectPeople, hoveredStaffingIds, hoveredBadgePhaseId, hatMap,
+  staffingTooltipInfo, colWidth, rowHeight, badgeColW, stickyLeftForDate,
+  stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
+  handleCellClick, handleSubColContextMenu, toggleProjectCheck,
+  handleBadgeClick, handleBadgeContextMenu, setHoveredBadgePhaseId,
+  handleWeekLabelClick,
+}: DayRowProps) {
+  const ds = formatDateStr(year, month, d);
+  const dow = getDayOfWeek(year, month, d);
+  const isWe = isWeekend(year, month, d);
+  const holidayName = !isWe ? getHolidayName(ds) : null;
+  const isHol = holidayName !== null;
+  const isNonW = isWe || isHol;
+  const isTd = ds === todayStr;
+  const isSun = new Date(year, month - 1, d).getDay() === 0;
+  const isSat = new Date(year, month - 1, d).getDay() === 6;
+
+  return (
+    <tr
+      key={d}
+      className=""
+      style={isWeekStart ? { borderTop: '3px solid #475569' } : undefined}
+    >
+      {/* Badge column */}
+      {isFirstDayOfWeek && weekInfo ? (
+        <td
+          className={`sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
+            isTd ? 'bg-blue-50' : 'bg-slate-50'
+          }`}
+          style={{
+            width: badgeColW,
+            maxWidth: badgeColW,
+            overflow: 'hidden',
+            padding: '2px 3px',
+            verticalAlign: 'top',
+            zIndex: 25,
+          }}
+          rowSpan={weekInfo.dayCount}
+        >
+          <div className="flex flex-col gap-0.5">
+            <button
+              className="text-[8px] font-bold text-slate-500 mb-0.5 hover:text-blue-600 hover:underline cursor-pointer text-left transition-colors"
+              title={`${weekInfo.weekLabel} (${weekInfo.startDate} ~ ${weekInfo.endDate})\n클릭: 이 주차 투입 가능 인력 보기`}
+              onClick={() => weekInfo && handleWeekLabelClick(weekInfo)}
+            >
+              🗓 {weekInfo.weekLabel}
+            </button>
+            {(() => {
+              const aBadges = weekInfo.badges.filter((b) => b.status === 'A');
+              const pBadges = weekInfo.badges.filter((b) => b.status === 'P');
+              return (
+                <>
+                  {aBadges.length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-[7px] font-bold text-blue-600 border-b border-blue-200 pb-0.5 mb-0.5">
+                        사업 (A)
+                      </div>
+                      {aBadges.map((badge) => {
+                        const isChecked = checkedProjectIds.has(badge.projectId);
+                        return (
+                          <div key={badge.phaseId} className="flex items-center gap-1">
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={() => toggleProjectCheck(badge.projectId)}
+                              className="h-3 w-3 flex-shrink-0"
+                            />
+                            <button
+                              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
+                              style={{
+                                backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
+                                color: badge.color.text,
+                                borderLeft: `3px solid ${badge.color.border}`,
+                                boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
+                              }}
+                              onClick={() => handleBadgeClick(badge)}
+                              onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
+                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
+                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                              title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
+                            >
+                              <span className="truncate flex-1">{badge.label}</span>
+                              <span className="text-[7px] font-bold rounded px-0.5 flex-shrink-0" style={{ backgroundColor: badge.color.border, color: '#fff' }}>
+                                {badge.status}
+                              </span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {aBadges.length > 0 && pBadges.length > 0 && (
+                    <div className="border-t border-dashed border-slate-300 my-0.5" />
+                  )}
+                  {pBadges.length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-[7px] font-bold text-amber-600 border-b border-amber-200 pb-0.5 mb-0.5">
+                        제안 (P)
+                      </div>
+                      {pBadges.map((badge) => {
+                        const isChecked = checkedProjectIds.has(badge.projectId);
+                        return (
+                          <div key={badge.phaseId} className="flex items-center gap-1">
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={() => toggleProjectCheck(badge.projectId)}
+                              className="h-3 w-3 flex-shrink-0"
+                            />
+                            <button
+                              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
+                              style={{
+                                backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
+                                color: badge.color.text,
+                                borderLeft: `3px solid ${badge.color.border}`,
+                                boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
+                              }}
+                              onClick={() => handleBadgeClick(badge)}
+                              onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
+                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
+                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                              title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
+                            >
+                              <span className="truncate flex-1">{badge.label}</span>
+                              <span className="text-[7px] font-bold rounded px-0.5 flex-shrink-0" style={{ backgroundColor: badge.color.border, color: '#fff' }}>
+                                {badge.status}
+                              </span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </td>
+      ) : !isFirstDayOfWeek ? null : (
+        <td
+          className="sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
+          style={{ width: badgeColW, maxWidth: badgeColW, overflow: 'hidden', padding: '2px 3px', zIndex: 25 }}
+        >
+          <span className="text-[8px] text-gray-400 italic">-</span>
+        </td>
+      )}
+      {/* Date */}
+      <td
+        className={`sticky border border-gray-300 text-center font-semibold text-[11px] ${
+          isTd ? 'bg-blue-100 text-blue-800' : isHol ? 'bg-red-50 text-red-600' : isWe ? 'bg-gray-100' : 'bg-white'
+        }`}
+        style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight, zIndex: 20 }}
+        title={holidayName ?? undefined}
+      >
+        {d}
+        {isHol && <span className="block text-[7px] leading-none text-red-400 truncate px-0.5">{holidayName}</span>}
+      </td>
+      {/* Day of week */}
+      <td
+        className={`sticky border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
+          isHol ? 'text-red-500' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'
+        } ${isTd ? 'bg-blue-100' : isHol ? 'bg-red-50' : isWe ? 'bg-gray-100' : 'bg-white'}`}
+        style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0', zIndex: 20 }}
+      >
+        {dow}
+      </td>
+      {/* Person sub-columns */}
+      {allPeople.map((p, pi) => {
+        const cols = personSubCols.get(p.id) || MIN_SUB_COLS;
+        return Array.from({ length: cols }).map((_, si) => {
+          const cellData = cellDataCache.get(`${p.id}_${d}_${si}`) ?? null;
+          const cellKey = cellData ? `${cellData.staffingId}_${cellData.dateStr}` : '';
+          const isToggling = togglingCell === cellKey;
+          const isFocused = focusedPersonId === p.id;
+          const isInChecked = checkedProjectPeople.has(p.id);
+          const isFirstSub = si === 0;
+          const isLastPerson = pi === allPeople.length - 1;
+          const isLastSub = si === cols - 1;
+          const isLastCheckedPerson = isInChecked && (pi === allPeople.length - 1 || !checkedProjectPeople.has(allPeople[pi + 1]?.id));
+
+          const tooltipInfo = cellData ? staffingTooltipInfo.get(cellData.staffingId) : null;
+          const hatRecord = cellData ? hatMap.get(cellData.staffingId) : undefined;
+          const isHatCell = !!hatRecord && !cellData?.isHatItem;
+          const isHatActualCell = !!cellData?.isHatItem;
+
+          const cellTooltip = tooltipInfo
+            ? isHatCell
+              ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)`
+              : isHatActualCell
+                ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)`
+                : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
+            : undefined;
+
+          const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
+          const focusBg = isHoveredBadgeCell
+            ? (cellData?.badge.color.available || 'rgba(253,230,138,0.5)')
+            : isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
+
+          const borderStyle: React.CSSProperties = {
+            borderLeft: isFirstSub ? '2px solid #64748b' : '1px solid #e5e7eb',
+            borderRight: isLastSub && isLastCheckedPerson && !isLastPerson
+              ? '3px solid #6366f1'
+              : isLastSub && isLastPerson
+                ? '1px solid #d1d5db'
+                : isLastSub
+                  ? '1px solid #cbd5e1'
+                  : '1px solid #e5e7eb',
+            borderTop: isTd ? '1px solid #60a5fa' : '1px solid #e5e7eb',
+            borderBottom: isTd ? '1px solid #60a5fa' : '1px solid #e5e7eb',
+          };
+
+          if (cellData && cellData.isSelected) {
+            const isNonWorkSelected = !cellData.isAvailable;
+            const isLockedCell = isHatCell || isHatActualCell;
+            return (
+              <td
+                key={`${p.id}-${d}-${si}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'}`}
+                style={{
+                  position: 'relative', zIndex: 0,
+                  backgroundColor: isNonWorkSelected
+                    ? (cellData.isHoliday ? '#fee2e2' : '#f3f4f6')
+                    : cellData.badge.color.cell,
+                  color: isNonWorkSelected
+                    ? (cellData.isHoliday ? '#ef4444' : '#6b7280')
+                    : cellData.badge.color.text,
+                  width: colWidth, height: rowHeight, padding: 0, fontSize: 10, fontWeight: 700,
+                  ...borderStyle,
+                  ...(isHatCell
+                    ? { opacity: 0.75 }
+                    : isNonWorkSelected
+                      ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
+                      : isHoveredBadgeCell
+                        ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
+                        : isFocused ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
+                }}
+                title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
+                onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
+              >
+                {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : cellData.badge.status)}
+              </td>
+            );
+          }
+
+          if (cellData && cellData.isAvailable && !cellData.isSelected) {
+            const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
+            return (
+              <td
+                key={`${p.id}-${d}-${si}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
+                style={{
+                  position: 'relative', zIndex: 0,
+                  backgroundColor: isHatCell
+                    ? (cellData.badge.color.available || '#f9fafb')
+                    : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
+                  width: colWidth, height: rowHeight, padding: 0,
+                  borderTop: borderStyle.borderTop,
+                  borderBottom: borderStyle.borderBottom,
+                  borderLeft: isFirstSub ? '2px solid #64748b' : `1px ${dashedBorder} ${cellData.badge.color.border}`,
+                  borderRight: (() => {
+                    const baseRight = borderStyle.borderRight as string;
+                    if (isLastSub && (isLastCheckedPerson || isLastPerson)) return baseRight;
+                    if (isLastSub) return baseRight;
+                    return `1px ${dashedBorder} ${cellData.badge.color.border}`;
+                  })(),
+                  ...(isHatCell ? { opacity: 0.6 } : {}),
+                }}
+                title={cellTooltip}
+                onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)}
+              >
+                {isToggling ? '…' : isHatActualCell ? '🎩' : ''}
+              </td>
+            );
+          }
+
+          if (cellData && !cellData.isAvailable) {
+            return (
+              <td
+                key={`${p.id}-${d}-${si}`}
+                style={{
+                  position: 'relative', zIndex: 0,
+                  backgroundColor: focusBg || (cellData.isHoliday ? '#fef2f2' : '#f1f5f9'),
+                  width: colWidth, height: rowHeight, padding: 0, ...borderStyle,
+                }}
+                title={cellData.isHoliday ? (holidayName || '공휴일') : '주말'}
+              />
+            );
+          }
+
+          return (
+            <td
+              key={`${p.id}-${d}-${si}`}
+              style={{
+                position: 'relative', zIndex: 0,
+                backgroundColor: focusBg || (isHol ? '#fef2f2' : isWe ? '#f1f5f9' : '#ffffff'),
+                width: colWidth, height: rowHeight, padding: 0, ...borderStyle,
+              }}
+            />
+          );
+        });
+      })}
+    </tr>
+  );
+}, (prev, next) => {
+  // 이 행에 영향을 주는 props만 비교 — 변화 없으면 재렌더 스킵
+  if (prev.d !== next.d || prev.year !== next.year || prev.month !== next.month) return false;
+  if (prev.togglingCell !== next.togglingCell) return false;
+  if (prev.colWidth !== next.colWidth || prev.rowHeight !== next.rowHeight) return false;
+  if (prev.focusedPersonId !== next.focusedPersonId) return false;
+  if (prev.hoveredBadgePhaseId !== next.hoveredBadgePhaseId) return false;
+  if (prev.allPeople !== next.allPeople) return false;
+  if (prev.checkedProjectPeople !== next.checkedProjectPeople) return false;
+  if (prev.checkedProjectIds !== next.checkedProjectIds) return false;
+  if (prev.cellDataCache !== next.cellDataCache) return false;
+  if (prev.hatMap !== next.hatMap) return false;
+  if (prev.badgeColW !== next.badgeColW || prev.stickyLeftForDate !== next.stickyLeftForDate) return false;
+  return true;
+});
+
 /* ───────── Main Component ───────── */
 export default function ScheduleTab({ projects, phases, staffing, people, onRefresh }: ScheduleTabProps) {
   const now = new Date();
@@ -1120,7 +1481,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     });
   }, []);
 
-  const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
+  // Map<"staffing_id_date", CalendarEntry> — 셀 클릭 시 해당 key만 갱신, 전체 배열 교체 없음
+  const [entryMap, setEntryMap] = useState<Map<string, CalendarEntry>>(new Map());
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [togglingCell, setTogglingCell] = useState<string | null>(null);
   const [bulkFilling, setBulkFilling] = useState(false);
@@ -1135,8 +1497,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const scheduleIsLocked = presenceOthers.length > 0;
 
   // Dynamic column width & row height
+  // input 표시용 (즉시 업데이트) vs 실제 렌더링용 (debounce 300ms)
   const [colWidth, setColWidth] = useState(getSavedColWidth);
   const [rowHeight, setRowHeight] = useState(getSavedRowHeight);
+  const [colWidthInput, setColWidthInput] = useState(getSavedColWidth);
+  const [rowHeightInput, setRowHeightInput] = useState(getSavedRowHeight);
+  const colWidthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowHeightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Person column focus
   const [focusedPersonId, setFocusedPersonId] = useState<number | string | null>(null);
@@ -1218,7 +1585,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const relevantStaffingIds = localStaffing.map((s) => s.id);
 
     if (relevantStaffingIds.length === 0) {
-      setCalendarEntries([]);
+      setEntryMap(new Map());
       return;
     }
 
@@ -1229,10 +1596,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         method: 'POST',
         data: { year, month, staffing_ids: relevantStaffingIds },
       });
-      setCalendarEntries(res?.entries || []);
+      const entries: CalendarEntry[] = res?.entries || [];
+      const newMap = new Map<string, CalendarEntry>();
+      entries.forEach((e) => newMap.set(`${e.staffing_id}_${e.entry_date}`, e));
+      setEntryMap(newMap);
     } catch (err) {
       console.error('Failed to fetch calendar entries:', err);
-      setCalendarEntries([]);
+      setEntryMap(new Map());
     } finally {
       setLoadingEntries(false);
     }
@@ -1244,24 +1614,18 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
 
 
-  const entryLookup = useMemo(() => {
-    const map = new Map<string, CalendarEntry>();
-    calendarEntries.forEach((e) => {
-      const key = `${e.staffing_id}_${e.entry_date}`;
-      map.set(key, e);
-    });
-    return map;
-  }, [calendarEntries]);
+  // entryLookup = entryMap 그 자체 (alias, 하위 호환)
+  const entryLookup = entryMap;
 
   const staffingDayCount = useMemo(() => {
     const map = new Map<number, number>();
-    calendarEntries.forEach((e) => {
+    entryMap.forEach((e) => {
       if (e.status) {
         map.set(e.staffing_id, (map.get(e.staffing_id) || 0) + 1);
       }
     });
     return map;
-  }, [calendarEntries]);
+  }, [entryMap]);
 
   // ── staffing_id → phase_id → project_id 역매핑 (중복 체크용) ──
   const staffingProjectMap = useMemo(() => {
@@ -1284,19 +1648,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     // project_id별 person_id별 날짜 Set
     // 구조: Map<projectId, Map<personId, Set<dateStr>>>
     const byProject = new Map<number, Map<number, Set<string>>>();
-    for (const e of calendarEntries) {
-      if (!e.status) continue;
+    entryMap.forEach((e) => {
+      if (!e.status) return;
       const personId = staffingPersonMap.get(e.staffing_id);
-      if (!personId) continue;
+      if (!personId) return;
       const projectId = staffingProjectMap.get(e.staffing_id);
-      if (!projectId) continue;
+      if (!projectId) return;
       if (!byProject.has(projectId)) byProject.set(projectId, new Map());
       const projMap = byProject.get(projectId)!;
       if (!projMap.has(personId)) projMap.set(personId, new Set());
       projMap.get(personId)!.add(e.entry_date);
-    }
+    });
     return byProject;
-  }, [calendarEntries, localStaffing, staffingProjectMap]);
+  }, [entryMap, localStaffing, staffingProjectMap]);
 
   // ── person별 전체 일정 날짜 Set (중복 제거) ──────────────────
   // key: person_id (number) 또는 'ext_이름' (외부) → Set<dateStr>
@@ -1311,15 +1675,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         staffingPersonKey.set(s.id, `ext_${s.person_name_text.trim()}`);
       }
     }
-    for (const e of calendarEntries) {
-      if (!e.status) continue;
+    entryMap.forEach((e) => {
+      if (!e.status) return;
       const personKey = staffingPersonKey.get(e.staffing_id);
-      if (personKey === undefined) continue;
+      if (personKey === undefined) return;
       if (!map.has(personKey)) map.set(personKey, new Set());
       map.get(personKey)!.add(e.entry_date);
-    }
+    });
     return map;
-  }, [calendarEntries, localStaffing]);
+  }, [entryMap, localStaffing]);
 
   const projectColorMap = useMemo(() => {
     const map = new Map<number, typeof PROJECT_COLORS[0]>();
@@ -1360,12 +1724,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     //    → phase 기간이 이미 지났어도 entries가 남아있으면 셀 표시 보장
     const phaseIdsWithEntries = new Set<number>();
     const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    for (const entry of calendarEntries) {
-      if (!entry.status) continue;
-      if (!entry.entry_date.startsWith(yearMonth)) continue;
+    entryMap.forEach((entry) => {
+      if (!entry.status) return;
+      if (!entry.entry_date.startsWith(yearMonth)) return;
       const s = localStaffing.find((st) => st.id === entry.staffing_id);
       if (s) phaseIdsWithEntries.add(s.phase_id);
-    }
+    });
 
     return localPhases
       .filter((ph) => overlapping.has(ph.id) || phaseIdsWithEntries.has(ph.id))
@@ -1375,7 +1739,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         if (aIdx !== bIdx) return aIdx - bIdx;
         return a.sort_order - b.sort_order;
       });
-  }, [localPhases, year, month, projectIndexMap, calendarEntries, localStaffing]);
+  }, [localPhases, year, month, projectIndexMap, entryMap, localStaffing]);
 
   const phaseBadges: PhaseBadgeInfo[] = useMemo(() => {
     return visiblePhases.map((ph) => {
@@ -1583,11 +1947,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
     const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
     const staffingHasEntryThisMonth = new Set<number>();
-    for (const entry of calendarEntries) {
+    entryMap.forEach((entry) => {
       if (entry.status && entry.entry_date.startsWith(yearMonth)) {
         staffingHasEntryThisMonth.add(entry.staffing_id);
       }
-    }
+    });
 
     for (const person of allPeople) {
       const items: StaffingWithBadge[] = [];
@@ -1716,7 +2080,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
 
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, calendarEntries, year, month, projectMap, projectColorMap, hatMap]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, entryMap, year, month, projectMap, projectColorMap, hatMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
@@ -1800,33 +2164,30 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return map;
   }, [weekInfos]);
 
-  const getPersonDayCellData = useCallback(
-    (personId: number | string, day: number, subColIdx: number) => {
+  // 렌더 중 함수 호출 대신 useMemo로 전체 셀 데이터를 미리 계산 (Map 조회만 남음)
+  const cellDataCache = useMemo(() => {
+    const cache = new Map<string, ReturnType<typeof calcCell> | null>();
+
+    function calcCell(personId: number | string, day: number, subColIdx: number) {
       const items = personStaffings.get(personId) || [];
       const dateStr = formatDateStr(year, month, day);
       const isWe = isWeekend(year, month, day);
       const isHol = !isWe && getHolidayName(dateStr) !== null;
       const isNonW = isWe || isHol;
 
-      // 슬롯 인덱스 일치하는 item 탐색
-      // - phase 기간 내: 빈 셀도 렌더링 (클릭 가능 영역)
-      // - phase 기간 외: entry(선택된 것)가 있을 때만 렌더링
       const item = (() => {
-        // 1순위: 슬롯 일치 + phase 기간 내
         const inRange = items.find(
           (it) =>
             (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx &&
             dayInRange(dateStr, it.badge.startDate, it.badge.endDate)
         );
         if (inRange) return inRange;
-
-        // 2순위: 슬롯 일치 + phase 기간 외지만 DB에 선택된 entry가 있는 경우
         const candidate = items.find(
           (it) => (it as StaffingWithBadge & { slotIndex?: number }).slotIndex === subColIdx
         );
         if (candidate) {
           const key = `${candidate.staffing.id}_${dateStr}`;
-          if (entryLookup.get(key)?.status) return candidate;
+          if (entryMap.get(key)?.status) return candidate;
         }
         return undefined;
       })();
@@ -1836,7 +2197,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const isHatItem = !!(item as StaffingWithBadge & { isHatItem?: boolean }).isHatItem;
       const hatForPersonName = (item as StaffingWithBadge & { hatForPersonName?: string }).hatForPersonName;
       const entryKey = `${item.staffing.id}_${dateStr}`;
-      const entry = entryLookup.get(entryKey);
+      const entry = entryMap.get(entryKey);
       const isSelected = !!entry?.status;
 
       return {
@@ -1851,8 +2212,23 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         isHatItem,
         hatForPersonName,
       };
-    },
-    [personStaffings, year, month, entryLookup]
+    }
+
+    for (const person of allPeople) {
+      const cols = personSubCols.get(person.id) || MIN_SUB_COLS;
+      for (let d = 1; d <= daysInMonth; d++) {
+        for (let si = 0; si < cols; si++) {
+          cache.set(`${person.id}_${d}_${si}`, calcCell(person.id, d, si));
+        }
+      }
+    }
+    return cache;
+  }, [allPeople, personStaffings, personSubCols, daysInMonth, year, month, entryMap]);
+
+  const getPersonDayCellData = useCallback(
+    (personId: number | string, day: number, subColIdx: number) =>
+      cellDataCache.get(`${personId}_${day}_${subColIdx}`) ?? null,
+    [cellDataCache]
   );
 
   const handleCellClick = async (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => {
@@ -1903,16 +2279,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const newStatus = currentlySelected ? null : badge.status;
 
     // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
-    const prevEntries = calendarEntries; // 롤백용 스냅샷
+    const prevEntryMap = entryMap; // 롤백용 스냅샷
     if (currentlySelected) {
-      setCalendarEntries((prev) =>
-        prev.filter((e) => !(e.staffing_id === staffingId && e.entry_date === dateStr))
-      );
+      setEntryMap((prev) => { const next = new Map(prev); next.delete(cellKey); return next; });
     } else {
-      setCalendarEntries((prev) => [
-        ...prev,
-        { id: null, staffing_id: staffingId, entry_date: dateStr, status: newStatus },
-      ]);
+      setEntryMap((prev) => { const next = new Map(prev); next.set(cellKey, { id: null, staffing_id: staffingId, entry_date: dateStr, status: newStatus }); return next; });
     }
 
     try {
@@ -1926,7 +2297,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       // 성공 시 낙관적 업데이트를 그대로 유지
     } catch (err: any) {
       // 실패 시 이전 상태로 롤백
-      setCalendarEntries(prevEntries);
+      setEntryMap(prevEntryMap);
       console.error('Failed to toggle cell:', err);
       if (err?.response?.status === 401) {
         toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -1987,22 +2358,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       }
 
       // ── 낙관적 UI 업데이트: API 호출 전에 먼저 화면에 반영 ──
-      const prevEntries = calendarEntries; // 롤백용 스냅샷
+      const prevEntryMap = entryMap; // 롤백용 스냅샷
       if (mode === 'fill') {
-        setCalendarEntries((prev) => [
-          ...prev,
-          ...cells.map((c) => ({
-            id: null,
-            staffing_id: c.staffing_id,
-            entry_date: c.entry_date,
-            status: c.status,
-          })),
-        ]);
+        setEntryMap((prev) => {
+          const next = new Map(prev);
+          cells.forEach((c) => next.set(`${c.staffing_id}_${c.entry_date}`, { id: null, staffing_id: c.staffing_id, entry_date: c.entry_date, status: c.status }));
+          return next;
+        });
       } else {
-        const clearDates = new Set(cells.map((c) => c.entry_date));
-        setCalendarEntries((prev) =>
-          prev.filter((e) => !(e.staffing_id === staffingId && clearDates.has(e.entry_date)))
-        );
+        setEntryMap((prev) => {
+          const next = new Map(prev);
+          cells.forEach((c) => next.delete(`${c.staffing_id}_${c.entry_date}`));
+          return next;
+        });
       }
 
       // Send batch request
@@ -2019,7 +2387,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         }
       } catch (err: any) {
         // 실패 시 이전 상태로 롤백
-        setCalendarEntries(prevEntries);
+        setEntryMap(prevEntryMap);
         console.error('Bulk fill failed:', err);
         if (err?.response?.status === 401) {
           toast.error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -2325,7 +2693,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         const deletedSids = new Set(staffingChanges.filter((c) => c.deleteStaffing).map((c) => c.staffingId));
         if (deletedSids.size > 0) {
           setLocalStaffing((prev) => prev.filter((s) => !deletedSids.has(s.id)));
-          setCalendarEntries((prev) => prev.filter((e) => !deletedSids.has(e.staffing_id)));
+          setEntryMap((prev) => { const next = new Map(prev); next.forEach((_, k) => { const sid = parseInt(k.split('_')[0]); if (deletedSids.has(sid)) next.delete(k); }); return next; });
         }
         // Update person/MD for non-deleted
         const updateMap = new Map(
@@ -2358,10 +2726,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const { personTotals, projectTotals } = useMemo(() => {
     const pMap = new Map<string, number>();
     const prMap = new Map<string, number>();
-    for (const entry of calendarEntries) {
-      if (!entry.status) continue;
+    entryMap.forEach((entry) => {
+      if (!entry.status) return;
       const s = staffingMap.get(entry.staffing_id);
-      if (!s) continue;
+      if (!s) return;
       const personName = s.person_id
         ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
         : s.person_name_text || '?';
@@ -2369,9 +2737,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const projName = proj?.project_name || '미정';
       pMap.set(personName, (pMap.get(personName) || 0) + 1);
       prMap.set(projName, (prMap.get(projName) || 0) + 1);
-    }
+    });
     return { personTotals: pMap, projectTotals: prMap };
-  }, [calendarEntries, staffingMap, people, projectMap]);
+  }, [entryMap, staffingMap, people, projectMap]);
 
   // ── 유휴 인력 계산 (월 기준) ───────────────────────────────
   // 이달 영업일 목록
@@ -2555,10 +2923,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               type="number"
               min={16}
               max={200}
-              value={colWidth}
+              value={colWidthInput}
               onChange={(e) => {
                 const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 16 && v <= 200) setColWidth(v);
+                if (!isNaN(v) && v >= 16 && v <= 200) {
+                  setColWidthInput(v);
+                  if (colWidthDebounceRef.current) clearTimeout(colWidthDebounceRef.current);
+                  colWidthDebounceRef.current = setTimeout(() => setColWidth(v), 300);
+                }
               }}
               className="w-[48px] h-6 px-1 text-[10px] text-center border rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
               title="열 너비 (16~200px)"
@@ -2568,10 +2940,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               type="number"
               min={16}
               max={100}
-              value={rowHeight}
+              value={rowHeightInput}
               onChange={(e) => {
                 const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 16 && v <= 100) setRowHeight(v);
+                if (!isNaN(v) && v >= 16 && v <= 100) {
+                  setRowHeightInput(v);
+                  if (rowHeightDebounceRef.current) clearTimeout(rowHeightDebounceRef.current);
+                  rowHeightDebounceRef.current = setTimeout(() => setRowHeight(v), 300);
+                }
               }}
               className="w-[48px] h-6 px-1 text-[10px] text-center border rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
               title="행 높이 (16~100px)"
@@ -2809,337 +3185,45 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                 </thead>
                 <tbody>
                   {days.map((d) => {
-                    const ds = formatDateStr(year, month, d);
-                    const dow = getDayOfWeek(year, month, d);
-                    const isWe = isWeekend(year, month, d);
-                    const holidayName = !isWe ? getHolidayName(ds) : null;
-                    const isHol = holidayName !== null;
-                    const isNonW = isWe || isHol;
-                    const isTd = ds === todayStr;
-                    const isSun = new Date(year, month - 1, d).getDay() === 0;
-                    const isSat = new Date(year, month - 1, d).getDay() === 6;
-                    const isWeekStart = weekBoundaries.has(d);
-
                     const weekInfo = dayToWeek.get(d);
                     const isFirstDayOfWeek = weekInfo ? d === weekInfo.startDay : false;
-
+                    const isWeekStart = weekBoundaries.has(d);
                     return (
-                      <tr
+                      <DayRow
                         key={d}
-                        className=""
-                        style={isWeekStart ? { borderTop: '3px solid #475569' } : undefined}
-                      >
-                        {/* Badge column */}
-                        {isFirstDayOfWeek && weekInfo ? (
-                          <td
-                            className={`sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 align-top ${
-                              isTd ? 'bg-blue-50' : 'bg-slate-50'
-                            }`}
-                            style={{
-                              width: badgeColW,
-                              maxWidth: badgeColW,
-                              overflow: 'hidden',
-                              padding: '2px 3px',
-                              verticalAlign: 'top',
-                              zIndex: 25,
-                            }}
-                            rowSpan={weekInfo.dayCount}
-                          >
-                            <div className="flex flex-col gap-0.5">
-                              <button
-                                className="text-[8px] font-bold text-slate-500 mb-0.5 hover:text-blue-600 hover:underline cursor-pointer text-left transition-colors"
-                                title={`${weekInfo.weekLabel} (${weekInfo.startDate} ~ ${weekInfo.endDate})\n클릭: 이 주차 투입 가능 인력 보기`}
-                                onClick={() => handleWeekLabelClick(weekInfo)}
-                              >
-                                🗓 {weekInfo.weekLabel}
-                              </button>
-                              {/* Group A: 사업(감리) badges */}
-                              {(() => {
-                                const aBadges = weekInfo.badges.filter((b) => b.status === 'A');
-                                const pBadges = weekInfo.badges.filter((b) => b.status === 'P');
-                                return (
-                                  <>
-                                    {aBadges.length > 0 && (
-                                      <div className="flex flex-col gap-0.5">
-                                        <div className="text-[7px] font-bold text-blue-600 border-b border-blue-200 pb-0.5 mb-0.5">
-                                          사업 (A)
-                                        </div>
-                                        {aBadges.map((badge) => {
-                                          const isChecked = checkedProjectIds.has(badge.projectId);
-                                          return (
-                                            <div key={badge.phaseId} className="flex items-center gap-1">
-                                              <Checkbox
-                                                checked={isChecked}
-                                                onCheckedChange={() => toggleProjectCheck(badge.projectId)}
-                                                className="h-3 w-3 flex-shrink-0"
-                                              />
-                                              <button
-                                                className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
-                                                style={{
-                                                  backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
-                                                  color: badge.color.text,
-                                                  borderLeft: `3px solid ${badge.color.border}`,
-                                                  boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
-                                                }}
-                                                onClick={() => handleBadgeClick(badge)}
-                                                onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                                                onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
-                                                onMouseLeave={() => setHoveredBadgePhaseId(null)}
-                                                title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
-                                              >
-                                                <span className="truncate flex-1">{badge.label}</span>
-                                                <span
-                                                  className="text-[7px] font-bold rounded px-0.5 flex-shrink-0"
-                                                  style={{ backgroundColor: badge.color.border, color: '#fff' }}
-                                                >
-                                                  {badge.status}
-                                                </span>
-                                              </button>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                    {/* Divider between A and P groups */}
-                                    {aBadges.length > 0 && pBadges.length > 0 && (
-                                      <div className="border-t border-dashed border-gray-300 my-0.5" />
-                                    )}
-                                    {/* Group P: 제안 badges */}
-                                    {pBadges.length > 0 && (
-                                      <div className="flex flex-col gap-0.5">
-                                        <div className="text-[7px] font-bold text-orange-600 border-b border-orange-200 pb-0.5 mb-0.5">
-                                          제안 (P)
-                                        </div>
-                                        {pBadges.map((badge) => {
-                                          const isChecked = checkedProjectIds.has(badge.projectId);
-                                          return (
-                                            <div key={badge.phaseId} className="flex items-center gap-1">
-                                              <Checkbox
-                                                checked={isChecked}
-                                                onCheckedChange={() => toggleProjectCheck(badge.projectId)}
-                                                className="h-3 w-3 flex-shrink-0"
-                                              />
-                                              <button
-                                                className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
-                                                style={{
-                                                  backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
-                                                  color: badge.color.text,
-                                                  borderLeft: `3px solid ${badge.color.border}`,
-                                                  boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
-                                                }}
-                                                onClick={() => handleBadgeClick(badge)}
-                                                onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                                                onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
-                                                onMouseLeave={() => setHoveredBadgePhaseId(null)}
-                                                title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
-                                              >
-                                                <span className="truncate flex-1">{badge.label}</span>
-                                                <span
-                                                  className="text-[7px] font-bold rounded px-0.5 flex-shrink-0"
-                                                  style={{ backgroundColor: badge.color.border, color: '#fff' }}
-                                                >
-                                                  {badge.status}
-                                                </span>
-                                              </button>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                    {aBadges.length === 0 && pBadges.length === 0 && (
-                                      <span className="text-[8px] text-gray-400 italic">-</span>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </td>
-                        ) : !isFirstDayOfWeek ? null : (
-                          <td
-                            className="sticky left-0 border border-gray-300 border-r-2 border-r-slate-400 bg-slate-50"
-                            style={{ width: badgeColW, maxWidth: badgeColW, overflow: 'hidden', padding: '2px 3px', zIndex: 25 }}
-                          >
-                            <span className="text-[8px] text-gray-400 italic">-</span>
-                          </td>
-                        )}
-                        {/* Date */}
-                        <td
-                          className={`sticky border border-gray-300 text-center font-semibold text-[11px] ${
-                            isTd ? 'bg-blue-100 text-blue-800' : isHol ? 'bg-red-50 text-red-600' : isWe ? 'bg-gray-100' : 'bg-white'
-                          }`}
-                          style={{ left: stickyLeftForDate, width: dateColW, padding: '3px 0', height: rowHeight, zIndex: 20 }}
-                          title={holidayName ?? undefined}
-                        >
-                          {d}
-                          {isHol && <span className="block text-[7px] leading-none text-red-400 truncate px-0.5">{holidayName}</span>}
-                        </td>
-                        {/* Day of week */}
-                        <td
-                          className={`sticky border border-gray-300 border-r-2 border-r-slate-400 text-center text-[10px] font-medium ${
-                            isHol ? 'text-red-500' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'
-                          } ${isTd ? 'bg-blue-100' : isHol ? 'bg-red-50' : isWe ? 'bg-gray-100' : 'bg-white'}`}
-                          style={{ left: stickyLeftForDow, width: dowColW, padding: '3px 0', zIndex: 20 }}
-                        >
-                          {dow}
-                        </td>
-                        {/* Person sub-columns */}
-                        {allPeople.map((p, pi) => {
-                          const cols = personSubCols.get(p.id) || MIN_SUB_COLS;
-                          return Array.from({ length: cols }).map((_, si) => {
-                            const cellData = getPersonDayCellData(p.id, d, si);
-                            const cellKey = cellData ? `${cellData.staffingId}_${cellData.dateStr}` : '';
-                            const isToggling = togglingCell === cellKey;
-                            const isFocused = focusedPersonId === p.id;
-                            const isInChecked = checkedProjectPeople.has(p.id);
-                            const isFirstSub = si === 0;
-                            const isLastPerson = pi === allPeople.length - 1;
-                            const isLastSub = si === cols - 1;
-                            const isLastCheckedPerson = isInChecked && (pi === allPeople.length - 1 || !checkedProjectPeople.has(allPeople[pi + 1]?.id));
-
-                            // Build tooltip text for cell
-                            const tooltipInfo = cellData ? staffingTooltipInfo.get(cellData.staffingId) : null;
-                            // 🎩 hat 정보 조회
-                            const hatRecord = cellData ? hatMap.get(cellData.staffingId) : undefined;
-                            const isHatCell = !!hatRecord && !cellData?.isHatItem; // 공식 인력 셀 (hat 씌워진)
-                            const isHatActualCell = !!cellData?.isHatItem; // 실제 투입자 셀
-
-                            const cellTooltip = tooltipInfo
-                              ? isHatCell
-                                ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)`
-                                : isHatActualCell
-                                  ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)`
-                                  : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
-                              : undefined;
-
-                            const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
-                            const focusBg = isHoveredBadgeCell
-                              ? (cellData?.badge.color.available || 'rgba(253,230,138,0.5)')
-                              : isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
-
-                            const borderStyle: React.CSSProperties = {
-                              borderLeft: isFirstSub ? '2px solid #64748b' : '1px solid #e5e7eb',
-                              borderRight: isLastSub && isLastCheckedPerson && !isLastPerson
-                                ? '3px solid #6366f1'
-                                : isLastSub && isLastPerson
-                                  ? '1px solid #d1d5db'
-                                  : isLastSub
-                                    ? '1px solid #cbd5e1'
-                                    : '1px solid #e5e7eb',
-                              borderTop: isTd ? '1px solid #60a5fa' : '1px solid #e5e7eb',
-                              borderBottom: isTd ? '1px solid #60a5fa' : '1px solid #e5e7eb',
-                            };
-
-                            if (cellData && cellData.isSelected) {
-                              // 공휴일/주말에 투입된 경우 경고 표시 (연한 배경에 빨간 테두리)
-                              const isNonWorkSelected = !cellData.isAvailable;
-                              const isLockedCell = isHatCell || isHatActualCell;
-                              return (
-                                <td
-                                  key={`${p.id}-${d}-${si}`}
-                                  className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'}`}
-                                  style={{
-                                    position: 'relative', zIndex: 0,
-                                    backgroundColor: isNonWorkSelected
-                                      ? (cellData.isHoliday ? '#fee2e2' : '#f3f4f6')
-                                      : cellData.badge.color.cell,
-                                    color: isNonWorkSelected
-                                      ? (cellData.isHoliday ? '#ef4444' : '#6b7280')
-                                      : cellData.badge.color.text,
-                                    width: colWidth,
-                                    height: rowHeight,
-                                    padding: 0,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    ...borderStyle,
-                                    ...(isHatCell
-                                      ? { opacity: 0.75 }
-                                      : isNonWorkSelected
-                                        ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
-                                        : isHoveredBadgeCell
-                                          ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
-                                          : isFocused ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
-                                  }}
-                                  title={isNonWorkSelected
-                                    ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)`
-                                    : cellTooltip}
-                                  onClick={() =>
-                                    handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)
-                                  }
-                                >
-                                  {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : cellData.badge.status)}
-                                </td>
-                              );
-                            }
-
-                            if (cellData && cellData.isAvailable && !cellData.isSelected) {
-                              const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
-                              return (
-                                <td
-                                  key={`${p.id}-${d}-${si}`}
-                                  className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
-                                  style={{
-                                    position: 'relative', zIndex: 0,
-                                    backgroundColor: isHatCell
-                                      ? (cellData.badge.color.available || '#f9fafb')
-                                      : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
-                                    width: colWidth,
-                                    height: rowHeight,
-                                    padding: 0,
-                                    borderTop: borderStyle.borderTop,
-                                    borderBottom: borderStyle.borderBottom,
-                                    borderLeft: isFirstSub ? '2px solid #64748b' : `1px ${dashedBorder} ${cellData.badge.color.border}`,
-                                    borderRight: (() => {
-                                      const baseRight = borderStyle.borderRight as string;
-                                      // Keep structural right border (person separator) as-is, but apply dashed only for non-separator
-                                      if (isLastSub && (isLastCheckedPerson || isLastPerson)) return baseRight;
-                                      if (isLastSub) return baseRight;
-                                      return `1px ${dashedBorder} ${cellData.badge.color.border}`;
-                                    })(),
-                                    ...(isHatCell ? { opacity: 0.6 } : {}),
-                                  }}
-                                  title={cellTooltip}
-                                  onClick={() =>
-                                    handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)
-                                  }
-                                >
-                                  {isToggling ? '…' : ''}
-                                </td>
-                              );
-                            }
-
-                            if (cellData && !cellData.isAvailable) {
-                              return (
-                                <td
-                                  key={`${p.id}-${d}-${si}`}
-                                  style={{
-                                    position: 'relative', zIndex: 0,
-                                    backgroundColor: focusBg || (cellData.isHoliday ? '#fef2f2' : '#f1f5f9'),
-                                    width: colWidth,
-                                    height: rowHeight,
-                                    padding: 0,
-                                    ...borderStyle,
-                                  }}
-                                  title={cellData.isHoliday ? (holidayName || '공휴일') : '주말'}
-                                />
-                              );
-                            }
-
-                            return (
-                              <td
-                                key={`${p.id}-${d}-${si}`}
-                                style={{
-                                  position: 'relative', zIndex: 0,
-                                  backgroundColor: focusBg || (isHol ? '#fef2f2' : isWe ? '#f1f5f9' : '#ffffff'),
-                                  width: colWidth,
-                                  height: rowHeight,
-                                  padding: 0,
-                                  ...borderStyle,
-                                }}
-                              />
-                            );
-                          });
-                        })}
-                      </tr>
+                        d={d}
+                        year={year}
+                        month={month}
+                        todayStr={todayStr}
+                        weekInfo={weekInfo}
+                        isFirstDayOfWeek={isFirstDayOfWeek}
+                        isWeekStart={isWeekStart}
+                        allPeople={allPeople}
+                        personSubCols={personSubCols}
+                        cellDataCache={cellDataCache}
+                        togglingCell={togglingCell}
+                        focusedPersonId={focusedPersonId}
+                        checkedProjectPeople={checkedProjectPeople}
+                        hoveredStaffingIds={hoveredStaffingIds}
+                        hoveredBadgePhaseId={hoveredBadgePhaseId}
+                        hatMap={hatMap}
+                        staffingTooltipInfo={staffingTooltipInfo}
+                        colWidth={colWidth}
+                        rowHeight={rowHeight}
+                        badgeColW={badgeColW}
+                        stickyLeftForDate={stickyLeftForDate}
+                        stickyLeftForDow={stickyLeftForDow}
+                        dateColW={dateColW}
+                        dowColW={dowColW}
+                        checkedProjectIds={checkedProjectIds}
+                        handleCellClick={handleCellClick}
+                        handleSubColContextMenu={handleSubColContextMenu}
+                        toggleProjectCheck={toggleProjectCheck}
+                        handleBadgeClick={handleBadgeClick}
+                        handleBadgeContextMenu={handleBadgeContextMenu}
+                        setHoveredBadgePhaseId={setHoveredBadgePhaseId}
+                        handleWeekLabelClick={handleWeekLabelClick}
+                      />
                     );
                   })}
                 </tbody>
