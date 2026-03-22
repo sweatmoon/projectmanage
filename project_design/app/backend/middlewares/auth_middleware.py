@@ -44,9 +44,14 @@ def _is_public(path: str) -> bool:
     # /database/* 경로는 공개
     if path.startswith("/database/"):
         return True
-    # SPA 프론트엔드 라우트: /api/v1 또는 /admin 으로 시작하지 않으면 공개
-    # (프론트엔드는 /logged-out, /project/:id, /person/:id 등의 경로를 사용)
-    if not path.startswith("/api/") and not path.startswith("/admin"):
+    # SPA 프론트엔드 라우트: /api/ 또는 /admin/ (슬래시 포함) 으로 시작하지 않으면 공개
+    # /admin (정확히 이 경로, 슬래시 없이 끝남)은 SPA 페이지 진입점이므로 공개
+    if path == "/admin":
+        return True
+    # /admin/... 은 백엔드 관리 API → 인증 필요 (아래에서 처리)
+    # /api/... 는 백엔드 API → 인증 필요
+    # 그 외는 모두 SPA 프론트엔드 라우트 → 공개
+    if not path.startswith("/api/") and not path.startswith("/admin/"):
         return True
     return False
 
