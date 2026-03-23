@@ -665,16 +665,17 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null); // staffing_id
 
-  // 🔁 공식 인력 변경 다이얼로그 state
-  const [changeDialog, setChangeDialog] = useState<{
+  // 🔁 저장 전 인력변경 사유 입력 다이얼로그
+  // pendingChanges: 인력이 바뀐 staffing 목록 (originalName → newName)
+  const [reasonDialog, setReasonDialog] = useState<{
     open: boolean;
-    staffingId: number;
-    originalPersonId: number | null;
-    originalPersonName: string;
-    newPersonId: number | null;
-    newPersonName: string;
     reason: string;
+    pendingPersonChanges: { staffingId: number; originalPersonId: number | null; originalPersonName: string; newPersonId: number | null; newPersonName: string }[];
+    pendingStaffingChanges: StaffingPersonChange[];
+    pendingProjectUpdates: Partial<Project>;
+    pendingPhaseUpdates: Partial<Phase>;
   } | null>(null);
+
   // 공식 변경 이력 (이 단계)
   const [changeHistory, setChangeHistory] = useState<StaffingChangeRecord[]>([]);
   const [changeHistoryLoaded, setChangeHistoryLoaded] = useState(false);
@@ -687,49 +688,6 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       setChangeHistoryLoaded(true);
     }).catch(() => setChangeHistoryLoaded(true));
   }, [phase.id]);
-
-  const openChangeDialog = (s: StaffingRow) => {
-    const currentPid = getCurrentPersonId(s);
-    const currentPidNum = currentPid === '__external__' ? null : (s.person_id ?? null);
-    setChangeDialog({
-      open: true,
-      staffingId: s.id,
-      originalPersonId: currentPidNum,
-      originalPersonName: getDisplayPerson(s),
-      newPersonId: null,
-      newPersonName: '',
-      reason: '',
-    });
-  };
-
-  const handleOfficialChange = async () => {
-    if (!changeDialog) return;
-    if (!changeDialog.newPersonName.trim()) {
-      toast.error('변경할 인력을 선택해주세요.');
-      return;
-    }
-    try {
-      await client.staffingChange.create({
-        staffing_id:          changeDialog.staffingId,
-        project_id:           project.id,
-        phase_id:             phase.id,
-        original_person_id:   changeDialog.originalPersonId,
-        original_person_name: changeDialog.originalPersonName,
-        new_person_id:        changeDialog.newPersonId,
-        new_person_name:      changeDialog.newPersonName,
-        reason:               changeDialog.reason || undefined,
-      });
-      toast.success(`🔁 공식 변경 완료: ${changeDialog.originalPersonName} → ${changeDialog.newPersonName}`);
-      setChangeDialog(null);
-      // 이력 갱신
-      const updated = await client.staffingChange.getByPhase(phase.id);
-      setChangeHistory(updated);
-      // staffing person도 로컬 반영 (personEdits)
-      handlePersonComboChange(changeDialog.staffingId, changeDialog.newPersonId, changeDialog.newPersonName);
-    } catch {
-      toast.error('공식 변경 처리에 실패했습니다.');
-    }
-  };
 
   const openHatInline = (staffingId: number) => {
     setHatEditId(staffingId);
@@ -903,11 +861,74 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       });
     });
 
-    onSave(
-      { project_name: projectName, organization, status: projectStatus },
-      { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined },
-      staffingChanges.length > 0 ? staffingChanges : undefined
-    );
+    const projectUpdates = { project_name: projectName, organization, status: projectStatus };
+    const phaseUpdates = { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined };
+
+    // 인력이 실제로 바뀐 항목 감지
+    const personChangedItems = staffingChanges
+      .filter((c) => !c.deleteStaffing)
+      .map((c) => {
+        const s = phaseStaffing.find((ss) => ss.id === c.staffingId);
+        if (!s) return null;
+        const origName = s.person_id
+          ? (allPeople.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '')
+          : (s.person_name_text || '');
+        const newName = c.newPersonId
+          ? (allPeople.find((p) => p.id === c.newPersonId)?.person_name || c.newPersonNameText || '')
+          : c.newPersonNameText;
+        // 이름이 실제로 바뀌었을 때만
+        if (origName !== newName && newName.trim()) {
+          return {
+            staffingId: c.staffingId,
+            originalPersonId: s.person_id ?? null,
+            originalPersonName: origName,
+            newPersonId: c.newPersonId,
+            newPersonName: newName,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean) as { staffingId: number; originalPersonId: number | null; originalPersonName: string; newPersonId: number | null; newPersonName: string }[];
+
+    if (personChangedItems.length > 0) {
+      // 인력 변경 있음 → 사유 입력 다이얼로그 표시
+      setReasonDialog({
+        open: true,
+        reason: '',
+        pendingPersonChanges: personChangedItems,
+        pendingStaffingChanges: staffingChanges,
+        pendingProjectUpdates: projectUpdates,
+        pendingPhaseUpdates: phaseUpdates,
+      });
+    } else {
+      // 인력 변경 없음 → 바로 저장
+      onSave(projectUpdates, phaseUpdates, staffingChanges.length > 0 ? staffingChanges : undefined);
+    }
+  };
+
+  // 사유 입력 후 최종 저장
+  const confirmSaveWithReason = async () => {
+    if (!reasonDialog) return;
+    const { reason, pendingPersonChanges, pendingStaffingChanges, pendingProjectUpdates, pendingPhaseUpdates } = reasonDialog;
+    setReasonDialog(null);
+    // staffing_change 이력 기록
+    try {
+      await Promise.all(pendingPersonChanges.map((ch) =>
+        client.staffingChange.create({
+          staffing_id:          ch.staffingId,
+          project_id:           project.id,
+          phase_id:             phase.id,
+          original_person_id:   ch.originalPersonId,
+          original_person_name: ch.originalPersonName,
+          new_person_id:        ch.newPersonId,
+          new_person_name:      ch.newPersonName,
+          reason:               reason.trim() || undefined,
+        })
+      ));
+    } catch {
+      toast.error('변경 이력 저장에 실패했습니다.');
+    }
+    onSave(pendingProjectUpdates, pendingPhaseUpdates, pendingStaffingChanges.length > 0 ? pendingStaffingChanges : undefined);
   };
 
   // Group staffing by team (excluding deleted)
@@ -1118,14 +1139,6 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                                 {/* 🔁 공식 인력 변경 버튼 */}
                                 <button
                                   type="button"
-                                  onClick={() => openChangeDialog(s)}
-                                  className="p-1 text-blue-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0"
-                                  title="공식 인력 변경 (변경 이력 기록)"
-                                >
-                                  <ArrowLeftRight className="h-3 w-3" />
-                                </button>
-                                <button
-                                  type="button"
                                   onClick={() => handleDeleteStaffing(s.id)}
                                   className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0"
                                   title="투입인력 삭제"
@@ -1178,54 +1191,47 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
         </div>
       </div>
 
-      {/* 🔁 공식 인력 변경 다이얼로그 */}
-      {changeDialog?.open && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setChangeDialog(null)}>
+      {/* 🔁 저장 전 인력 변경 사유 입력 다이얼로그 */}
+      {reasonDialog?.open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setReasonDialog(null)}>
           <div className="bg-white rounded-lg shadow-2xl w-[440px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b">
               <div className="flex items-center gap-2">
                 <ArrowLeftRight className="h-4 w-4 text-blue-600" />
-                <h3 className="text-sm font-semibold">공식 인력 변경</h3>
+                <h3 className="text-sm font-semibold">인력 변경 사유 입력</h3>
               </div>
-              <button onClick={() => setChangeDialog(null)} className="p-1 hover:bg-gray-100 rounded">
+              <button onClick={() => setReasonDialog(null)} className="p-1 hover:bg-gray-100 rounded">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="px-5 py-4 space-y-3">
-              <div>
-                <Label className="text-xs text-gray-500">기존 인력</Label>
-                <div className="h-8 px-3 flex items-center text-sm bg-gray-50 rounded border text-gray-600">
-                  {changeDialog.originalPersonName}
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">변경할 인력 <span className="text-red-400">*</span></Label>
-                <PersonCombobox
-                  value={changeDialog.newPersonId != null ? String(changeDialog.newPersonId) : (changeDialog.newPersonName ? '__external__' : '')}
-                  displayText={changeDialog.newPersonName || '인력 선택...'}
-                  isExternal={changeDialog.newPersonId === null && !!changeDialog.newPersonName}
-                  allPeople={allPeople}
-                  onChange={(pid, pname) => setChangeDialog((prev) => prev ? { ...prev, newPersonId: pid, newPersonName: pname } : prev)}
-                />
+              {/* 변경 목록 */}
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">변경 인력 목록</Label>
+                {reasonDialog.pendingPersonChanges.map((ch) => (
+                  <div key={ch.staffingId} className="flex items-center gap-2 text-xs bg-blue-50 rounded px-2 py-1.5 border border-blue-100">
+                    <span className="text-gray-600 truncate max-w-[110px]">{ch.originalPersonName}</span>
+                    <ArrowLeftRight className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                    <span className="text-blue-700 font-semibold truncate max-w-[110px]">{ch.newPersonName}</span>
+                  </div>
+                ))}
               </div>
               <div>
                 <Label className="text-xs">변경 사유 <span className="text-gray-400 font-normal">(선택)</span></Label>
                 <Input
-                  value={changeDialog.reason}
-                  onChange={(e) => setChangeDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                  value={reasonDialog.reason}
+                  onChange={(e) => setReasonDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
                   placeholder="예: 퇴사, 담당자 변경, 역할 조정 등"
-                  className="h-8 text-sm"
+                  className="h-8 text-sm mt-1"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmSaveWithReason(); }}
                 />
               </div>
-              <p className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
-                ⚠️ 공식 변경 시 기존 인력의 달력 일정이 새 인력으로 재배정됩니다.
-              </p>
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
-              <Button variant="outline" size="sm" onClick={() => setChangeDialog(null)}>취소</Button>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={handleOfficialChange}>
-                <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
-                공식 변경 적용
+              <Button variant="outline" size="sm" onClick={() => setReasonDialog(null)}>취소</Button>
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={confirmSaveWithReason}>
+                저장
               </Button>
             </div>
           </div>
@@ -1277,6 +1283,7 @@ interface DayRowProps {
   hoveredStaffingIds: Set<number>;
   hoveredBadgePhaseId: number | null;
   hatMap: Map<number, HatRecord>;
+  changeMap: Map<number, StaffingChangeRecord>;
   staffingTooltipInfo: Map<number, { label: string; team: string; field: string }>;
   colWidth: number;
   rowHeight: number;
@@ -1299,7 +1306,7 @@ interface DayRowProps {
 const DayRow = React.memo(function DayRow({
   d, year, month, todayStr, weekInfo, isFirstDayOfWeek, isWeekStart,
   allPeople, personSubCols, cellDataCache, togglingCell, focusedPersonId,
-  checkedProjectPeople, hoveredStaffingIds, hoveredBadgePhaseId, hatMap,
+  checkedProjectPeople, hoveredStaffingIds, hoveredBadgePhaseId, hatMap, changeMap,
   staffingTooltipInfo, colWidth, rowHeight, badgeColW, stickyLeftForDate,
   stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
   handleCellClick, handleSubColContextMenu, toggleProjectCheck,
@@ -1479,15 +1486,20 @@ const DayRow = React.memo(function DayRow({
 
           const tooltipInfo = cellData ? staffingTooltipInfo.get(cellData.staffingId) : null;
           const hatRecord = cellData ? hatMap.get(cellData.staffingId) : undefined;
+          const changeRecord = cellData ? changeMap.get(cellData.staffingId) : undefined;
           const isHatCell = !!hatRecord && !cellData?.isHatItem;
           const isHatActualCell = !!cellData?.isHatItem;
 
+          const changeTooltipSuffix = changeRecord
+            ? `\n🔁 공식변경: ${changeRecord.original_person_name} → ${changeRecord.new_person_name}${changeRecord.reason ? ` (${changeRecord.reason})` : ''}\n변경일: ${changeRecord.changed_at.slice(0, 10)}`
+            : '';
+
           const cellTooltip = tooltipInfo
             ? isHatCell
-              ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)`
+              ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)${changeTooltipSuffix}`
               : isHatActualCell
-                ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)`
-                : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
+                ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)${changeTooltipSuffix}`
+                : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${changeTooltipSuffix}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
             : undefined;
 
           const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
@@ -1536,7 +1548,14 @@ const DayRow = React.memo(function DayRow({
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
               >
-                {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : cellData.badge.status)}
+                {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : (
+                  changeRecord
+                    ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, fontSize: 8 }}>
+                        <span style={{ color: 'inherit', fontWeight: 700 }}>↔</span>
+                        <span style={{ fontWeight: 700 }}>{cellData.badge.status}</span>
+                      </span>
+                    : cellData.badge.status
+                ))}
               </td>
             );
           }
@@ -1612,6 +1631,7 @@ const DayRow = React.memo(function DayRow({
   if (prev.checkedProjectIds !== next.checkedProjectIds) return false;
   if (prev.cellDataCache !== next.cellDataCache) return false;
   if (prev.hatMap !== next.hatMap) return false;
+  if (prev.changeMap !== next.changeMap) return false;
   if (prev.badgeColW !== next.badgeColW || prev.stickyLeftForDate !== next.stickyLeftForDate) return false;
   return true;
 });
@@ -1639,21 +1659,40 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   // ── 모자(Hat) state ─────────────────────────────────────────
   const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map()); // key: staffing_id
 
-  // staffing 변경 시 hat 데이터 로드
+  // ── 공식 인력 변경 이력 (staffingId → 최신 변경 1건) ─────────
+  const [changeMap, setChangeMap] = useState<Map<number, StaffingChangeRecord>>(new Map());
+
+  // staffing 변경 시 hat + changeMap 로드
   useEffect(() => {
     const ids = staffing.map((s) => s.id);
-    if (ids.length === 0) { setHatMap(new Map()); return; }
-    // 프로젝트 목록에서 project_id 수집 후 hat 로드
+    if (ids.length === 0) { setHatMap(new Map()); setChangeMap(new Map()); return; }
     const projectIds = [...new Set(staffing.map((s) => s.project_id))];
-    Promise.all(
-      projectIds.map((pid) =>
-        client.apiCall.invoke({ url: `/api/v1/staffing-hat/by-project/${pid}`, method: 'GET' })
-          .catch(() => [])
-      )
-    ).then((results) => {
-      const map = new Map<number, HatRecord>();
-      results.flat().forEach((h: HatRecord) => map.set(h.staffing_id, h));
-      setHatMap(map);
+    Promise.all([
+      // hat 로드
+      Promise.all(
+        projectIds.map((pid) =>
+          client.apiCall.invoke({ url: `/api/v1/staffing-hat/by-project/${pid}`, method: 'GET' })
+            .catch(() => [])
+        )
+      ),
+      // 공식 변경 이력 로드
+      Promise.all(
+        projectIds.map((pid) =>
+          client.staffingChange.getByProject(pid).catch(() => [] as StaffingChangeRecord[])
+        )
+      ),
+    ]).then(([hatResults, changeResults]) => {
+      const hMap = new Map<number, HatRecord>();
+      hatResults.flat().forEach((h: HatRecord) => hMap.set(h.staffing_id, h));
+      setHatMap(hMap);
+
+      // staffingId별 가장 최신 변경 1건만 보관
+      const cMap = new Map<number, StaffingChangeRecord>();
+      changeResults.flat().forEach((c: StaffingChangeRecord) => {
+        const existing = cMap.get(c.staffing_id);
+        if (!existing || c.changed_at > existing.changed_at) cMap.set(c.staffing_id, c);
+      });
+      setChangeMap(cMap);
     });
   }, [staffing]);
 
@@ -2960,6 +2999,18 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       }
       setEditTarget(null);
       fetchCalendarEntries();
+      // 공식 변경 이력 갱신
+      const projectIds = [...new Set(localStaffing.map((s) => s.project_id))];
+      Promise.all(
+        projectIds.map((pid) => client.staffingChange.getByProject(pid).catch(() => [] as StaffingChangeRecord[]))
+      ).then((results) => {
+        const cMap = new Map<number, StaffingChangeRecord>();
+        results.flat().forEach((c: StaffingChangeRecord) => {
+          const existing = cMap.get(c.staffing_id);
+          if (!existing || c.changed_at > existing.changed_at) cMap.set(c.staffing_id, c);
+        });
+        setChangeMap(cMap);
+      });
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('Failed to save:', err);
@@ -3451,23 +3502,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         hoveredStaffingIds={hoveredStaffingIds}
                         hoveredBadgePhaseId={hoveredBadgePhaseId}
                         hatMap={hatMap}
+                        changeMap={changeMap}
                         staffingTooltipInfo={staffingTooltipInfo}
-                        colWidth={colWidth}
-                        rowHeight={rowHeight}
-                        badgeColW={badgeColW}
-                        stickyLeftForDate={stickyLeftForDate}
-                        stickyLeftForDow={stickyLeftForDow}
-                        dateColW={dateColW}
-                        dowColW={dowColW}
-                        checkedProjectIds={checkedProjectIds}
-                        handleCellClick={handleCellClick}
-                        handleSubColContextMenu={handleSubColContextMenu}
-                        toggleProjectCheck={toggleProjectCheck}
-                        handleBadgeClick={handleBadgeClick}
-                        handleBadgeContextMenu={handleBadgeContextMenu}
-                        setHoveredBadgePhaseId={setHoveredBadgePhaseId}
-                        handleWeekLabelClick={handleWeekLabelClick}
-                      />
                     );
                   })}
                 </tbody>
