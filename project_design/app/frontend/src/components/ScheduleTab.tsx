@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock, HardHat } from 'lucide-react';
-import { client } from '@/lib/api';
+import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock, HardHat, ArrowLeftRight } from 'lucide-react';
+import { client, StaffingChangeRecord } from '@/lib/api';
 import { toast } from 'sonner';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
@@ -444,6 +444,8 @@ interface EditModalProps {
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
   readOnly?: boolean; // 뷰어 계정: 조회 전용
+  phaseId?: number;   // 공식변경 이력 로드용
+  projectId?: number;
 }
 
 /* ── Searchable Person Combobox ── */
@@ -662,6 +664,72 @@ function PersonCombobox({
 function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allPhases, personDatesByProject, hatMap, onHatSave, onHatDelete, onClose, onSave, readOnly = false }: EditModalProps) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null); // staffing_id
+
+  // 🔁 공식 인력 변경 다이얼로그 state
+  const [changeDialog, setChangeDialog] = useState<{
+    open: boolean;
+    staffingId: number;
+    originalPersonId: number | null;
+    originalPersonName: string;
+    newPersonId: number | null;
+    newPersonName: string;
+    reason: string;
+  } | null>(null);
+  // 공식 변경 이력 (이 단계)
+  const [changeHistory, setChangeHistory] = useState<StaffingChangeRecord[]>([]);
+  const [changeHistoryLoaded, setChangeHistoryLoaded] = useState(false);
+
+  // 단계 변경 이력 로드
+  useEffect(() => {
+    if (!phase.id) return;
+    client.staffingChange.getByPhase(phase.id).then((list) => {
+      setChangeHistory(list);
+      setChangeHistoryLoaded(true);
+    }).catch(() => setChangeHistoryLoaded(true));
+  }, [phase.id]);
+
+  const openChangeDialog = (s: StaffingRow) => {
+    const currentPid = getCurrentPersonId(s);
+    const currentPidNum = currentPid === '__external__' ? null : (s.person_id ?? null);
+    setChangeDialog({
+      open: true,
+      staffingId: s.id,
+      originalPersonId: currentPidNum,
+      originalPersonName: getDisplayPerson(s),
+      newPersonId: null,
+      newPersonName: '',
+      reason: '',
+    });
+  };
+
+  const handleOfficialChange = async () => {
+    if (!changeDialog) return;
+    if (!changeDialog.newPersonName.trim()) {
+      toast.error('변경할 인력을 선택해주세요.');
+      return;
+    }
+    try {
+      await client.staffingChange.create({
+        staffing_id:          changeDialog.staffingId,
+        project_id:           project.id,
+        phase_id:             phase.id,
+        original_person_id:   changeDialog.originalPersonId,
+        original_person_name: changeDialog.originalPersonName,
+        new_person_id:        changeDialog.newPersonId,
+        new_person_name:      changeDialog.newPersonName,
+        reason:               changeDialog.reason || undefined,
+      });
+      toast.success(`🔁 공식 변경 완료: ${changeDialog.originalPersonName} → ${changeDialog.newPersonName}`);
+      setChangeDialog(null);
+      // 이력 갱신
+      const updated = await client.staffingChange.getByPhase(phase.id);
+      setChangeHistory(updated);
+      // staffing person도 로컬 반영 (personEdits)
+      handlePersonComboChange(changeDialog.staffingId, changeDialog.newPersonId, changeDialog.newPersonName);
+    } catch {
+      toast.error('공식 변경 처리에 실패했습니다.');
+    }
+  };
 
   const openHatInline = (staffingId: number) => {
     setHatEditId(staffingId);
@@ -1047,6 +1115,15 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                                     </button>
                                   )
                                 )}
+                                {/* 🔁 공식 인력 변경 버튼 */}
+                                <button
+                                  type="button"
+                                  onClick={() => openChangeDialog(s)}
+                                  className="p-1 text-blue-400 hover:bg-blue-50 hover:text-blue-600 rounded flex-shrink-0"
+                                  title="공식 인력 변경 (변경 이력 기록)"
+                                >
+                                  <ArrowLeftRight className="h-3 w-3" />
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteStaffing(s.id)}
@@ -1067,6 +1144,28 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             )}
           </div>
         </div>
+
+        {/* 🔁 공식 인력 변경 이력 섹션 (뷰어도 볼 수 있음) */}
+        {changeHistoryLoaded && changeHistory.length > 0 && (
+          <div className="px-5 pb-3">
+            <h4 className="text-[11px] font-semibold text-blue-600 flex items-center gap-1 mb-2">
+              <ArrowLeftRight className="h-3 w-3" />
+              공식 인력 변경 이력 ({changeHistory.length}건)
+            </h4>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {changeHistory.map((ch) => (
+                <div key={ch.id} className="flex items-center gap-2 text-[10px] bg-blue-50 rounded px-2 py-1 border border-blue-100">
+                  <span className="text-blue-700 font-medium truncate max-w-[90px]">{ch.original_person_name}</span>
+                  <ArrowLeftRight className="h-2.5 w-2.5 text-blue-400 flex-shrink-0" />
+                  <span className="text-blue-800 font-semibold truncate max-w-[90px]">{ch.new_person_name}</span>
+                  <span className="text-gray-400 ml-auto flex-shrink-0">{ch.changed_at.slice(0, 10)}</span>
+                  {ch.reason && <span className="text-gray-500 truncate max-w-[80px]" title={ch.reason}>({ch.reason})</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
           {readOnly ? (
             <Button variant="outline" size="sm" onClick={onClose}>닫기</Button>
@@ -1078,6 +1177,60 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
           )}
         </div>
       </div>
+
+      {/* 🔁 공식 인력 변경 다이얼로그 */}
+      {changeDialog?.open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setChangeDialog(null)}>
+          <div className="bg-white rounded-lg shadow-2xl w-[440px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-2">
+                <ArrowLeftRight className="h-4 w-4 text-blue-600" />
+                <h3 className="text-sm font-semibold">공식 인력 변경</h3>
+              </div>
+              <button onClick={() => setChangeDialog(null)} className="p-1 hover:bg-gray-100 rounded">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <Label className="text-xs text-gray-500">기존 인력</Label>
+                <div className="h-8 px-3 flex items-center text-sm bg-gray-50 rounded border text-gray-600">
+                  {changeDialog.originalPersonName}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">변경할 인력 <span className="text-red-400">*</span></Label>
+                <PersonCombobox
+                  value={changeDialog.newPersonId != null ? String(changeDialog.newPersonId) : (changeDialog.newPersonName ? '__external__' : '')}
+                  displayText={changeDialog.newPersonName || '인력 선택...'}
+                  isExternal={changeDialog.newPersonId === null && !!changeDialog.newPersonName}
+                  allPeople={allPeople}
+                  onChange={(pid, pname) => setChangeDialog((prev) => prev ? { ...prev, newPersonId: pid, newPersonName: pname } : prev)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">변경 사유 <span className="text-gray-400 font-normal">(선택)</span></Label>
+                <Input
+                  value={changeDialog.reason}
+                  onChange={(e) => setChangeDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                  placeholder="예: 퇴사, 담당자 변경, 역할 조정 등"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <p className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
+                ⚠️ 공식 변경 시 기존 인력의 달력 일정이 새 인력으로 재배정됩니다.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
+              <Button variant="outline" size="sm" onClick={() => setChangeDialog(null)}>취소</Button>
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={handleOfficialChange}>
+                <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
+                공식 변경 적용
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

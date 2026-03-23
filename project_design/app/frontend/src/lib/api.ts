@@ -179,8 +179,22 @@ function createEntityClient(entityName: string) {
   };
 }
 
-interface ApiCallOptions {
-  url: string;
+// 공식 인력 변경 이력 타입
+export interface StaffingChangeRecord {
+  id: number;
+  staffing_id: number;
+  project_id: number;
+  phase_id: number;
+  original_person_id: number | null;
+  original_person_name: string;
+  new_person_id: number | null;
+  new_person_name: string;
+  reason: string | null;
+  changed_by: string | null;
+  changed_at: string;
+}
+
+interface ApiCallOptions {  url: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   data?: any;
   params?: Record<string, any>;
@@ -354,6 +368,35 @@ export const client = {
           message: string;
         }>;
       };
+    },
+  },
+
+  // ── 공식 인력 변경 이력 ──────────────────────────────────────
+  staffingChange: {
+    async create(data: {
+      staffing_id: number;
+      project_id: number;
+      phase_id: number;
+      original_person_id: number | null;
+      original_person_name: string;
+      new_person_id: number | null;
+      new_person_name: string;
+      reason?: string;
+    }) {
+      const res = await http.post('/api/v1/staffing-change', data);
+      return res.data as StaffingChangeRecord;
+    },
+    async getByProject(projectId: number) {
+      const res = await http.get(`/api/v1/staffing-change/by-project/${projectId}`);
+      return res.data as StaffingChangeRecord[];
+    },
+    async getByStaffing(staffingId: number) {
+      const res = await http.get(`/api/v1/staffing-change/by-staffing/${staffingId}`);
+      return res.data as StaffingChangeRecord[];
+    },
+    async getByPhase(phaseId: number) {
+      const res = await http.get(`/api/v1/staffing-change/by-phase/${phaseId}`);
+      return res.data as StaffingChangeRecord[];
     },
   },
 };
