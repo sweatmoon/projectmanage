@@ -807,6 +807,18 @@ export default function ProjectDetail() {
   // Inline person editing
   const [editingPerson, setEditingPerson] = useState<{ staffingId: number; search: string } | null>(null);
   const [savingPerson, setSavingPerson] = useState(false);
+  // 인력 공식 변경 사유 입력 다이얼로그
+  const [personChangeDialog, setPersonChangeDialog] = useState<{
+    open: boolean;
+    staffingIds: number[];
+    newPersonId: number | null;
+    newPersonName: string;
+    originalPersonId: number | null;
+    originalPersonName: string;
+    projectId: number;
+    phaseId: number;
+    reason: string;
+  } | null>(null);
   // 인력별 선택된 일정 날짜 (중복 체크용): { person_id → Set<dateStr> }
   // 현재 프로젝트 일정은 제외 (동일 사업 내 중복 허용)
   const [globalPersonDates, setGlobalPersonDates] = useState<Map<number, Set<string>>>(new Map());
@@ -1347,6 +1359,78 @@ export default function ProjectDetail() {
       );
       setEditingPerson(null);
       toast.success('담당자가 변경되었습니다.');
+    } catch (err) {
+      console.error(err);
+      toast.error('담당자 변경에 실패했습니다.');
+    } finally {
+      setSavingPerson(false);
+    }
+  };
+
+  // 공식 인력 변경: 사유 다이얼로그 → 저장 + 이력 기록
+  const openPersonChangeDialog = (staffingIds: number[], newPersonId: number | null, newPersonName: string) => {
+    // 첫 번째 staffingId 기준으로 원본 정보 추출
+    const firstId = staffingIds[0];
+    const original = staffingList.find((s) => s.id === firstId);
+    if (!original) {
+      // 찾지 못한 경우 바로 저장
+      staffingIds.forEach((sid) => handlePersonChange(sid, newPersonId, newPersonName));
+      return;
+    }
+    const originalPersonName = original.person_id
+      ? people.find((p) => p.id === original.person_id)?.person_name || original.person_name_text || ''
+      : original.person_name_text || '';
+    setPersonChangeDialog({
+      open: true,
+      staffingIds,
+      newPersonId,
+      newPersonName,
+      originalPersonId: original.person_id ?? null,
+      originalPersonName,
+      projectId: original.project_id,
+      phaseId: original.phase_id,
+      reason: '',
+    });
+  };
+
+  const confirmPersonChange = async () => {
+    if (!personChangeDialog) return;
+    const { staffingIds, newPersonId, newPersonName, originalPersonId, originalPersonName, projectId, phaseId, reason } = personChangeDialog;
+    setPersonChangeDialog(null);
+    setSavingPerson(true);
+    try {
+      // 인력 변경 저장
+      await Promise.all(staffingIds.map((sid) =>
+        client.entities.staffing.update({
+          id: String(sid),
+          data: { person_id: newPersonId, person_name_text: newPersonName, updated_at: new Date().toISOString() },
+        })
+      ));
+      setStaffingList((prev) =>
+        prev.map((s) =>
+          staffingIds.includes(s.id)
+            ? { ...s, person_id: newPersonId ?? undefined, person_name_text: newPersonName }
+            : s
+        )
+      );
+      // 공식 변경 이력 기록
+      await Promise.all(staffingIds.map((sid) =>
+        client.staffingChange.create({
+          staffing_id: sid,
+          project_id: projectId,
+          phase_id: phaseId,
+          original_person_id: originalPersonId,
+          original_person_name: originalPersonName,
+          new_person_id: newPersonId,
+          new_person_name: newPersonName,
+          reason: reason || undefined,
+        })
+      ));
+      // 변경 이력 새로고침
+      const updated = await client.staffingChange.getByProject(projectId);
+      setChangeHistory(updated);
+      setEditingPerson(null);
+      toast.success(`🔁 공식 변경 완료: ${originalPersonName} → ${newPersonName}`);
     } catch (err) {
       console.error(err);
       toast.error('담당자 변경에 실패했습니다.');
@@ -1971,7 +2055,7 @@ export default function ProjectDetail() {
                                       disabled={savingPerson}
                                       onChange={(pid, pname) => {
                                         const staffingIds = Object.values(row.phaseMds).map((v) => v.staffingId);
-                                        staffingIds.forEach((sid) => handlePersonChange(sid, pid, pname));
+                                        openPersonChangeDialog(staffingIds, pid, pname);
                                       }}
                                       onCancel={() => setEditingPerson(null)}
                                     />
@@ -2086,7 +2170,7 @@ export default function ProjectDetail() {
             </CardContent>
           </Card>
           {/* 🔁 공식 인력 변경 이력 Card */}
-          {changeHistoryLoaded && changeHistory.length > 0 && (
+          {changeHistoryLoaded && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -2109,7 +2193,11 @@ export default function ProjectDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {changeHistory.map((ch) => (
+                      {changeHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-6 text-center text-gray-400 text-sm">아직 공식 인력 변경 이력이 없습니다.</td>
+                        </tr>
+                      ) : changeHistory.map((ch) => (
                         <tr key={ch.id} className="border-b last:border-0 hover:bg-muted/30">
                           <td className="py-1.5 pr-3 text-gray-600">{ch.original_person_name}</td>
                           <td className="py-1.5 pr-3">
@@ -2594,6 +2682,42 @@ export default function ProjectDetail() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* 🔁 공식 인력 변경 사유 입력 다이얼로그 */}
+        {personChangeDialog?.open && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-semibold text-base mb-4 flex items-center gap-2">
+                🔁 공식 인력 변경 사유 입력
+              </h3>
+              <div className="mb-3 text-sm text-gray-700">
+                <span className="font-medium text-gray-600">{personChangeDialog.originalPersonName || '(미배정)'}</span>
+                <span className="mx-2 text-blue-400">→</span>
+                <span className="font-semibold text-blue-700">{personChangeDialog.newPersonName || '(미배정)'}</span>
+              </div>
+              <div className="mb-4">
+                <label className="block text-xs text-gray-500 mb-1">변경 사유 (선택)</label>
+                <input
+                  type="text"
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  placeholder="사유를 입력하세요 (공란 가능)"
+                  value={personChangeDialog.reason}
+                  onChange={(e) => setPersonChangeDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmPersonChange(); }}
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPersonChangeDialog(null)} disabled={savingPerson}>
+                  취소
+                </Button>
+                <Button size="sm" onClick={confirmPersonChange} disabled={savingPerson} className="bg-blue-600 hover:bg-blue-700 text-white">
+                  {savingPerson ? '저장 중...' : '🔁 공식 변경 적용'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </TooltipProvider>
