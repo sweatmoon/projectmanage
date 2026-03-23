@@ -1164,13 +1164,14 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             <h4 className="text-[11px] font-semibold text-blue-600 flex items-center gap-1 mb-2">
               <ArrowLeftRight className="h-3 w-3" />
               공식 인력 변경 이력 ({changeHistory.length}건)
+              <span className="text-[10px] font-normal text-gray-400 ml-1">· {phase.phase_name}</span>
             </h4>
             <div className="space-y-1 max-h-32 overflow-y-auto">
               {changeHistory.map((ch) => (
                 <div key={ch.id} className="flex items-center gap-2 text-[10px] bg-blue-50 rounded px-2 py-1 border border-blue-100">
-                  <span className="text-blue-700 font-medium truncate max-w-[90px]">{ch.original_person_name}</span>
+                  <span className="text-blue-700 font-medium truncate max-w-[80px]">{ch.original_person_name}</span>
                   <ArrowLeftRight className="h-2.5 w-2.5 text-blue-400 flex-shrink-0" />
-                  <span className="text-blue-800 font-semibold truncate max-w-[90px]">{ch.new_person_name}</span>
+                  <span className="text-blue-800 font-semibold truncate max-w-[80px]">{ch.new_person_name}</span>
                   <span className="text-gray-400 ml-auto flex-shrink-0">{ch.changed_at.slice(0, 10)}</span>
                   {ch.reason && <span className="text-gray-500 truncate max-w-[80px]" title={ch.reason}>({ch.reason})</span>}
                 </div>
