@@ -950,7 +950,7 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="bg-white rounded-lg shadow-xl w-[680px] max-w-[95vw] max-h-[90vh] overflow-auto"
+        className="relative bg-white rounded-lg shadow-xl w-[680px] max-w-[95vw] max-h-[90vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b">
@@ -1189,54 +1189,53 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             </>
           )}
         </div>
-      </div>
 
-      {/* 🔁 저장 전 인력 변경 사유 입력 다이얼로그 */}
-      {reasonDialog?.open && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setReasonDialog(null)}>
-          <div className="bg-white rounded-lg shadow-2xl w-[440px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b">
-              <div className="flex items-center gap-2">
-                <ArrowLeftRight className="h-4 w-4 text-blue-600" />
-                <h3 className="text-sm font-semibold">인력 변경 사유 입력</h3>
+        {/* 🔁 저장 전 인력 변경 사유 입력 다이얼로그 — white box 안에서 렌더링해야 onClose 버블링 차단 */}
+        {reasonDialog?.open && (
+          <div className="absolute inset-0 z-[10] flex items-center justify-center bg-black/40 rounded-lg" onClick={() => setReasonDialog(null)}>
+            <div className="bg-white rounded-lg shadow-2xl w-[440px] max-w-[90%]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b">
+                <div className="flex items-center gap-2">
+                  <ArrowLeftRight className="h-4 w-4 text-blue-600" />
+                  <h3 className="text-sm font-semibold">인력 변경 사유 입력</h3>
+                </div>
+                <button onClick={() => setReasonDialog(null)} className="p-1 hover:bg-gray-100 rounded">
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button onClick={() => setReasonDialog(null)} className="p-1 hover:bg-gray-100 rounded">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              {/* 변경 목록 */}
-              <div className="space-y-1">
-                <Label className="text-xs text-gray-500">변경 인력 목록</Label>
-                {reasonDialog.pendingPersonChanges.map((ch) => (
-                  <div key={ch.staffingId} className="flex items-center gap-2 text-xs bg-blue-50 rounded px-2 py-1.5 border border-blue-100">
-                    <span className="text-gray-600 truncate max-w-[110px]">{ch.originalPersonName}</span>
-                    <ArrowLeftRight className="h-3 w-3 text-blue-400 flex-shrink-0" />
-                    <span className="text-blue-700 font-semibold truncate max-w-[110px]">{ch.newPersonName}</span>
-                  </div>
-                ))}
+              <div className="px-5 py-4 space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-500">변경 인력 목록</Label>
+                  {reasonDialog.pendingPersonChanges.map((ch) => (
+                    <div key={ch.staffingId} className="flex items-center gap-2 text-xs bg-blue-50 rounded px-2 py-1.5 border border-blue-100">
+                      <span className="text-gray-600 truncate max-w-[110px]">{ch.originalPersonName}</span>
+                      <ArrowLeftRight className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                      <span className="text-blue-700 font-semibold truncate max-w-[110px]">{ch.newPersonName}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <Label className="text-xs">변경 사유 <span className="text-gray-400 font-normal">(선택)</span></Label>
+                  <Input
+                    value={reasonDialog.reason}
+                    onChange={(e) => setReasonDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                    placeholder="예: 퇴사, 담당자 변경, 역할 조정 등"
+                    className="h-8 text-sm mt-1"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') confirmSaveWithReason(); }}
+                  />
+                </div>
               </div>
-              <div>
-                <Label className="text-xs">변경 사유 <span className="text-gray-400 font-normal">(선택)</span></Label>
-                <Input
-                  value={reasonDialog.reason}
-                  onChange={(e) => setReasonDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
-                  placeholder="예: 퇴사, 담당자 변경, 역할 조정 등"
-                  className="h-8 text-sm mt-1"
-                  autoFocus
-                  onKeyDown={(e) => { if (e.key === 'Enter') confirmSaveWithReason(); }}
-                />
+              <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
+                <Button variant="outline" size="sm" onClick={() => setReasonDialog(null)}>취소</Button>
+                <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={confirmSaveWithReason}>
+                  저장
+                </Button>
               </div>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
-              <Button variant="outline" size="sm" onClick={() => setReasonDialog(null)}>취소</Button>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={confirmSaveWithReason}>
-                저장
-              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
