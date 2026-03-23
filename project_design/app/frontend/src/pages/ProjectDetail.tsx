@@ -528,7 +528,9 @@ export default function ProjectDetail() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportText, setExportText] = useState('');
   const [exportActualText, setExportActualText] = useState('');
+  const [exportOriginalText, setExportOriginalText] = useState('');
   const [exportHasHat, setExportHasHat] = useState(false);
+  const [exportHasChange, setExportHasChange] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
   // Text edit dialog (overwrite phases)
@@ -1521,7 +1523,9 @@ export default function ProjectDetail() {
       // client.apiCall.invoke는 이미 res.data를 반환하므로 .data 중복 접근 불필요
       setExportText(res?.text || '');
       setExportActualText(res?.actual_text || '');
+      setExportOriginalText(res?.original_text || '');
       setExportHasHat(res?.has_hat || false);
+      setExportHasChange(res?.has_change || false);
       setShowExportDialog(true);
     } catch (err) {
       console.error(err);
@@ -2184,6 +2188,7 @@ export default function ProjectDetail() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left pb-2 pr-3 font-medium">단계</th>
                         <th className="text-left pb-2 pr-3 font-medium">기존 인력</th>
                         <th className="text-left pb-2 pr-3 font-medium"></th>
                         <th className="text-left pb-2 pr-3 font-medium">변경 인력</th>
@@ -2195,10 +2200,13 @@ export default function ProjectDetail() {
                     <tbody>
                       {changeHistory.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="py-6 text-center text-gray-400 text-sm">아직 공식 인력 변경 이력이 없습니다.</td>
+                          <td colSpan={7} className="py-6 text-center text-gray-400 text-sm">아직 공식 인력 변경 이력이 없습니다.</td>
                         </tr>
-                      ) : changeHistory.map((ch) => (
+                      ) : changeHistory.map((ch) => {
+                          const phaseName = phases.find((p) => p.id === ch.phase_id)?.phase_name || `단계 ${ch.phase_id}`;
+                          return (
                         <tr key={ch.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="py-1.5 pr-3 text-xs text-indigo-600 font-medium whitespace-nowrap">{phaseName}</td>
                           <td className="py-1.5 pr-3 text-gray-600">{ch.original_person_name}</td>
                           <td className="py-1.5 pr-3">
                             <ArrowLeftRight className="h-3 w-3 text-blue-400" />
@@ -2212,7 +2220,8 @@ export default function ProjectDetail() {
                             {ch.changed_at.replace('T', ' ').slice(0, 16)}
                           </td>
                         </tr>
-                      ))}
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

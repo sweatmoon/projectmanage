@@ -15,6 +15,7 @@ from models.staffing import Staffing
 from models.people import People
 from models.calendar_entries import Calendar_entries
 from models.staffing_hat import StaffingHat
+from models.staffing_change import StaffingChange
 from utils.holidays import count_business_days, get_consecutive_business_days
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,9 @@ class PhaseTextImportResponse(BaseModel):
 class ProjectExportResponse(BaseModel):
     text: str
     actual_text: str = ''   # 모자(대체인력) 반영된 실제 버전
-    has_hat: bool = False   # 모자 데이터 존재 여부
+    original_text: str = ''  # 공식 인력변경 전 초기 입력값 버전
+    has_hat: bool = False    # 모자 데이터 존재 여부
+    has_change: bool = False  # 공식 인력변경 이력 존재 여부
     project_name: str
     organization: str
     status: str
@@ -527,6 +530,49 @@ async def export_project_to_text(
 
         has_hat = bool(hat_by_staffing)
 
+        # ── 공식 인력변경 이력 조회 → 초기 입력값 버전 생성 ──────────────
+        # staffing_id → 가장 오래된 original_person_name (= 최초 입력값)
+        change_by_staffing: Dict[int, str] = {}
+        if staffing_ids:
+            change_stmt = select(StaffingChange).where(
+                StaffingChange.staffing_id.in_(staffing_ids)
+            ).order_by(StaffingChange.changed_at)
+            change_result = await db.execute(change_stmt)
+            for chg in change_result.scalars().all():
+                # 가장 오래된 레코드의 original을 초기값으로 사용 (중복 시 먼저 온 것만 저장)
+                if chg.staffing_id not in change_by_staffing:
+                    change_by_staffing[chg.staffing_id] = chg.original_person_name
+
+        has_change = bool(change_by_staffing)
+
+        # 초기 입력값 버전 라인 생성 (공식변경 전 원래 인력)
+        original_lines = []
+        for phase in phases:
+            start_str = phase.start_date.strftime('%Y%m%d') if phase.start_date else ''
+            end_str = phase.end_date.strftime('%Y%m%d') if phase.end_date else ''
+            total_biz_days = 0
+            if phase.start_date and phase.end_date:
+                total_biz_days = count_business_days(phase.start_date, phase.end_date)
+
+            phase_staffing = staffing_by_phase.get(phase.id, [])
+            person_entries = []
+            for s in phase_staffing:
+                # 공식변경 이력이 있으면 최초 original_person_name, 없으면 현재 이름
+                person_name = change_by_staffing.get(s.id)
+                if person_name is None:
+                    person_name = s.person_name_text or ''
+                    if not person_name and s.person_id:
+                        person_name = people_by_id.get(s.person_id, '')
+                field_name = s.field or ''
+                actual_md = actual_counts.get(s.id, s.md or 0)
+                if actual_md == total_biz_days:
+                    person_entries.append(f"{person_name}:{field_name}")
+                else:
+                    person_entries.append(f"{person_name}:{field_name}:{actual_md}")
+
+            parts = [phase.phase_name, start_str, end_str] + person_entries
+            original_lines.append(', '.join(parts))
+
         # 실제 버전 라인 생성 (hat 적용)
         actual_lines = []
         for phase in phases:
@@ -556,7 +602,9 @@ async def export_project_to_text(
         return ProjectExportResponse(
             text='\n'.join(lines),
             actual_text='\n'.join(actual_lines),
+            original_text='\n'.join(original_lines),
             has_hat=has_hat,
+            has_change=has_change,
             project_name=project.project_name,
             organization=project.organization or '',
             status=project.status or '',
