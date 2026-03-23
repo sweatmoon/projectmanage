@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GanttChart, X, Loader2, HardHat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GanttChart, X, Loader2, HardHat, ArrowLeftRight } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { client } from '@/lib/api';
+import { client, StaffingChangeRecord } from '@/lib/api';
 import { toast } from 'sonner';
 import { useUserRole } from '@/hooks/useUserRole';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
@@ -584,6 +584,16 @@ function EditModal({
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null);
 
+  // 🔁 저장 전 인력변경 사유 입력 다이얼로그
+  const [reasonDialog, setReasonDialog] = useState<{
+    open: boolean;
+    reason: string;
+    pendingPersonChanges: { staffingId: number; originalPersonId: number | null; originalPersonName: string; newPersonId: number | null; newPersonName: string }[];
+    pendingStaffingChanges: StaffingPersonChange[];
+    pendingProjectUpdates: Partial<Project>;
+    pendingPhaseUpdates: Partial<Phase>;
+  } | null>(null);
+
   const openHatInline = (staffingId: number) => {
     setHatEditId(staffingId);
   };
@@ -723,11 +733,52 @@ function EditModal({
         newMd: mEdit !== undefined ? (mEdit ?? null) : undefined,
       });
     });
-    onSave(
-      { project_name: projectName, organization, status: projectStatus },
-      { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined },
-      staffingChanges.length > 0 ? staffingChanges : undefined
-    );
+    const projectUpdates = { project_name: projectName, organization, status: projectStatus };
+    const phaseUpdates = { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined };
+
+    // 인력이 실제로 바뀐 항목 감지
+    const personChangedItems = staffingChanges
+      .filter((c) => !c.deleteStaffing)
+      .map((c) => {
+        const s = phaseStaffing.find((ss) => ss.id === c.staffingId);
+        if (!s) return null;
+        const origName = s.person_id
+          ? (allPeople.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '')
+          : (s.person_name_text || '');
+        const newName = c.newPersonId
+          ? (allPeople.find((p) => p.id === c.newPersonId)?.person_name || c.newPersonNameText || '')
+          : c.newPersonNameText;
+        if (origName !== newName && newName.trim()) {
+          return { staffingId: c.staffingId, originalPersonId: s.person_id ?? null, originalPersonName: origName, newPersonId: c.newPersonId, newPersonName: newName };
+        }
+        return null;
+      })
+      .filter(Boolean) as { staffingId: number; originalPersonId: number | null; originalPersonName: string; newPersonId: number | null; newPersonName: string }[];
+
+    if (personChangedItems.length > 0) {
+      setReasonDialog({ open: true, reason: '', pendingPersonChanges: personChangedItems, pendingStaffingChanges: staffingChanges, pendingProjectUpdates: projectUpdates, pendingPhaseUpdates: phaseUpdates });
+    } else {
+      onSave(projectUpdates, phaseUpdates, staffingChanges.length > 0 ? staffingChanges : undefined);
+    }
+  };
+
+  const confirmSaveWithReason = async () => {
+    if (!reasonDialog) return;
+    const { reason, pendingPersonChanges, pendingStaffingChanges, pendingProjectUpdates, pendingPhaseUpdates } = reasonDialog;
+    setReasonDialog(null);
+    try {
+      await Promise.all(pendingPersonChanges.map((ch) =>
+        client.staffingChange.create({
+          staffing_id: ch.staffingId, project_id: project.id, phase_id: phase.id,
+          original_person_id: ch.originalPersonId, original_person_name: ch.originalPersonName,
+          new_person_id: ch.newPersonId, new_person_name: ch.newPersonName,
+          reason: reason.trim() || undefined,
+        })
+      ));
+    } catch {
+      toast.error('변경 이력 저장에 실패했습니다.');
+    }
+    onSave(pendingProjectUpdates, pendingPhaseUpdates, pendingStaffingChanges.length > 0 ? pendingStaffingChanges : undefined);
   };
 
   const groupedStaffing = useMemo(() => {
@@ -887,6 +938,50 @@ function EditModal({
           )}
         </div>
       </div>
+
+      {/* 🔁 저장 전 인력 변경 사유 입력 다이얼로그 */}
+      {reasonDialog?.open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setReasonDialog(null)}>
+          <div className="bg-white rounded-lg shadow-2xl w-[440px] max-w-[95vw]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-2">
+                <ArrowLeftRight className="h-4 w-4 text-blue-600" />
+                <h3 className="text-sm font-semibold">인력 변경 사유 입력</h3>
+              </div>
+              <button onClick={() => setReasonDialog(null)} className="p-1 hover:bg-gray-100 rounded">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">변경 인력 목록</Label>
+                {reasonDialog.pendingPersonChanges.map((ch) => (
+                  <div key={ch.staffingId} className="flex items-center gap-2 text-xs bg-blue-50 rounded px-2 py-1.5 border border-blue-100">
+                    <span className="text-gray-600 truncate max-w-[110px]">{ch.originalPersonName}</span>
+                    <ArrowLeftRight className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                    <span className="text-blue-700 font-semibold truncate max-w-[110px]">{ch.newPersonName}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <Label className="text-xs">변경 사유 <span className="text-gray-400 font-normal">(선택)</span></Label>
+                <Input
+                  value={reasonDialog.reason}
+                  onChange={(e) => setReasonDialog((prev) => prev ? { ...prev, reason: e.target.value } : prev)}
+                  placeholder="예: 퇴사, 담당자 변경, 역할 조정 등"
+                  className="h-8 text-sm mt-1"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmSaveWithReason(); }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
+              <Button variant="outline" size="sm" onClick={() => setReasonDialog(null)}>취소</Button>
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={confirmSaveWithReason}>저장</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
