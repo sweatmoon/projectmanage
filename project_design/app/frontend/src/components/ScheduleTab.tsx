@@ -1282,7 +1282,7 @@ interface DayRowProps {
   hoveredStaffingIds: Set<number>;
   hoveredBadgePhaseId: number | null;
   hatMap: Map<number, HatRecord>;
-  changeMap: Map<number, StaffingChangeRecord>;
+  changeMap: Map<number, StaffingChangeRecord[]>;
   staffingTooltipInfo: Map<number, { label: string; team: string; field: string }>;
   colWidth: number;
   rowHeight: number;
@@ -1485,12 +1485,15 @@ const DayRow = React.memo(function DayRow({
 
           const tooltipInfo = cellData ? staffingTooltipInfo.get(cellData.staffingId) : null;
           const hatRecord = cellData ? hatMap.get(cellData.staffingId) : undefined;
-          const changeRecord = cellData ? changeMap.get(cellData.staffingId) : undefined;
+          const changeRecords = cellData ? (changeMap.get(cellData.staffingId) ?? []) : [];
+          const changeRecord = changeRecords.length > 0 ? changeRecords[changeRecords.length - 1] : undefined;
           const isHatCell = !!hatRecord && !cellData?.isHatItem;
           const isHatActualCell = !!cellData?.isHatItem;
 
-          const changeTooltipSuffix = changeRecord
-            ? `\n🔁 공식변경: ${changeRecord.original_person_name} → ${changeRecord.new_person_name}${changeRecord.reason ? ` (${changeRecord.reason})` : ''}\n변경일: ${changeRecord.changed_at.slice(0, 10)}`
+          const changeTooltipSuffix = changeRecords.length > 0
+            ? '\n' + changeRecords.map((cr, idx) =>
+                `🔁 변경${idx + 1}: ${cr.original_person_name} → ${cr.new_person_name}${cr.reason ? ` (${cr.reason})` : ''} [${cr.changed_at.slice(0, 10)}]`
+              ).join('\n')
             : '';
 
           const cellTooltip = tooltipInfo
@@ -1548,9 +1551,9 @@ const DayRow = React.memo(function DayRow({
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
               >
                 {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : (
-                  changeRecord
+                  changeRecords.length > 0
                     ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, fontSize: 8 }}>
-                        <span style={{ color: 'inherit', fontWeight: 700 }}>↔</span>
+                        <span style={{ color: '#3b82f6', fontWeight: 700 }}>🔁</span>
                         <span style={{ fontWeight: 700 }}>{cellData.badge.status}</span>
                       </span>
                     : cellData.badge.status
@@ -1658,8 +1661,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   // ── 모자(Hat) state ─────────────────────────────────────────
   const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map()); // key: staffing_id
 
-  // ── 공식 인력 변경 이력 (staffingId → 최신 변경 1건) ─────────
-  const [changeMap, setChangeMap] = useState<Map<number, StaffingChangeRecord>>(new Map());
+  // ── 공식 인력 변경 이력 (staffingId → 전체 이력 배열) ─────────
+  const [changeMap, setChangeMap] = useState<Map<number, StaffingChangeRecord[]>>(new Map());
 
   // staffing 변경 시 hat + changeMap 로드
   useEffect(() => {
@@ -1685,12 +1688,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       hatResults.flat().forEach((h: HatRecord) => hMap.set(h.staffing_id, h));
       setHatMap(hMap);
 
-      // staffingId별 가장 최신 변경 1건만 보관
-      const cMap = new Map<number, StaffingChangeRecord>();
+      // staffingId별 전체 이력 배열 (changed_at 오름차순)
+      const cMap = new Map<number, StaffingChangeRecord[]>();
       changeResults.flat().forEach((c: StaffingChangeRecord) => {
-        const existing = cMap.get(c.staffing_id);
-        if (!existing || c.changed_at > existing.changed_at) cMap.set(c.staffing_id, c);
+        const arr = cMap.get(c.staffing_id) ?? [];
+        arr.push(c);
+        cMap.set(c.staffing_id, arr);
       });
+      // 각 배열을 changed_at 오름차순 정렬
+      cMap.forEach((arr) => arr.sort((a, b) => a.changed_at.localeCompare(b.changed_at)));
       setChangeMap(cMap);
     });
   }, [staffing]);
