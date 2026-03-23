@@ -3503,6 +3503,22 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         hatMap={hatMap}
                         changeMap={changeMap}
                         staffingTooltipInfo={staffingTooltipInfo}
+                        colWidth={colWidth}
+                        rowHeight={rowHeight}
+                        badgeColW={badgeColW}
+                        stickyLeftForDate={stickyLeftForDate}
+                        stickyLeftForDow={stickyLeftForDow}
+                        dateColW={dateColW}
+                        dowColW={dowColW}
+                        checkedProjectIds={checkedProjectIds}
+                        handleCellClick={handleCellClick}
+                        handleSubColContextMenu={handleSubColContextMenu}
+                        toggleProjectCheck={toggleProjectCheck}
+                        handleBadgeClick={handleBadgeClick}
+                        handleBadgeContextMenu={handleBadgeContextMenu}
+                        setHoveredBadgePhaseId={setHoveredBadgePhaseId}
+                        handleWeekLabelClick={handleWeekLabelClick}
+                      />
                     );
                   })}
                 </tbody>
