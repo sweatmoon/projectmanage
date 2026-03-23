@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck, HardHat } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck, HardHat, ArrowLeftRight } from 'lucide-react';
+import { StaffingChangeRecord } from '@/lib/api';
 import { countBusinessDays as countBizDaysHoliday, isNonWorkday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
@@ -504,6 +505,10 @@ export default function ProjectDetail() {
   // ── 모자(대체인력) 관련 state ──────────────────────────────────
   interface HatRecord { id: number; staffing_id: number; actual_person_id: number | null; actual_person_name: string; }
   const [hatMap, setHatMap] = useState<Map<number, HatRecord>>(new Map()); // key: staffing_id
+
+  // ── 공식 인력 변경 이력 ──────────────────────────────────────
+  const [changeHistory, setChangeHistory] = useState<StaffingChangeRecord[]>([]);
+  const [changeHistoryLoaded, setChangeHistoryLoaded] = useState(false);
   const [hatModalOpen, setHatModalOpen] = useState(false);
   // hatModalTarget: 원장에서 열 때 rowKey 기준, 단계모달에서 열 때 phase_id 기준으로 staffingId 배열 전달
   const [hatModalStaffingIds, setHatModalStaffingIds] = useState<number[]>([]);
@@ -918,18 +923,30 @@ export default function ProjectDetail() {
         setCalendarEntries([]);
       }
 
-      // hat(모자) 데이터 로드
+      // hat(모자) 데이터 + 공식 변경 이력 병렬 로드
       try {
-        const hatRes = await client.apiCall.invoke({
-          url: `/api/v1/staffing-hat/by-project/${projectId}`,
-          method: 'GET',
-        });
-        const hats: HatRecord[] = hatRes || [];
-        const map = new Map<number, HatRecord>();
-        hats.forEach((h) => map.set(h.staffing_id, h));
-        setHatMap(map);
+        const [hatRes, changeRes] = await Promise.allSettled([
+          client.apiCall.invoke({
+            url: `/api/v1/staffing-hat/by-project/${projectId}`,
+            method: 'GET',
+          }),
+          client.staffingChange.getByProject(projectId),
+        ]);
+        if (hatRes.status === 'fulfilled') {
+          const hats: HatRecord[] = hatRes.value || [];
+          const map = new Map<number, HatRecord>();
+          hats.forEach((h) => map.set(h.staffing_id, h));
+          setHatMap(map);
+        } else {
+          setHatMap(new Map());
+        }
+        if (changeRes.status === 'fulfilled') {
+          setChangeHistory(changeRes.value);
+        }
+        setChangeHistoryLoaded(true);
       } catch {
         setHatMap(new Map());
+        setChangeHistoryLoaded(true);
       }
     } catch (err) {
       console.error(err);
@@ -2068,6 +2085,52 @@ export default function ProjectDetail() {
               </div>
             </CardContent>
           </Card>
+          {/* 🔁 공식 인력 변경 이력 Card */}
+          {changeHistoryLoaded && changeHistory.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ArrowLeftRight className="h-4 w-4 text-blue-600" />
+                  공식 인력 변경 이력
+                  <span className="text-xs font-normal text-blue-500 bg-blue-50 rounded px-1.5 py-0.5">{changeHistory.length}건</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left pb-2 pr-3 font-medium">기존 인력</th>
+                        <th className="text-left pb-2 pr-3 font-medium"></th>
+                        <th className="text-left pb-2 pr-3 font-medium">변경 인력</th>
+                        <th className="text-left pb-2 pr-3 font-medium">변경 사유</th>
+                        <th className="text-left pb-2 pr-3 font-medium">변경자</th>
+                        <th className="text-left pb-2 font-medium">변경일시</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {changeHistory.map((ch) => (
+                        <tr key={ch.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="py-1.5 pr-3 text-gray-600">{ch.original_person_name}</td>
+                          <td className="py-1.5 pr-3">
+                            <ArrowLeftRight className="h-3 w-3 text-blue-400" />
+                          </td>
+                          <td className="py-1.5 pr-3 font-semibold text-blue-700">{ch.new_person_name}</td>
+                          <td className="py-1.5 pr-3 text-gray-500 max-w-[180px] truncate" title={ch.reason || ''}>
+                            {ch.reason || <span className="text-gray-300">-</span>}
+                          </td>
+                          <td className="py-1.5 pr-3 text-gray-500">{ch.changed_by || '-'}</td>
+                          <td className="py-1.5 text-gray-400 text-xs whitespace-nowrap">
+                            {ch.changed_at.replace('T', ' ').slice(0, 16)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </main>
 
         {/* Phase Dialog */}
