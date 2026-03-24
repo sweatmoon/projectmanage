@@ -49,7 +49,7 @@ export default function LoggedOut() {
               다시 로그인
             </button>
             <p className="text-xs text-slate-300 mt-4">
-              Synology 계정으로 로그인합니다
+              Google 계정으로 로그인합니다
             </p>
           </>
         )}

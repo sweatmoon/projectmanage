@@ -22,13 +22,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── Google OAuth 엔드포인트 상수 ─────────────────────────
+GOOGLE_TOKEN_URL    = "https://oauth2.googleapis.com/token"
+GOOGLE_AUTH_URL     = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+
+
 # ── 설정값 (환경변수에서 읽기) ─────────────────────────────
 def get_oidc_settings():
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    use_google = bool(google_client_id)
     return {
-        "issuer_url": os.environ.get("OIDC_ISSUER_URL", ""),          # https://your-nas.com/webman/sso
-        "client_id": os.environ.get("OIDC_CLIENT_ID", ""),
-        "client_secret": os.environ.get("OIDC_CLIENT_SECRET", ""),
-        "redirect_uri": os.environ.get("OIDC_REDIRECT_URI", ""),      # https://your-app.com/auth/callback
+        # Google OAuth (우선)
+        "use_google": use_google,
+        "google_client_id": google_client_id,
+        "google_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        # Synology SSO (폴백)
+        "issuer_url": os.environ.get("OIDC_ISSUER_URL", ""),
+        "client_id": google_client_id if use_google else os.environ.get("OIDC_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", "") if use_google else os.environ.get("OIDC_CLIENT_SECRET", ""),
+        # 공통
+        "redirect_uri": os.environ.get("OIDC_REDIRECT_URI", ""),
         "jwt_secret": os.environ.get("JWT_SECRET", "change-me-in-production"),
         "jwt_expire_hours": int(os.environ.get("JWT_EXPIRE_HOURS", "8")),
         "app_url": os.environ.get("APP_URL", "http://localhost:8080"),
@@ -62,7 +76,7 @@ async def dev_login(db: AsyncSession = Depends(get_db)):
     """OIDC 미설정 개발환경에서 미리보기용 admin 토큰 발급"""
     cfg = get_oidc_settings()
     # OIDC가 설정된 프로덕션 환경에서는 절대 사용 불가
-    if cfg["issuer_url"]:
+    if cfg["issuer_url"] or cfg["use_google"]:
         raise HTTPException(status_code=403, detail="개발 환경에서만 사용 가능합니다.")
 
     user_id = "dev_admin"
@@ -111,7 +125,7 @@ async def dev_login(db: AsyncSession = Depends(get_db)):
 async def dev_login_user(db: AsyncSession = Depends(get_db)):
     """OIDC 미설정 개발환경에서 일반 사용자(user role) 미리보기 토큰 발급"""
     cfg = get_oidc_settings()
-    if cfg["issuer_url"]:
+    if cfg["issuer_url"] or cfg["use_google"]:
         raise HTTPException(status_code=403, detail="개발 환경에서만 사용 가능합니다.")
 
     user_id = "dev_user"
@@ -153,19 +167,17 @@ async def dev_login_user(db: AsyncSession = Depends(get_db)):
     return RedirectResponse(url=f"{app_url}/?token={token}")
 
 
-# ── 1. 로그인 시작: 시놀로지 로그인 페이지로 리다이렉트 ──────
+# ── 1. 로그인 시작 ──────────────────────────────────────────
 @router.get("/login")
 async def login(request: Request, db: AsyncSession = Depends(get_db)):
     cfg = get_oidc_settings()
-    if not cfg["issuer_url"] or not cfg["client_id"]:
+    if not cfg["use_google"] and not cfg["issuer_url"]:
         raise HTTPException(
             status_code=503,
-            detail="OIDC not configured. Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI env vars."
+            detail="Auth not configured. Set GOOGLE_CLIENT_ID or OIDC_ISSUER_URL."
         )
 
-    import secrets
-    import hashlib
-    import base64
+    import secrets, hashlib, base64, urllib.parse
 
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -174,36 +186,42 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         hashlib.sha256(code_verifier.encode()).digest()
     ).decode().rstrip("=")
 
-    # state 저장 (DB)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-    oidc_state = OIDCState(
-        state=state,
-        nonce=nonce,
-        code_verifier=code_verifier,
-        expires_at=expires_at,
-    )
-    db.add(oidc_state)
+    db.add(OIDCState(state=state, nonce=nonce, code_verifier=code_verifier, expires_at=expires_at))
     await db.commit()
 
-    # 시놀로지 OIDC authorization URL
-    import urllib.parse
-    params = {
-        "response_type": "code",
-        "client_id": cfg["client_id"],
-        "redirect_uri": cfg["redirect_uri"],
-        "scope": "openid email",  # Synology SSO: profile 미지원, openid+email만 사용
-        "state": state,
-        "nonce": nonce,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-    }
-    # 시놀로지 SSO 실제 엔드포인트: SSOOauth.cgi (well-known 기준)
-    auth_url = f"{cfg['issuer_url']}/SSOOauth.cgi?{urllib.parse.urlencode(params)}"
-    logger.info(f"Redirecting to OIDC: {auth_url[:80]}...")
+    if cfg["use_google"]:
+        # ── Google OAuth 2.0 ─────────────────────────────
+        params = {
+            "response_type": "code",
+            "client_id": cfg["google_client_id"],
+            "redirect_uri": cfg["redirect_uri"],
+            "scope": "openid email profile",
+            "state": state,
+            "nonce": nonce,
+            "access_type": "offline",
+            "prompt": "select_account",
+        }
+        auth_url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
+        logger.info(f"Redirecting to Google OAuth: {auth_url[:80]}...")
+    else:
+        # ── Synology SSO (폴백) ──────────────────────────
+        params = {
+            "response_type": "code",
+            "client_id": cfg["client_id"],
+            "redirect_uri": cfg["redirect_uri"],
+            "scope": "openid email",
+            "state": state, "nonce": nonce,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+        }
+        auth_url = f"{cfg['issuer_url']}/SSOOauth.cgi?{urllib.parse.urlencode(params)}"
+        logger.info(f"Redirecting to Synology SSO: {auth_url[:80]}...")
+
     return RedirectResponse(url=auth_url)
 
 
-# ── 2. 콜백: 시놀로지에서 code 받아 토큰 교환 ────────────────
+# ── 2. 콜백: code 받아 토큰 교환 ─────────────────────────────
 @router.get("/callback")
 async def callback(
     request: Request,
@@ -215,7 +233,6 @@ async def callback(
     app_url = cfg["app_url"].rstrip("/") if cfg["app_url"] else str(request.base_url).rstrip("/")
 
     def error_redirect(msg: str, detail: str = ""):
-        """오류 시 프론트엔드 에러 페이지로 리다이렉트"""
         logger.error(f"Auth callback error: {msg} | {detail}")
         from urllib.parse import quote
         return RedirectResponse(url=f"{app_url}/?auth_error={quote(msg)}", status_code=302)
@@ -231,124 +248,119 @@ async def callback(
         return error_redirect("로그인 세션이 만료되었습니다. 다시 시도해주세요.", "State expired")
 
     code_verifier = oidc_state.code_verifier
-    nonce = oidc_state.nonce
-
-    logger.info(f"Callback: state={state[:8]}... code={code[:8]}... code_verifier_len={len(code_verifier)}")
-    logger.info(f"Callback cfg: redirect_uri={cfg['redirect_uri']} issuer_url={cfg['issuer_url']}")
-
-    # state 삭제 (one-time use)
     await db.delete(oidc_state)
     await db.flush()
 
-    # 시놀로지 token endpoint로 code 교환
-    token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
-
-    async def _exchange_token(use_pkce: bool, use_basic_auth: bool = False) -> dict | None:
-        """토큰 교환 시도. use_pkce=True면 code_verifier 포함, use_basic_auth=True면 Basic Auth 사용."""
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": cfg["redirect_uri"],
-        }
-        headers = {}
-        if use_basic_auth:
-            import base64 as _b64a
-            creds = _b64a.b64encode(f"{cfg['client_id']}:{cfg['client_secret']}".encode()).decode()
-            headers["Authorization"] = f"Basic {creds}"
-        else:
-            data["client_id"] = cfg["client_id"]
-            data["client_secret"] = cfg["client_secret"]
-        if use_pkce:
-            data["code_verifier"] = code_verifier
-        label = f"pkce={'yes' if use_pkce else 'no'} auth={'basic' if use_basic_auth else 'post'}"
-        logger.info(f"Token exchange attempt [{label}]: {token_url}")
-        logger.info(f"  redirect_uri sent: {cfg['redirect_uri']}")
-        try:
-            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-                resp = await client.post(token_url, data=data, headers=headers)
-                logger.info(f"  -> status: {resp.status_code}  body: {resp.text[:300]}")
-                try:
-                    result = resp.json()
-                except Exception:
-                    result = {}
-                if resp.status_code < 400 and not result.get("error"):
-                    logger.info(f"  -> SUCCESS [{label}]")
-                    return result
-                logger.warning(f"  -> FAILED [{label}]: {result.get('error', resp.status_code)}")
-                return None
-        except Exception as e:
-            logger.error(f"  -> EXCEPTION [{label}]: {e}")
-            return None
-
-    # 시도 순서: PKCE+POST → PKCE+Basic → no-PKCE+POST → no-PKCE+Basic
-    for use_pkce, use_basic in [(True, False), (True, True), (False, False), (False, True)]:
-        tokens = await _exchange_token(use_pkce=use_pkce, use_basic_auth=use_basic)
-        if tokens is not None:
-            break
-
-    if tokens is None:
-        return error_redirect(
-            "SSO 인증 실패: 토큰 교환 오류",
-            f"4가지 방법 모두 실패 | URL: {token_url} | redirect_uri: {cfg['redirect_uri']}"
-        )
-
-    logger.info(f"SSO token response keys: {list(tokens.keys())}")
-
     import base64 as _b64, json as _json
-
-    logger.info(f"SSO token response keys: {list(tokens.keys())}")
-
-    # ── 사용자 정보 추출 우선순위 ─────────────────────────────
-    # 1) id_token JWT 디코드
-    # 2) SSOUserInfo.cgi 조회
-    # 3) tokens에 직접 포함된 account/username 필드
     user_info: dict = {}
 
-    # 1. id_token 디코드 시도
-    id_token = tokens.get("id_token", "")
-    if id_token and id_token.count(".") == 2:
+    if cfg["use_google"]:
+        # ── Google OAuth 토큰 교환 ───────────────────────
         try:
-            payload_b64 = id_token.split(".")[1]
-            payload_b64 += "=" * (4 - len(payload_b64) % 4)
-            user_info = _json.loads(_b64.urlsafe_b64decode(payload_b64))
-            logger.info(f"id_token claims: {list(user_info.keys())}")
+            async with httpx.AsyncClient(timeout=30.0) as hc:
+                token_resp = await hc.post(GOOGLE_TOKEN_URL, data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": cfg["redirect_uri"],
+                    "client_id": cfg["google_client_id"],
+                    "client_secret": cfg["google_client_secret"],
+                })
+                logger.info(f"Google token status: {token_resp.status_code}")
+                tokens = token_resp.json()
+                if token_resp.status_code >= 400 or tokens.get("error"):
+                    return error_redirect(
+                        f"Google 인증 오류: {tokens.get('error', token_resp.status_code)}",
+                        tokens.get("error_description", token_resp.text[:200])
+                    )
         except Exception as e:
-            logger.warning(f"id_token decode failed: {e}")
+            return error_redirect("Google 서버 연결 실패", str(e))
 
-    # 2. UserInfo endpoint 조회 (id_token에 sub 없을 때)
-    if not user_info.get("sub") and not user_info.get("account"):
-        try:
-            access_token = tokens.get("access_token", "")
-            async with httpx.AsyncClient(timeout=15.0, verify=False) as hc:
-                ui_resp = await hc.get(
-                    f"{cfg['issuer_url']}/SSOUserInfo.cgi",
-                    headers={"Authorization": f"Bearer {access_token}"}
-                )
-                if ui_resp.status_code == 200:
-                    ui_data = ui_resp.json()
-                    logger.info(f"SSOUserInfo response keys: {list(ui_data.keys())}")
-                    user_info.update(ui_data)
-        except Exception as e:
-            logger.warning(f"SSOUserInfo.cgi failed: {e}")
+        # id_token에서 사용자 정보 추출
+        id_token = tokens.get("id_token", "")
+        if id_token and id_token.count(".") == 2:
+            try:
+                pb = id_token.split(".")[1]; pb += "=" * (4 - len(pb) % 4)
+                user_info = _json.loads(_b64.urlsafe_b64decode(pb))
+                logger.info(f"Google id_token claims: {list(user_info.keys())}")
+            except Exception as e:
+                logger.warning(f"id_token decode failed: {e}")
+        if not user_info.get("sub"):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as hc:
+                    ui = await hc.get(GOOGLE_USERINFO_URL,
+                        headers={"Authorization": f"Bearer {tokens.get('access_token', '')}"})
+                    if ui.status_code == 200:
+                        user_info = ui.json()
+                        logger.info(f"Google userinfo: {list(user_info.keys())}")
+            except Exception as e:
+                logger.warning(f"Google userinfo failed: {e}")
+    else:
+        # ── Synology SSO 토큰 교환 (폴백) ───────────────
+        token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
 
-    # 3. tokens 자체에 account 정보가 있는 경우 (일부 DSM 버전)
-    if not user_info.get("sub") and not user_info.get("account"):
-        for k in ("account", "username", "user", "userid", "user_id"):
-            if tokens.get(k):
-                user_info["account"] = tokens[k]
-                logger.info(f"Using tokens['{k}'] as user_id: {tokens[k]}")
+        async def _synology_exchange(use_pkce: bool, use_basic: bool) -> dict | None:
+            data = {"grant_type": "authorization_code", "code": code,
+                    "redirect_uri": cfg["redirect_uri"]}
+            headers = {}
+            if use_basic:
+                import base64 as _b64b
+                creds = _b64b.b64encode(f"{cfg['client_id']}:{cfg['client_secret']}".encode()).decode()
+                headers["Authorization"] = f"Basic {creds}"
+            else:
+                data["client_id"] = cfg["client_id"]
+                data["client_secret"] = cfg["client_secret"]
+            if use_pkce:
+                data["code_verifier"] = code_verifier
+            try:
+                async with httpx.AsyncClient(timeout=30.0, verify=False) as hc:
+                    resp = await hc.post(token_url, data=data, headers=headers)
+                    logger.info(f"Synology [{use_pkce},{use_basic}] {resp.status_code}: {resp.text[:200]}")
+                    r = resp.json() if resp.text else {}
+                    if resp.status_code < 400 and not r.get("error"):
+                        return r
+            except Exception as e:
+                logger.error(f"Synology token exception: {e}")
+            return None
+
+        tokens = None
+        for pkce, basic in [(True, False), (True, True), (False, False), (False, True)]:
+            tokens = await _synology_exchange(pkce, basic)
+            if tokens:
                 break
+        if not tokens:
+            return error_redirect("SSO 인증 실패: 토큰 교환 오류",
+                f"URL: {token_url} | redirect_uri: {cfg['redirect_uri']}")
 
-    if not user_info:
-        logger.error(f"No user info. Full token response: {tokens}")
-        return error_redirect("사용자 정보를 가져올 수 없습니다. NAS SSO 설정을 확인하세요.", str(tokens))
+        id_token = tokens.get("id_token", "")
+        if id_token and id_token.count(".") == 2:
+            try:
+                pb = id_token.split(".")[1]; pb += "=" * (4 - len(pb) % 4)
+                user_info = _json.loads(_b64.urlsafe_b64decode(pb))
+            except Exception: pass
+        if not user_info.get("sub") and not user_info.get("account"):
+            try:
+                async with httpx.AsyncClient(timeout=15.0, verify=False) as hc:
+                    ui = await hc.get(f"{cfg['issuer_url']}/SSOUserInfo.cgi",
+                        headers={"Authorization": f"Bearer {tokens.get('access_token', '')}"})
+                    if ui.status_code == 200:
+                        user_info.update(ui.json())
+            except Exception: pass
+        if not user_info:
+            for k in ("account", "username", "user"):
+                if tokens.get(k):
+                    user_info["account"] = tokens[k]; break
+        if not user_info:
+            return error_redirect("사용자 정보를 가져올 수 없습니다.", str(tokens))
 
+    # ── 공통: user_info → user_id / email / name ─────────
     user_id = (user_info.get("sub") or user_info.get("account")
-               or user_info.get("username") or user_info.get("preferred_username", "unknown"))
-    email = user_info.get("email") or f"{user_id}@synology.local"
+               or user_info.get("preferred_username", "unknown"))
+    email = user_info.get("email") or f"{user_id}@unknown.local"
     name  = (user_info.get("name") or user_info.get("preferred_username")
-             or user_info.get("display_name") or user_id)
+             or user_info.get("display_name") or email.split("@")[0])
     logger.info(f"Resolved user → id={user_id!r}, name={name!r}, email={email!r}")
+    if not user_id or user_id == "unknown":
+        return error_redirect("사용자 정보를 가져올 수 없습니다.", str(user_info))
 
     # ── 접속 허용 목록 체크 ────────────────────────────────────
     # AllowedUser 테이블에 등록된 사용자만 접근 허용
@@ -412,6 +424,7 @@ async def callback(
     if not is_duplicate_login:
         try:
             from services.audit_service import write_audit_log, EventType, EntityType
+            from middlewares.auth_middleware import _get_client_ip
             await write_audit_log(
                 db,
                 event_type=EventType.LOGIN,
@@ -522,8 +535,8 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
         logger.warning(f"Logout audit log failed: {e}")
 
     app_url = cfg["app_url"].rstrip("/")
-    # Synology SSO는 oauth2/logout 미지원 → 앱 로그인 페이지로 이동
-    return RedirectResponse(url=f"{app_url}/auth/login")
+    # 로그아웃 후 로그인 선택 페이지로 이동
+    return RedirectResponse(url=f"{app_url}/logged-out")
 
 
 # ── 5. 현재 사용자 정보 ───────────────────────────────────
