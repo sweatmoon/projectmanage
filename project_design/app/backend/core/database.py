@@ -107,6 +107,15 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
+            # PostgreSQL SSL 설정 (Railway postgres-ssl 이미지 대응)
+            # railway.internal(내부) 또는 rlwy.net(외부) 모두 SSL 필요
+            if "postgresql" in database_url or "postgres" in database_url:
+                engine_kwargs["connect_args"] = {
+                    "ssl": "require",  # SSL 연결 강제 (Railway postgres-ssl 호환)
+                    "server_settings": {"application_name": "projectmanage"},
+                }
+                logger.info("SSL enabled for PostgreSQL connection")
+
             # Check if we're in a Lambda environment
             is_lambda = bool(
                 os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
@@ -115,18 +124,15 @@ class DatabaseManager:
 
             if is_lambda:
                 # Lambda: Use NullPool to avoid connection state conflicts
-                # NullPool creates a fresh connection for each request, avoiding "cannot switch to state" errors
                 engine_kwargs["poolclass"] = NullPool
-                # NullPool doesn't support pool_timeout, pool_size, max_overflow, pool_recycle, or pool_pre_ping
-                # These parameters are only valid for QueuePool
                 logger.info("Using NullPool for Lambda environment to avoid connection state conflicts")
             else:
                 # Non-Lambda: Use QueuePool with connection pooling
-                engine_kwargs["pool_pre_ping"] = True  # Verify connections before using them
-                engine_kwargs["pool_size"] = 10  # Connection pool size
-                engine_kwargs["max_overflow"] = 20  # Maximum overflow connections
-                engine_kwargs["pool_recycle"] = 3600  # Connection recycle time (1 hour)
-                engine_kwargs["pool_timeout"] = 30  # Connection acquisition timeout (30 seconds)
+                engine_kwargs["pool_pre_ping"] = True
+                engine_kwargs["pool_size"] = 5
+                engine_kwargs["max_overflow"] = 10
+                engine_kwargs["pool_recycle"] = 3600
+                engine_kwargs["pool_timeout"] = 30
                 logger.info("Using QueuePool with connection pooling for non-Lambda environment")
 
             self.engine = create_async_engine(database_url, **engine_kwargs)

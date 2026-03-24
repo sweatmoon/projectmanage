@@ -47,7 +47,11 @@ def alembic_include_object(object, name, type_, reflected, compare_to):
 
 
 async def run_migrations_online():
-    connectable = create_async_engine(_db_url, poolclass=pool.NullPool)
+    # Railway postgres-ssl 이미지 호환: SSL 연결 강제
+    connect_args = {}
+    if "postgresql" in _db_url or "postgres" in _db_url:
+        connect_args["ssl"] = "require"
+    connectable = create_async_engine(_db_url, poolclass=pool.NullPool, connect_args=connect_args)
     async with connectable.connect() as connection:
         await connection.run_sync(
             lambda sync_conn: context.configure(
