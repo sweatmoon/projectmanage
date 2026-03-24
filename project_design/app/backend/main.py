@@ -243,6 +243,13 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/config")
+def get_config():
+    """프론트엔드에 API 기본 URL 제공 (Railway/프로덕션 환경용)"""
+    app_url = os.environ.get("APP_URL", "")
+    return {"API_BASE_URL": app_url}
+
+
 # Serve frontend static files
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 if FRONTEND_DIST.exists():
