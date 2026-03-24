@@ -234,6 +234,7 @@ async def callback(
     nonce = oidc_state.nonce
 
     logger.info(f"Callback: state={state[:8]}... code={code[:8]}... code_verifier_len={len(code_verifier)}")
+    logger.info(f"Callback cfg: redirect_uri={cfg['redirect_uri']} issuer_url={cfg['issuer_url']}")
 
     # state 삭제 (one-time use)
     await db.delete(oidc_state)
@@ -242,48 +243,53 @@ async def callback(
     # 시놀로지 token endpoint로 code 교환
     token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
 
-    async def _exchange_token(use_pkce: bool) -> dict | None:
-        """토큰 교환 시도. use_pkce=True면 code_verifier 포함, False면 PKCE 생략."""
+    async def _exchange_token(use_pkce: bool, use_basic_auth: bool = False) -> dict | None:
+        """토큰 교환 시도. use_pkce=True면 code_verifier 포함, use_basic_auth=True면 Basic Auth 사용."""
         data = {
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": cfg["redirect_uri"],
-            "client_id": cfg["client_id"],
-            "client_secret": cfg["client_secret"],
         }
+        headers = {}
+        if use_basic_auth:
+            import base64 as _b64a
+            creds = _b64a.b64encode(f"{cfg['client_id']}:{cfg['client_secret']}".encode()).decode()
+            headers["Authorization"] = f"Basic {creds}"
+        else:
+            data["client_id"] = cfg["client_id"]
+            data["client_secret"] = cfg["client_secret"]
         if use_pkce:
             data["code_verifier"] = code_verifier
-        pkce_label = "with PKCE" if use_pkce else "without PKCE"
-        logger.info(f"Trying token exchange {pkce_label}: {token_url}")
+        label = f"pkce={'yes' if use_pkce else 'no'} auth={'basic' if use_basic_auth else 'post'}"
+        logger.info(f"Token exchange attempt [{label}]: {token_url}")
+        logger.info(f"  redirect_uri sent: {cfg['redirect_uri']}")
         try:
             async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-                resp = await client.post(token_url, data=data)
-                logger.info(f"SSOAccessToken [{pkce_label}] status: {resp.status_code}")
-                logger.info(f"SSOAccessToken [{pkce_label}] body: {resp.text[:500]}")
+                resp = await client.post(token_url, data=data, headers=headers)
+                logger.info(f"  -> status: {resp.status_code}  body: {resp.text[:300]}")
                 try:
                     result = resp.json()
                 except Exception:
                     result = {}
                 if resp.status_code < 400 and not result.get("error"):
-                    return result  # 성공
-                logger.warning(f"Token exchange {pkce_label} failed: {result.get('error', resp.status_code)}")
+                    logger.info(f"  -> SUCCESS [{label}]")
+                    return result
+                logger.warning(f"  -> FAILED [{label}]: {result.get('error', resp.status_code)}")
                 return None
         except Exception as e:
-            logger.error(f"Token exchange {pkce_label} exception: {e}")
+            logger.error(f"  -> EXCEPTION [{label}]: {e}")
             return None
 
-    # 1차 시도: PKCE 포함
-    tokens = await _exchange_token(use_pkce=True)
-
-    # 2차 시도: PKCE 없이 (일부 Synology DSM 설정에서 PKCE 비활성화)
-    if tokens is None:
-        logger.warning("PKCE token exchange failed, retrying without PKCE...")
-        tokens = await _exchange_token(use_pkce=False)
+    # 시도 순서: PKCE+POST → PKCE+Basic → no-PKCE+POST → no-PKCE+Basic
+    for use_pkce, use_basic in [(True, False), (True, True), (False, False), (False, True)]:
+        tokens = await _exchange_token(use_pkce=use_pkce, use_basic_auth=use_basic)
+        if tokens is not None:
+            break
 
     if tokens is None:
         return error_redirect(
             "SSO 인증 실패: 토큰 교환 오류",
-            f"PKCE/non-PKCE 모두 실패 | URL: {token_url} | redirect_uri: {cfg['redirect_uri']}"
+            f"4가지 방법 모두 실패 | URL: {token_url} | redirect_uri: {cfg['redirect_uri']}"
         )
 
     logger.info(f"SSO token response keys: {list(tokens.keys())}")
