@@ -46,6 +46,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # 시작 스크립트 인라인
-RUN printf '#!/bin/bash\nset -e\n\necho "=== 감리 공수관리 시스템 시작 ==="\n\necho "[1/2] DB 마이그레이션 실행 중..."\ncd /app\nalembic upgrade head || echo "마이그레이션 건너뜀 (이미 최신 상태)"\n\necho "[2/2] 서버 시작 (포트 ${PORT:-8080})..."\nexec uvicorn main:app \\\n    --host 0.0.0.0 \\\n    --port "${PORT:-8080}" \\\n    --workers 1 \\\n    --no-access-log \\\n    --proxy-headers \\\n    --forwarded-allow-ips="*"\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\n\necho "=== 감리 공수관리 시스템 시작 ==="\n\n# Railway postgres:// -> postgresql:// 변환 (asyncpg 호환)\nif [ -n "$DATABASE_URL" ]; then\n    export DATABASE_URL=$(echo "$DATABASE_URL" | sed '"'"'s|^postgres://|postgresql://|'"'"')\nfi\n\necho "[1/2] DB 마이그레이션 실행 중..."\ncd /app\nif alembic upgrade head 2>&1; then\n    echo "마이그레이션 완료"\nelse\n    echo "마이그레이션 경고: 오류 발생 (계속 진행)"\nfi\n\necho "[2/2] 서버 시작 (포트 ${PORT:-8080})..."\nexec uvicorn main:app \\\n    --host 0.0.0.0 \\\n    --port "${PORT:-8080}" \\\n    --workers 1 \\\n    --no-access-log \\\n    --proxy-headers \\\n    --forwarded-allow-ips="*"\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 CMD ["/docker-entrypoint.sh"]

@@ -25,7 +25,10 @@ if config.config_file_name is not None:
 
 # Override sqlalchemy.url from DATABASE_URL environment variable if set
 _db_url = os.environ.get("DATABASE_URL", "sqlite:///./app.db")
-# Ensure async driver for SQLite
+# Railway 호환: postgres:// -> postgresql:// 변환
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+# Ensure async driver
 if _db_url.startswith("sqlite:///") and "+aiosqlite" not in _db_url:
     _db_url = _db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
 elif _db_url.startswith("postgresql://") and "+asyncpg" not in _db_url:
