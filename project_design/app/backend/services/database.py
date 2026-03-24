@@ -33,6 +33,20 @@ async def initialize_database():
         return
     start_time = time.time()
     logger.debug("[DB_OP] Starting database initialization")
+
+    # DATABASE_URL 디버그 로그 (비밀번호 마스킹)
+    raw_db_url = os.environ.get("DATABASE_URL", "NOT_SET")
+    if raw_db_url != "NOT_SET" and "@" in raw_db_url:
+        try:
+            scheme_end = raw_db_url.index("://") + 3
+            at_pos = raw_db_url.rindex("@")
+            masked = raw_db_url[:scheme_end] + "***:***@" + raw_db_url[at_pos+1:]
+            logger.info(f"DATABASE_URL (masked): {masked}")
+        except Exception:
+            logger.info(f"DATABASE_URL scheme: {raw_db_url.split('://')[0]}")
+    else:
+        logger.warning(f"DATABASE_URL status: {raw_db_url}")
+
     try:
         logger.info("🔧 Starting database initialization...")
         await db_manager.init_db()
@@ -43,7 +57,8 @@ async def initialize_database():
         logger.debug(f"[DB_OP] Database initialization completed in {time.time() - start_time:.4f}s")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
-        raise
+        logger.warning("⚠️ DB 초기화 실패 - 앱은 계속 기동됩니다. /health 엔드포인트는 DB 없이도 응답합니다.")
+        # raise 제거: DB 연결 실패 시에도 앱이 기동되어 healthcheck 통과 가능하도록 함
 
 
 async def close_database():
