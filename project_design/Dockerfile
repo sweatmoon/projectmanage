@@ -49,5 +49,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # 시작 스크립트
 COPY deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+# Railway cache bust: 2026-03-25
 
 CMD ["/docker-entrypoint.sh"]
