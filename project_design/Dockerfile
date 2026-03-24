@@ -33,11 +33,10 @@ COPY app/backend/ ./
 # = /app(backend).parent(=/app_root) / frontend/dist → /app_root/frontend/dist
 COPY --from=frontend-builder /build/frontend/dist /frontend/dist
 
-# 데이터 디렉터리 생성 (SQLite DB 저장용)
+# 데이터 디렉터리 생성 (SQLite DB 저장용 / PostgreSQL 미설정 시 폴백)
 RUN mkdir -p /data /app/logs
 
-# DB를 /data 볼륨에 저장하도록 환경변수 설정
-ENV DATABASE_URL=sqlite:////data/app.db
+# PORT만 기본값 설정 (DATABASE_URL은 Railway 환경변수로 주입)
 ENV PORT=8080
 
 EXPOSE 8080
@@ -47,6 +46,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # 시작 스크립트 (인라인 — COPY 경로 문제 우회)
-RUN printf '#!/bin/bash\nset -e\n\necho "=== 감리 공수관리 시스템 시작 ==="\n\necho "[1/2] DB 마이그레이션 실행 중..."\ncd /app\nalembic upgrade head || echo "마이그레이션 건너뜀 (이미 최신 상태)"\n\necho "[2/2] 서버 시작 (포트 ${PORT:-8080})..."\nexec uvicorn main:app \\\n    --host 0.0.0.0 \\\n    --port "${PORT:-8080}" \\\n    --workers 1 \\\n    --no-access-log \\\n    --proxy-headers \\\n    --forwarded-allow-ips="*"\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\n\necho "=== 감리 공수관리 시스템 시작 ==="\n\n# Railway DATABASE_URL: postgres:// → postgresql+asyncpg:// 변환\nif [ -n "$DATABASE_URL" ]; then\n  # postgres:// → postgresql://\n  DATABASE_URL=$(echo "$DATABASE_URL" | sed "s|^postgres://|postgresql://|")\n  # postgresql:// → postgresql+asyncpg:// (async 드라이버 명시)\n  DATABASE_URL=$(echo "$DATABASE_URL" | sed "s|^postgresql://|postgresql+asyncpg://|")\n  export DATABASE_URL\n  echo "[INFO] DATABASE_URL 설정됨: $(echo $DATABASE_URL | sed s/:.*@/:***@/)"\nelse\n  export DATABASE_URL="sqlite+aiosqlite:////data/app.db"\n  echo "[경고] DATABASE_URL 미설정 → SQLite 폴백: $DATABASE_URL"\nfi\n\necho "[1/2] DB 마이그레이션 실행 중..."\ncd /app\n# 마이그레이션 실패 시 서버 시작 중단 (오류 은닉 제거)\nalembic upgrade head\n\necho "[2/2] 서버 시작 (포트 ${PORT:-8080})..."\nexec uvicorn main:app \\\n    --host 0.0.0.0 \\\n    --port "${PORT:-8080}" \\\n    --workers 1 \\\n    --no-access-log \\\n    --proxy-headers \\\n    --forwarded-allow-ips="*"\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 CMD ["/docker-entrypoint.sh"]
