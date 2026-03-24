@@ -250,8 +250,20 @@ async def callback(
                 "code_verifier": code_verifier,
             })
             logger.info(f"SSOAccessToken response status: {token_resp.status_code}")
-            token_resp.raise_for_status()
-            tokens = token_resp.json()
+            logger.info(f"SSOAccessToken response body: {token_resp.text[:500]}")
+            try:
+                tokens = token_resp.json()
+            except Exception:
+                tokens = {}
+            # Synology SSO가 오류 응답을 반환한 경우 처리
+            if token_resp.status_code >= 400 or tokens.get("error"):
+                oidc_err = tokens.get("error", f"HTTP {token_resp.status_code}")
+                oidc_desc = tokens.get("error_description", token_resp.text[:200])
+                logger.error(f"SSO token error: {oidc_err} – {oidc_desc}")
+                return error_redirect(
+                    f"SSO 인증 오류: {oidc_err}",
+                    f"{oidc_desc} | URL: {token_url}"
+                )
             logger.info(f"SSO token response keys: {list(tokens.keys())}")
     except Exception as e:
         logger.error(f"Token exchange failed: {e}")
