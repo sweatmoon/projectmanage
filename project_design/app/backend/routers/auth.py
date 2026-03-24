@@ -233,41 +233,60 @@ async def callback(
     code_verifier = oidc_state.code_verifier
     nonce = oidc_state.nonce
 
+    logger.info(f"Callback: state={state[:8]}... code={code[:8]}... code_verifier_len={len(code_verifier)}")
+
     # state 삭제 (one-time use)
     await db.delete(oidc_state)
     await db.flush()
 
     # 시놀로지 token endpoint로 code 교환
     token_url = f"{cfg['issuer_url']}/SSOAccessToken.cgi"
-    try:
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-            token_resp = await client.post(token_url, data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": cfg["redirect_uri"],
-                "client_id": cfg["client_id"],
-                "client_secret": cfg["client_secret"],
-                "code_verifier": code_verifier,
-            })
-            logger.info(f"SSOAccessToken response status: {token_resp.status_code}")
-            logger.info(f"SSOAccessToken response body: {token_resp.text[:500]}")
-            try:
-                tokens = token_resp.json()
-            except Exception:
-                tokens = {}
-            # Synology SSO가 오류 응답을 반환한 경우 처리
-            if token_resp.status_code >= 400 or tokens.get("error"):
-                oidc_err = tokens.get("error", f"HTTP {token_resp.status_code}")
-                oidc_desc = tokens.get("error_description", token_resp.text[:200])
-                logger.error(f"SSO token error: {oidc_err} – {oidc_desc}")
-                return error_redirect(
-                    f"SSO 인증 오류: {oidc_err}",
-                    f"{oidc_desc} | URL: {token_url}"
-                )
-            logger.info(f"SSO token response keys: {list(tokens.keys())}")
-    except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
-        return error_redirect("인증 서버 연결에 실패했습니다.", str(e))
+
+    async def _exchange_token(use_pkce: bool) -> dict | None:
+        """토큰 교환 시도. use_pkce=True면 code_verifier 포함, False면 PKCE 생략."""
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": cfg["redirect_uri"],
+            "client_id": cfg["client_id"],
+            "client_secret": cfg["client_secret"],
+        }
+        if use_pkce:
+            data["code_verifier"] = code_verifier
+        pkce_label = "with PKCE" if use_pkce else "without PKCE"
+        logger.info(f"Trying token exchange {pkce_label}: {token_url}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+                resp = await client.post(token_url, data=data)
+                logger.info(f"SSOAccessToken [{pkce_label}] status: {resp.status_code}")
+                logger.info(f"SSOAccessToken [{pkce_label}] body: {resp.text[:500]}")
+                try:
+                    result = resp.json()
+                except Exception:
+                    result = {}
+                if resp.status_code < 400 and not result.get("error"):
+                    return result  # 성공
+                logger.warning(f"Token exchange {pkce_label} failed: {result.get('error', resp.status_code)}")
+                return None
+        except Exception as e:
+            logger.error(f"Token exchange {pkce_label} exception: {e}")
+            return None
+
+    # 1차 시도: PKCE 포함
+    tokens = await _exchange_token(use_pkce=True)
+
+    # 2차 시도: PKCE 없이 (일부 Synology DSM 설정에서 PKCE 비활성화)
+    if tokens is None:
+        logger.warning("PKCE token exchange failed, retrying without PKCE...")
+        tokens = await _exchange_token(use_pkce=False)
+
+    if tokens is None:
+        return error_redirect(
+            "SSO 인증 실패: 토큰 교환 오류",
+            f"PKCE/non-PKCE 모두 실패 | URL: {token_url} | redirect_uri: {cfg['redirect_uri']}"
+        )
+
+    logger.info(f"SSO token response keys: {list(tokens.keys())}")
 
     import base64 as _b64, json as _json
 
