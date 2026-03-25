@@ -4,8 +4,8 @@ import { client } from '@/lib/api';
 import {
   Shield, Users, Activity, LogIn, Clock, RefreshCw,
   ChevronDown, ChevronUp, Search, Download, Archive,
-  FileText, GitBranch, Filter, X, ChevronLeft, ChevronRight,
-  UserCheck, ToggleLeft, ToggleRight, Trash2, PlusCircle, RotateCcw,
+  FileText, Filter, X, ChevronLeft, ChevronRight,
+  Trash2, RotateCcw,
   UserPlus, CheckCircle2, XCircle, Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -72,7 +72,7 @@ interface AuditLogListResponse {
   has_more: boolean;
 }
 
-type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'allowlist' | 'pending';
+type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'pending';
 
 interface PendingUserItem {
   id: number;
@@ -85,17 +85,6 @@ interface PendingUserItem {
   reviewed_by: string | null;
   note: string | null;
   reject_reason: string | null;
-}
-
-interface AllowedUserItem {
-  id: number;
-  user_id: string;
-  display_name: string | null;
-  role: string;
-  is_active: boolean;
-  created_at: string | null;
-  created_by: string | null;
-  note: string | null;
 }
 
 // ── 유틸 ────────────────────────────────────────────────────
@@ -257,10 +246,6 @@ export default function AdminPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState<string | null>(null);
 
-  // 허용 사용자 상태
-  const [allowedUsers, setAllowedUsers] = useState<AllowedUserItem[]>([]);
-  const [allowForm, setAllowForm] = useState({ user_id: '', display_name: '', role: 'user', note: '' });
-  const [allowSaving, setAllowSaving] = useState(false);
 
   // 감사 로그 상태
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -349,56 +334,6 @@ export default function AdminPage() {
     } catch { toast.error('삭제 실패'); }
   };
 
-  const fetchAllowedUsers = async () => {
-    setLoading(true);
-    try { setAllowedUsers(await client.admin.getAllowedUsers()); }
-    catch { toast.error('허용 사용자 목록 로드 실패'); }
-    finally { setLoading(false); }
-  };
-
-  const handleAddAllowedUser = async () => {
-    if (!allowForm.user_id.trim()) { toast.error('Synology 계정 ID를 입력하세요.'); return; }
-    setAllowSaving(true);
-    try {
-      await client.admin.addAllowedUser({
-        user_id: allowForm.user_id.trim(),
-        display_name: allowForm.display_name.trim() || undefined,
-        role: allowForm.role,
-        note: allowForm.note.trim() || undefined,
-      });
-      toast.success(`${allowForm.user_id} 추가됨`);
-      setAllowForm({ user_id: '', display_name: '', role: 'user', note: '' });
-      fetchAllowedUsers();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail || '추가 실패');
-    } finally { setAllowSaving(false); }
-  };
-
-  const handleUpdateAllowedUserRole = async (userId: string, role: string) => {
-    try {
-      await client.admin.updateAllowedUser(userId, { role });
-      toast.success('권한이 변경되었습니다.');
-      fetchAllowedUsers();
-    } catch { toast.error('권한 변경 실패'); }
-  };
-
-  const handleToggleAllowedUser = async (userId: string, isActive: boolean) => {
-    try {
-      await client.admin.updateAllowedUser(userId, { is_active: !isActive });
-      toast.success(isActive ? '비활성화되었습니다.' : '활성화되었습니다.');
-      fetchAllowedUsers();
-    } catch { toast.error('상태 변경 실패'); }
-  };
-
-  const handleDeleteAllowedUser = async (userId: string) => {
-    if (!confirm(`${userId} 을(를) 허용 목록에서 삭제하시겠습니까?`)) return;
-    try {
-      await client.admin.deleteAllowedUser(userId);
-      toast.success('삭제되었습니다.');
-      fetchAllowedUsers();
-    } catch { toast.error('삭제 실패'); }
-  };
-
   const fetchAuditLogs = useCallback(async (skip = 0) => {
     setLoading(true);
     try {
@@ -427,16 +362,15 @@ export default function AdminPage() {
     if (activeTab === 'users')     fetchUsers();
     if (activeTab === 'stats')     fetchStats();
     if (activeTab === 'audit')     fetchAuditLogs(0);
-    if (activeTab === 'allowlist') fetchAllowedUsers();
     if (activeTab === 'pending')   { fetchPendingUsers(); fetchPendingCount(); }
   }, [activeTab]);
 
   // ── 역할 변경 ──────────────────────────────────────────────
   const handleRoleChange = async (userId: string, currentRole: string) => {
-    const roles = ['user', 'viewer', 'admin', 'audit_viewer'];
-    const roleNames = { user: '일반사용자', viewer: '뷰어', admin: '관리자', audit_viewer: '감사자' };
+    const roles = ['user', 'leader', 'viewer', 'admin', 'audit_viewer'];
+    const roleNames: Record<string, string> = { user: '일반사용자', leader: '리더', viewer: '뷰어', admin: '관리자', audit_viewer: '감사자' };
     const nextRole = roles[(roles.indexOf(currentRole) + 1) % roles.length];
-    if (!confirm(`역할을 '${roleNames[nextRole as keyof typeof roleNames]}'(으)로 변경하시겠습니까?`)) return;
+    if (!confirm(`역할을 '${roleNames[nextRole]}'(으)로 변경하시겠습니까?`)) return;
     try {
       await client.admin.updateUserRole(userId, nextRole);
       toast.success('역할이 변경되었습니다.');
@@ -619,8 +553,7 @@ export default function AdminPage() {
           { key: 'audit', label: '감사 로그', icon: FileText },
           { key: 'logs',  label: '접속 로그', icon: LogIn },
           { key: 'users', label: '사용자 관리', icon: Users },
-          { key: 'allowlist', label: '접근 허용 목록', icon: UserCheck },
-        { key: 'pending',   label: '권한 신청', icon: UserPlus },
+          { key: 'pending',   label: '권한 신청', icon: UserPlus },
         ] as { key: TabType; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -1195,10 +1128,11 @@ export default function AdminPage() {
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           user.role === 'admin'        ? 'bg-purple-100 text-purple-700' :
+                          user.role === 'leader'        ? 'bg-indigo-100 text-indigo-700' :
                           user.role === 'audit_viewer' ? 'bg-blue-100 text-blue-700'    :
                                                          'bg-gray-100 text-gray-600'
                         }`}>
-                          {user.role === 'audit_viewer' ? '감사자' : user.role === 'admin' ? '관리자' : user.role === 'viewer' ? '뷰어' : '일반'}
+                          {user.role === 'audit_viewer' ? '감사자' : user.role === 'admin' ? '관리자' : user.role === 'leader' ? '리더' : user.role === 'viewer' ? '뷰어' : '일반'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(user.created_at)}</td>
@@ -1221,156 +1155,6 @@ export default function AdminPage() {
       )}
 
 
-      {/* ── 접근 허용 목록 탭 ── */}
-      {activeTab === 'allowlist' && (
-        <div>
-          {/* 안내 배너 */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm text-blue-800">
-            <strong>접근 허용 목록</strong>이 비어 있으면 모든 Synology 계정으로 로그인이 가능합니다.
-            사용자를 한 명이라도 추가하면, 목록에 있는 계정만 접근할 수 있습니다.
-          </div>
-
-          {/* 추가 폼 */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-              <PlusCircle className="w-4 h-4 text-purple-500" />
-              새 허용 사용자 추가
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Synology 계정 ID <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={allowForm.user_id}
-                  onChange={e => setAllowForm(f => ({ ...f, user_id: e.target.value }))}
-                  placeholder="예: john"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">표시 이름 (선택)</label>
-                <input
-                  type="text"
-                  value={allowForm.display_name}
-                  onChange={e => setAllowForm(f => ({ ...f, display_name: e.target.value }))}
-                  placeholder="예: 홍길동"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">권한</label>
-                <select
-                  value={allowForm.role}
-                  onChange={e => setAllowForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                >
-                  <option value="user">일반사용자</option>
-                  <option value="viewer">뷰어 (조회만)</option>
-                  <option value="admin">관리자</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">메모 (선택)</label>
-                <input
-                  type="text"
-                  value={allowForm.note}
-                  onChange={e => setAllowForm(f => ({ ...f, note: e.target.value }))}
-                  placeholder="예: 개발팀"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                />
-              </div>
-            </div>
-            <div className="mt-3 flex justify-end">
-              <button
-                onClick={handleAddAllowedUser}
-                disabled={allowSaving}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                <PlusCircle className="w-4 h-4" />
-                {allowSaving ? '추가 중...' : '추가'}
-              </button>
-            </div>
-          </div>
-
-          {/* 목록 */}
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-sm text-gray-500">총 {allowedUsers.length}명 등록됨</span>
-            <button onClick={fetchAllowedUsers} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-              <RefreshCw className="w-4 h-4" /> 새로고침
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="text-center text-gray-400 py-12">로딩 중...</div>
-          ) : (
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">계정 ID</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">표시 이름</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">권한</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">상태</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">메모</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">등록일</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">관리</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {allowedUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-center text-gray-400 py-10">
-                        등록된 허용 사용자가 없습니다.<br />
-                        <span className="text-xs text-gray-300">현재 모든 Synology 계정이 접근 가능합니다.</span>
-                      </td>
-                    </tr>
-                  ) : allowedUsers.map(u => (
-                    <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${!u.is_active ? 'opacity-50' : ''}`}>
-                      <td className="px-4 py-3 font-mono font-medium text-gray-800">{u.user_id}</td>
-                      <td className="px-4 py-3 text-gray-600">{u.display_name || '-'}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={u.role}
-                          onChange={e => handleUpdateAllowedUserRole(u.user_id, e.target.value)}
-                          className={`px-2 py-1 rounded text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400 ${
-                            u.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                            u.role === 'viewer' ? 'bg-blue-100 text-blue-600' :
-                            'bg-gray-100 text-gray-600'
-                          }`}
-                        >
-                          <option value="user">일반사용자</option>
-                          <option value="viewer">뷰어 (조회만)</option>
-                          <option value="admin">관리자</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => handleToggleAllowedUser(u.user_id, u.is_active)}
-                          className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded transition-colors ${u.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-500 hover:bg-red-200'}`}
-                        >
-                          {u.is_active ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
-                          {u.is_active ? '활성' : '비활성'}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-400">{u.note || '-'}</td>
-                      <td className="px-4 py-3 text-xs text-gray-400">{formatDateTime(u.created_at)}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => handleDeleteAllowedUser(u.user_id)}
-                          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── 권한 신청 탭 ── */}
       {activeTab === 'pending' && (
@@ -1381,7 +1165,7 @@ export default function AdminPage() {
               <Bell className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <div>
                 <strong>권한 신청 관리</strong> — 구글 계정으로 로그인했지만 허용 목록에 없는 사용자들의 접근 신청을 여기서 승인하거나 거부할 수 있습니다.
-                승인하면 자동으로 <strong>접근 허용 목록</strong>에 추가됩니다.
+                승인하면 자동으로 사용자 목록에 추가되어 서비스를 이용할 수 있습니다.
               </div>
             </div>
           </div>
@@ -1468,7 +1252,15 @@ export default function AdminPage() {
                                 className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                일반 승인
+                                일반
+                              </button>
+                              <button
+                                onClick={() => handleApproveUser(u.user_id, 'leader')}
+                                disabled={reviewingUser === u.user_id}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                리더
                               </button>
                               <button
                                 onClick={() => handleApproveUser(u.user_id, 'admin')}

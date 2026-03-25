@@ -233,8 +233,8 @@ async def update_user_role(
     db: AsyncSession = Depends(get_db),
     _: Request = Depends(require_admin_only),
 ):
-    if body.role not in ("admin", "user", "viewer", "audit_viewer"):
-        raise HTTPException(status_code=400, detail="role은 'admin', 'user', 'viewer', 'audit_viewer'만 가능합니다.")
+    if body.role not in ("admin", "leader", "user", "viewer", "audit_viewer"):
+        raise HTTPException(status_code=400, detail="role은 'admin', 'leader', 'user', 'viewer', 'audit_viewer'만 가능합니다.")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -530,7 +530,7 @@ class AllowedUserItem(BaseModel):
 class AllowedUserCreate(BaseModel):
     user_id: str
     display_name: Optional[str] = None
-    role: str = "user"          # user / admin / viewer
+    role: str = "user"          # user / leader / admin / viewer
     note: Optional[str] = None
 
 
@@ -569,8 +569,8 @@ async def create_allowed_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail=f"이미 등록된 사용자입니다: {body.user_id}")
 
-    if body.role not in ("user", "admin", "viewer"):
-        raise HTTPException(status_code=400, detail="role은 user, admin, viewer 만 허용됩니다.")
+    if body.role not in ("user", "leader", "admin", "viewer"):
+        raise HTTPException(status_code=400, detail="role은 user, leader, admin, viewer 만 허용됩니다.")
 
     admin_id = getattr(request.state, "user_id", "system")
     new_entry = AllowedUser(
@@ -606,8 +606,8 @@ async def update_allowed_user(
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
     if body.role is not None:
-        if body.role not in ("user", "admin", "viewer"):
-            raise HTTPException(status_code=400, detail="role은 user, admin, viewer 만 허용됩니다.")
+        if body.role not in ("user", "leader", "admin", "viewer"):
+            raise HTTPException(status_code=400, detail="role은 user, leader, admin, viewer 만 허용됩니다.")
         entry.role = body.role
     if body.display_name is not None:
         entry.display_name = body.display_name
@@ -1535,8 +1535,8 @@ async def review_pending_user(
     """권한 신청 승인 또는 거부"""
     if body.action not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="action은 'approve' 또는 'reject'만 허용됩니다.")
-    if body.action == "approve" and body.role not in ("user", "admin", "viewer"):
-        raise HTTPException(status_code=400, detail="role은 user, admin, viewer 만 허용됩니다.")
+    if body.action == "approve" and body.role not in ("user", "leader", "admin", "viewer"):
+        raise HTTPException(status_code=400, detail="role은 user, leader, admin, viewer 만 허용됩니다.")
 
     # pending_users 조회
     result = await db.execute(select(PendingUser).where(PendingUser.user_id == user_id))
