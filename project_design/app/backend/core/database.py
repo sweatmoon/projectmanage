@@ -110,27 +110,13 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
-            # PostgreSQL 연결 설정 (Railway 내부망 호환)
+            # PostgreSQL 연결 설정 - SSL 비활성화 (Railway 환경)
             if "postgresql" in database_url or "postgres" in database_url:
-                # railway.internal 내부망은 SSL 불필요
-                # rlwy.net 외부 프록시는 SSL 필요하지만 내부망 우선 사용
-                is_internal = "railway.internal" in database_url
-                if is_internal:
-                    engine_kwargs["connect_args"] = {
-                        "ssl": False,
-                        "server_settings": {"application_name": "projectmanage"},
-                    }
-                    logger.info("PostgreSQL internal network (SSL disabled)")
-                else:
-                    import ssl as _ssl
-                    ssl_ctx = _ssl.create_default_context()
-                    ssl_ctx.check_hostname = False
-                    ssl_ctx.verify_mode = _ssl.CERT_NONE
-                    engine_kwargs["connect_args"] = {
-                        "ssl": ssl_ctx,
-                        "server_settings": {"application_name": "projectmanage"},
-                    }
-                    logger.info("PostgreSQL external (SSL enabled, verify=False)")
+                engine_kwargs["connect_args"] = {
+                    "ssl": False,
+                    "server_settings": {"application_name": "projectmanage"},
+                }
+                logger.info("PostgreSQL SSL disabled (Railway environment)")
 
             # Check if we're in a Lambda environment
             is_lambda = bool(
