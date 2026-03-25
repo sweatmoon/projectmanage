@@ -82,9 +82,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
 
-        # OIDC 미설정 시 인증 스킵 (개발 환경)
+        # 인증 미설정 시 스킵 (개발 환경: OIDC_ISSUER_URL과 GOOGLE_CLIENT_ID 모두 없을 때)
         oidc_issuer = os.environ.get("OIDC_ISSUER_URL", "")
-        if not oidc_issuer:
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        if not oidc_issuer and not google_client_id:
             return await call_next(request)
 
         # JWT 검증
