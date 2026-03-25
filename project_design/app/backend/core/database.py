@@ -84,6 +84,42 @@ class DatabaseManager:
             logger.error(f"Database not found:{filename}")
         return found
 
+    @staticmethod
+    def _is_public_url(raw_url: str) -> bool:
+        """Railway PUBLIC URL 여부 판단:
+        - Private URL: railway.internal 도메인 (내부망, SSL 불필요)
+        - Public URL:  proxy.rlwy.net 또는 외부 도메인 (SSL 필요)
+        """
+        return (
+            "proxy.rlwy.net" in raw_url
+            or "up.railway.app" in raw_url
+            or (
+                "railway.internal" not in raw_url
+                and "localhost" not in raw_url
+                and "127.0.0.1" not in raw_url
+                and ("postgresql" in raw_url or "postgres" in raw_url)
+                and ".internal" not in raw_url
+            )
+        )
+
+    @staticmethod
+    def _fix_railway_url(raw_url: str) -> str:
+        """Railway DATABASE_URL 자동 변환:
+        1) postgres:// → postgresql://
+        2) postgresql:// → postgresql+asyncpg://  (async 드라이버 명시)
+        3) ?sslmode=... 등 쿼리 파라미터 제거 (connect_args로 직접 제어)
+        """
+        if not raw_url:
+            return raw_url
+        # Step 1: postgres:// → postgresql://
+        url = re.sub(r"^postgres://", "postgresql://", raw_url)
+        # Step 2: postgresql:// → postgresql+asyncpg:// (이미 +asyncpg가 없으면)
+        if url.startswith("postgresql://"):
+            url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+        # Step 3: ?sslmode=... 쿼리 파라미터 제거 (connect_args로 직접 제어하므로)
+        url = re.sub(r"\?.*$", "", url)
+        return url
+
     async def init_db(self):
         """Initialize database connection with thread safety"""
         raw_db_url = os.environ.get("DATABASE_URL", "")
@@ -96,13 +132,19 @@ class DatabaseManager:
                 logger.info("Database already initialized")
                 return
 
-        if not settings.database_url:
+        # settings.database_url 대신 os.environ에서 직접 읽어 Railway 주입값을 우선 사용
+        raw_url = os.environ.get("DATABASE_URL", "") or settings.database_url
+        if not raw_url:
             logger.error("No database URL provided. DATABASE_URL environment variable must be set.")
             raise ValueError("DATABASE_URL environment variable is required")
 
         try:
             logger.info("Normalizing database URL for async compatibility...")
-            database_url = self._normalize_async_database_url(settings.database_url)
+            # Railway URL 자동 변환 먼저 적용 후 일반 normalize
+            database_url = self._fix_railway_url(raw_url)
+            database_url = self._normalize_async_database_url(database_url)
+            masked_final = re.sub(r":([^:@]+)@", ":***@", database_url)
+            logger.info(f"[DB] 최종 연결 URL: {masked_final}")
 
             logger.info("Creating async database engine...")
             # Configure engine based on environment (Lambda vs non-Lambda)
@@ -110,13 +152,28 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
-            # PostgreSQL 연결 설정 - SSL 비활성화 (Railway 환경)
+            # PostgreSQL SSL 설정
+            # - Railway Private URL (*.railway.internal): SSL 불필요 → ssl=False
+            # - Railway Public URL (*.proxy.rlwy.net):   SSL 필요   → ssl=True (기본 컨텍스트)
+            # - SQLite: connect_args 불필요
             if "postgresql" in database_url or "postgres" in database_url:
-                engine_kwargs["connect_args"] = {
-                    "ssl": False,
-                    "server_settings": {"application_name": "projectmanage"},
-                }
-                logger.info("PostgreSQL SSL disabled (Railway environment)")
+                is_public = self._is_public_url(raw_url)
+                if is_public:
+                    import ssl as ssl_module
+                    ssl_ctx = ssl_module.create_default_context()
+                    ssl_ctx.check_hostname = False
+                    ssl_ctx.verify_mode = ssl_module.CERT_NONE
+                    engine_kwargs["connect_args"] = {
+                        "ssl": ssl_ctx,
+                        "server_settings": {"application_name": "projectmanage"},
+                    }
+                    logger.info(f"[DB] PostgreSQL SSL 활성화 (Public/Proxy URL 감지: {masked_final})")
+                else:
+                    engine_kwargs["connect_args"] = {
+                        "ssl": False,
+                        "server_settings": {"application_name": "projectmanage"},
+                    }
+                    logger.info(f"[DB] PostgreSQL SSL 비활성화 (Private/Internal URL 감지: {masked_final})")
 
             # Check if we're in a Lambda environment
             is_lambda = bool(
