@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from models.auth import OIDCState, User, AllowedUser, PendingUser
+from models.auth import OIDCState, User, PendingUser
 
 logger = logging.getLogger(__name__)
 
@@ -362,30 +362,31 @@ async def callback(
     if not user_id or user_id == "unknown":
         return error_redirect("사용자 정보를 가져올 수 없습니다.", str(user_info))
 
-    # ── 접속 허용 목록 체크 ────────────────────────────────────
-    # AllowedUser 테이블에 등록된 사용자만 접근 허용
-    # (테이블이 비어있으면 모든 사용자 허용 - 초기 설정 편의를 위해)
-    allowed_count_result = await db.execute(select(AllowedUser).limit(1))
-    has_allowlist = allowed_count_result.scalar_one_or_none() is not None
-
     # ── ADMIN_USERS 환경변수 체크 (최우선 - 항상 통과) ──────────
     admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
     is_env_admin = user_id in admin_users or email in admin_users
 
-    if has_allowlist and not is_env_admin:
-        allowed_result = await db.execute(
-            select(AllowedUser).where(
-                AllowedUser.user_id == user_id,
-                AllowedUser.is_active == True,
-            )
-        )
-        allowed_entry = allowed_result.scalar_one_or_none()
-        if not allowed_entry:
-            # ── 미허가 사용자: pending_users에 등록 후 신청 페이지로 ──
-            logger.warning(f"Access pending for user {user_id!r} - saving to pending_users")
-            app_url = get_oidc_settings()["app_url"].rstrip("/")
+    # ── 접속 허용 체크 ────────────────────────────────────────
+    # Google OAuth 환경에서는 반드시 다음 중 하나여야 접근 허용:
+    #   1) ADMIN_USERS 환경변수에 등록된 이메일/ID (관리자)
+    #   2) pending_users에서 관리자 승인을 받아 users 테이블에 role이 할당된 사용자
+    # ※ allowed_users 테이블이 비어있어도 미승인 사용자는 접근 불가
+    app_url = get_oidc_settings()["app_url"].rstrip("/")
 
-            # pending_users upsert (이미 신청한 경우 상태 확인)
+    if is_env_admin:
+        # 환경변수 admin은 항상 통과
+        role = "admin"
+        is_admin = True
+    else:
+        # users 테이블에 이미 승인된 사용자인지 확인 (pending 승인 → users 테이블에 추가됨)
+        existing_user_result = await db.execute(select(User).where(User.id == user_id))
+        existing_user_check = existing_user_result.scalar_one_or_none()
+
+        if existing_user_check is None:
+            # 한 번도 승인된 적 없는 신규 사용자 → 권한 신청 흐름
+            logger.warning(f"Access denied (not approved) for user {user_id!r} - redirecting to request page")
+
+            # pending_users upsert
             pending_result = await db.execute(
                 select(PendingUser).where(PendingUser.user_id == user_id)
             )
@@ -411,31 +412,23 @@ async def callback(
                     url=f"{app_url}/access-request?status=rejected&reason={reason}"
                 )
             else:
-                # 이미 pending 상태
+                # 이미 pending 상태 (재로그인 시도)
                 await db.commit()
                 return RedirectResponse(
                     url=f"{app_url}/access-request?status=pending&email={email}"
                 )
-        # 허용 목록의 role을 우선 사용 (admin 환경변수보다 DB 설정 우선)
-        role = allowed_entry.role
-        is_admin = role == "admin"
-    elif is_env_admin:
-        # 환경변수 admin은 항상 통과
-        role = "admin"
-        is_admin = True
-    else:
-        # 허용 목록이 비어있으면 ADMIN_USERS 환경변수로 폴백
-        is_admin = is_env_admin
-        role = "admin" if is_admin else "user"
 
-    # 최종 role 정리
-    if is_env_admin:
-        role = "admin"
-        is_admin = True
+        # users 테이블에 존재: DB의 role 그대로 사용
+        role = existing_user_check.role
+        is_admin = role == "admin"
 
     # DB에 사용자 upsert + 마지막 로그인 시간 확인 (중복 로그 방지용)
-    existing = await db.execute(select(User).where(User.id == user_id))
-    user = existing.scalar_one_or_none()
+    # is_env_admin 경로에서는 아직 user 객체가 없으므로 조회, 비admin 경로는 existing_user_check 재사용
+    if is_env_admin:
+        existing_result = await db.execute(select(User).where(User.id == user_id))
+        user = existing_result.scalar_one_or_none()
+    else:
+        user = existing_user_check  # 이미 위에서 조회함
     now_utc = datetime.now(timezone.utc)
 
     # 5분 내 재로그인이면 SSO 자동 재인증으로 판단 → 로그 기록 스킵
@@ -450,7 +443,7 @@ async def callback(
         user.last_login = now_utc
         user.name = name
         user.email = email
-        user.role = role  # allowed_entry.role (admin/user/viewer) 또는 폴백 role 동기화
+        user.role = role  # 최신 role 동기화
     else:
         user = User(id=user_id, email=email, name=name, role=role, last_login=now_utc)
         db.add(user)
