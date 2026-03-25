@@ -86,6 +86,9 @@ class DatabaseManager:
 
     async def init_db(self):
         """Initialize database connection with thread safety"""
+        raw_db_url = os.environ.get("DATABASE_URL", "")
+        masked = re.sub(r":([^:@]+)@", ":***@", raw_db_url) if raw_db_url else "(없음)"
+        logger.info(f"[DB] DATABASE_URL 환경변수 직접 확인: {masked}")
         logger.info("Starting database initialization...")
 
         async with self._init_lock:
