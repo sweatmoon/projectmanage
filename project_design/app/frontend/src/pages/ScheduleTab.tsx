@@ -5,6 +5,7 @@ import {
   toggleCalendarEntry, bulkCreateEntries,
   type Project, type Person, type Phase, type Staffing, type CalendarEntry
 } from '../api'
+import { authStore } from '@/lib/api'
 import { KOREAN_HOLIDAYS, isNonWorkdayStr as isNonWorkdayStrHoliday } from '../lib/holidays'
 
 function isBusinessDay(dateS: string): boolean { return !isNonWorkdayStrHoliday(dateS) }
@@ -107,6 +108,9 @@ export default function ScheduleTab() {
   const today = new Date()
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth() + 1)
+  // leader 이상만 달력 셀 토글 가능 (user 역할은 읽기 전용)
+  const currentRole = authStore.getUser()?.role ?? 'user'
+  const canToggleCalendar = currentRole === 'admin' || currentRole === 'leader'
   const [viewMode, setViewMode] = useState<ViewMode>('month')
 
   const [projects, setProjects] = useState<Project[]>([])
@@ -234,10 +238,11 @@ export default function ScheduleTab() {
     return result
   }
 
-  // ── Cell 클릭 (월 단위만 편집 가능) ─────────────────────────
+  // ── Cell 클릭 (월 단위 + leader/admin만 편집 가능) ──────────
   const [toggling, setToggling] = useState<string | null>(null)
   async function handleCellClick(staffingId: number, dateS: string, status?: string) {
     if (viewMode !== 'month') return  // 월 단위 외에는 읽기 전용
+    if (!canToggleCalendar) return    // user 역할은 달력 셀 수정 불가
     const key = `${staffingId}_${dateS}`
     if (toggling === key) return
     setToggling(key)
@@ -599,7 +604,7 @@ export default function ScheduleTab() {
                                 const isSelected = !!entry
                                 const status = entry?.status
                                 const isTogglingThis = toggling === `${s.id}_${dateS}`
-                                const isReadOnly = viewMode !== 'month'
+                                const isReadOnly = viewMode !== 'month' || !canToggleCalendar
 
                                 return (
                                   <button
@@ -611,7 +616,7 @@ export default function ScheduleTab() {
                                       handleCellClick(s.id, dateS, st)
                                     }}
                                     disabled={isTogglingThis || isReadOnly}
-                                    title={`${projects.find(p => p.id === s.project_id)?.project_name} / ${phases.find(p => p.id === s.phase_id)?.phase_name}\n${s.field} - ${s.sub_field}${isReadOnly ? '\n(월 단위에서 편집 가능)' : ''}`}
+                                    title={`${projects.find(p => p.id === s.project_id)?.project_name} / ${phases.find(p => p.id === s.phase_id)?.phase_name}\n${s.field} - ${s.sub_field}${viewMode !== 'month' ? '\n(월 단위에서 편집 가능)' : !canToggleCalendar ? '\n(리더 이상 권한 필요)' : ''}`}
                                     className={`h-7 rounded transition flex items-center justify-center font-bold text-[11px]
                                       ${isTogglingThis ? 'opacity-50' : ''}
                                       ${isReadOnly ? 'cursor-default' : ''}

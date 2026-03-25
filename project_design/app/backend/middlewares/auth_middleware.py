@@ -138,6 +138,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "조회 전용 계정입니다. 입력·수정·삭제 작업은 허용되지 않습니다."}
             )
 
+        # ── user 역할: 달력 셀 토글(추가/제거) 차단 ───────────────
+        # user는 달력 셀 클릭(toggle) 불가 - leader/admin만 허용
+        # leader, admin, viewer(이미 위에서 차단)는 해당 없음
+        if (
+            request.state.user_role == "user"
+            and request.method.upper() == "POST"
+            and path == "/api/v1/calendar/toggle"
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "달력 셀 수정 권한이 없습니다. 리더 이상 권한이 필요합니다."}
+            )
+
         response = await call_next(request)
 
         # 접속 로그 기록 (API 요청만)
