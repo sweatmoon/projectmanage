@@ -27,7 +27,7 @@ from sqlalchemy import desc, func, or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from models.auth import AccessLog, User, AllowedUser
+from models.auth import AccessLog, User, AllowedUser, PendingUser
 from models.audit import AuditLog, AuditLogArchive
 from services.audit_service import write_audit_log, archive_old_logs, EventType, EntityType
 
@@ -1462,3 +1462,134 @@ async def bulk_rollback_audit_logs(
         failed=len(results) - success,
         results=results,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 권한 신청 대기 사용자 관리 API ────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+class PendingUserItem(BaseModel):
+    id: int
+    user_id: str
+    email: str
+    name: Optional[str]
+    status: str
+    requested_at: Optional[datetime]
+    reviewed_at: Optional[datetime]
+    reviewed_by: Optional[str]
+    note: Optional[str]
+    reject_reason: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class PendingUserReviewRequest(BaseModel):
+    action: str          # "approve" or "reject"
+    role: str = "user"   # approve 시 부여할 role
+    reject_reason: Optional[str] = None
+
+
+@router.get("/pending-users", response_model=List[PendingUserItem])
+async def list_pending_users(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin),
+    status: Optional[str] = Query(None, description="pending / approved / rejected"),
+):
+    """권한 신청 대기 사용자 목록"""
+    stmt = select(PendingUser).order_by(desc(PendingUser.requested_at))
+    if status:
+        stmt = stmt.where(PendingUser.status == status)
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.get("/pending-users/count")
+async def count_pending_users(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin),
+):
+    """대기 중인 권한 신청 건수"""
+    result = await db.execute(
+        select(func.count(PendingUser.id)).where(PendingUser.status == "pending")
+    )
+    count = result.scalar() or 0
+    return {"pending_count": count}
+
+
+@router.post("/pending-users/{user_id}/review")
+async def review_pending_user(
+    user_id: str,
+    body: PendingUserReviewRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """권한 신청 승인 또는 거부"""
+    if body.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="action은 'approve' 또는 'reject'만 허용됩니다.")
+    if body.action == "approve" and body.role not in ("user", "admin", "viewer"):
+        raise HTTPException(status_code=400, detail="role은 user, admin, viewer 만 허용됩니다.")
+
+    # pending_users 조회
+    result = await db.execute(select(PendingUser).where(PendingUser.user_id == user_id))
+    pending = result.scalar_one_or_none()
+    if not pending:
+        raise HTTPException(status_code=404, detail="신청 사용자를 찾을 수 없습니다.")
+
+    admin_id = getattr(request.state, "user_id", "system")
+    now = datetime.now(timezone.utc)
+
+    if body.action == "approve":
+        # AllowedUser에 추가
+        existing_allowed = await db.execute(
+            select(AllowedUser).where(AllowedUser.user_id == user_id)
+        )
+        if existing_allowed.scalar_one_or_none() is None:
+            new_allowed = AllowedUser(
+                user_id=user_id,
+                display_name=pending.name,
+                role=body.role,
+                is_active=True,
+                created_by=admin_id,
+                note=f"권한 신청 승인 ({pending.email})",
+            )
+            db.add(new_allowed)
+            logger.info(f"Approved pending user: {user_id} as role={body.role} by {admin_id}")
+
+        # pending 상태 업데이트
+        pending.status = "approved"
+        pending.reviewed_at = now
+        pending.reviewed_by = admin_id
+        await db.commit()
+
+        return {"ok": True, "action": "approve", "user_id": user_id, "role": body.role}
+
+    else:  # reject
+        pending.status = "rejected"
+        pending.reviewed_at = now
+        pending.reviewed_by = admin_id
+        pending.reject_reason = body.reject_reason or "관리자에 의해 거부되었습니다."
+        await db.commit()
+
+        logger.info(f"Rejected pending user: {user_id} by {admin_id}, reason: {pending.reject_reason}")
+        return {"ok": True, "action": "reject", "user_id": user_id}
+
+
+@router.delete("/pending-users/{user_id}")
+async def delete_pending_user(
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """권한 신청 기록 삭제"""
+    result = await db.execute(select(PendingUser).where(PendingUser.user_id == user_id))
+    pending = result.scalar_one_or_none()
+    if not pending:
+        raise HTTPException(status_code=404, detail="신청 사용자를 찾을 수 없습니다.")
+    await db.delete(pending)
+    await db.commit()
+    return {"ok": True, "deleted": user_id}

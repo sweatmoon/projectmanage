@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronUp, Search, Download, Archive,
   FileText, GitBranch, Filter, X, ChevronLeft, ChevronRight,
   UserCheck, ToggleLeft, ToggleRight, Trash2, PlusCircle, RotateCcw,
+  UserPlus, CheckCircle2, XCircle, Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -71,7 +72,20 @@ interface AuditLogListResponse {
   has_more: boolean;
 }
 
-type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'allowlist';
+type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'allowlist' | 'pending';
+
+interface PendingUserItem {
+  id: number;
+  user_id: string;
+  email: string;
+  name: string | null;
+  status: string;
+  requested_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  note: string | null;
+  reject_reason: string | null;
+}
 
 interface AllowedUserItem {
   id: number;
@@ -235,6 +249,14 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
 
+  // 권한 신청 대기 사용자 상태
+  const [pendingUsers, setPendingUsers] = useState<PendingUserItem[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingFilter, setPendingFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [reviewingUser, setReviewingUser] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectDialog, setShowRejectDialog] = useState<string | null>(null);
+
   // 허용 사용자 상태
   const [allowedUsers, setAllowedUsers] = useState<AllowedUserItem[]>([]);
   const [allowForm, setAllowForm] = useState({ user_id: '', display_name: '', role: 'user', note: '' });
@@ -273,6 +295,58 @@ export default function AdminPage() {
     try { setUsers(await client.admin.getUsers()); }
     catch { toast.error('사용자 목록 로드 실패'); }
     finally { setLoading(false); }
+  };
+
+  const fetchPendingUsers = async (filter = pendingFilter) => {
+    setLoading(true);
+    try {
+      const params = filter !== 'all' ? { status: filter } : {};
+      const res = await client.admin.getPendingUsers(params);
+      setPendingUsers(res);
+    } catch { toast.error('권한 신청 목록 로드 실패'); }
+    finally { setLoading(false); }
+  };
+
+  const fetchPendingCount = async () => {
+    try {
+      const res = await client.admin.getPendingCount();
+      setPendingCount(res.pending_count);
+    } catch { /* 무시 */ }
+  };
+
+  const handleApproveUser = async (userId: string, role = 'user') => {
+    setReviewingUser(userId);
+    try {
+      await client.admin.reviewPendingUser(userId, { action: 'approve', role });
+      toast.success('사용자를 승인했습니다.');
+      fetchPendingUsers();
+      fetchPendingCount();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || '승인 실패');
+    } finally { setReviewingUser(null); }
+  };
+
+  const handleRejectUser = async (userId: string) => {
+    setReviewingUser(userId);
+    try {
+      await client.admin.reviewPendingUser(userId, { action: 'reject', reject_reason: rejectReason || undefined });
+      toast.success('사용자를 거부했습니다.');
+      setShowRejectDialog(null);
+      setRejectReason('');
+      fetchPendingUsers();
+      fetchPendingCount();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || '거부 실패');
+    } finally { setReviewingUser(null); }
+  };
+
+  const handleDeletePending = async (userId: string) => {
+    if (!confirm('이 신청 기록을 삭제하시겠습니까?')) return;
+    try {
+      await client.admin.deletePendingUser(userId);
+      toast.success('삭제되었습니다.');
+      fetchPendingUsers();
+    } catch { toast.error('삭제 실패'); }
   };
 
   const fetchAllowedUsers = async () => {
@@ -347,13 +421,14 @@ export default function AdminPage() {
     finally { setLoading(false); }
   }, [auditFilters]);
 
-  useEffect(() => { fetchStats(); }, []);
+  useEffect(() => { fetchStats(); fetchPendingCount(); }, []);
   useEffect(() => {
     if (activeTab === 'logs')      fetchLogs();
     if (activeTab === 'users')     fetchUsers();
     if (activeTab === 'stats')     fetchStats();
     if (activeTab === 'audit')     fetchAuditLogs(0);
     if (activeTab === 'allowlist') fetchAllowedUsers();
+    if (activeTab === 'pending')   { fetchPendingUsers(); fetchPendingCount(); }
   }, [activeTab]);
 
   // ── 역할 변경 ──────────────────────────────────────────────
@@ -545,6 +620,7 @@ export default function AdminPage() {
           { key: 'logs',  label: '접속 로그', icon: LogIn },
           { key: 'users', label: '사용자 관리', icon: Users },
           { key: 'allowlist', label: '접근 허용 목록', icon: UserCheck },
+        { key: 'pending',   label: '권한 신청', icon: UserPlus },
         ] as { key: TabType; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -557,6 +633,11 @@ export default function AdminPage() {
           >
             <Icon className="w-4 h-4" />
             {label}
+            {key === 'pending' && pendingCount > 0 && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1">
+                {pendingCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1286,6 +1367,176 @@ export default function AdminPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 권한 신청 탭 ── */}
+      {activeTab === 'pending' && (
+        <div>
+          {/* 안내 배너 */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
+            <div className="flex items-start gap-2">
+              <Bell className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <strong>권한 신청 관리</strong> — 구글 계정으로 로그인했지만 허용 목록에 없는 사용자들의 접근 신청을 여기서 승인하거나 거부할 수 있습니다.
+                승인하면 자동으로 <strong>접근 허용 목록</strong>에 추가됩니다.
+              </div>
+            </div>
+          </div>
+
+          {/* 필터 + 새로고침 */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex gap-2">
+              {(['pending', 'all', 'approved', 'rejected'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => { setPendingFilter(f); fetchPendingUsers(f); }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    pendingFilter === f ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {f === 'all' ? '전체' : f === 'pending' ? `대기 중 ${pendingCount > 0 ? `(${pendingCount})` : ''}` : f === 'approved' ? '승인됨' : '거부됨'}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => { fetchPendingUsers(); fetchPendingCount(); }} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+              <RefreshCw className="w-4 h-4" /> 새로고침
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="text-center text-gray-400 py-12">로딩 중...</div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">사용자</th>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">Google ID</th>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">신청일</th>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">상태</th>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">처리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {pendingUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center text-gray-400 py-10">
+                        {pendingFilter === 'pending' ? '대기 중인 권한 신청이 없습니다.' : '신청 내역이 없습니다.'}
+                      </td>
+                    </tr>
+                  ) : pendingUsers.map(u => (
+                    <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-800">{u.name ?? '-'}</div>
+                        <div className="text-xs text-blue-600">{u.email}</div>
+                      </td>
+                      <td className="px-4 py-3 text-xs font-mono text-gray-500 max-w-[120px] truncate" title={u.user_id}>
+                        {u.user_id}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(u.requested_at)}</td>
+                      <td className="px-4 py-3">
+                        {u.status === 'pending' && (
+                          <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded">대기 중</span>
+                        )}
+                        {u.status === 'approved' && (
+                          <div>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">승인됨</span>
+                            <div className="text-xs text-gray-400 mt-1">{formatDateTime(u.reviewed_at)}</div>
+                          </div>
+                        )}
+                        {u.status === 'rejected' && (
+                          <div>
+                            <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded">거부됨</span>
+                            {u.reject_reason && (
+                              <div className="text-xs text-red-500 mt-1 max-w-[150px] truncate" title={u.reject_reason}>
+                                {u.reject_reason}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {u.status === 'pending' && (
+                          <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => handleApproveUser(u.user_id, 'user')}
+                                disabled={reviewingUser === u.user_id}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                일반 승인
+                              </button>
+                              <button
+                                onClick={() => handleApproveUser(u.user_id, 'admin')}
+                                disabled={reviewingUser === u.user_id}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors disabled:opacity-50"
+                              >
+                                <Shield className="w-3.5 h-3.5" />
+                                관리자
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => setShowRejectDialog(u.user_id)}
+                              disabled={reviewingUser === u.user_id}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors disabled:opacity-50"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              거부
+                            </button>
+                          </div>
+                        )}
+                        {u.status !== 'pending' && (
+                          <button
+                            onClick={() => handleDeletePending(u.user_id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-400 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            삭제
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 거부 사유 입력 다이얼로그 */}
+          {showRejectDialog && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
+                <h3 className="text-base font-semibold text-gray-800 mb-1">접근 신청 거부</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  거부 사유를 입력하면 사용자가 확인할 수 있습니다. (선택사항)
+                </p>
+                <textarea
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  placeholder="예: 해당 프로젝트 구성원이 아닙니다."
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-300 mb-4"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleRejectUser(showRejectDialog)}
+                    disabled={reviewingUser === showRejectDialog}
+                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    {reviewingUser === showRejectDialog ? '처리 중...' : '거부 확정'}
+                  </button>
+                  <button
+                    onClick={() => { setShowRejectDialog(null); setRejectReason(''); }}
+                    className="flex-1 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

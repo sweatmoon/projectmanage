@@ -12,6 +12,7 @@ import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import AdminPage from './pages/AdminPage';
 import LoggedOut from './pages/LoggedOut';
+import AccessRequest from './pages/AccessRequest';
 import { client, authStore } from './lib/api';
 
 const queryClient = new QueryClient();
@@ -68,8 +69,9 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
         window.location.href = '/auth/dev-login';
         return;
       } else {
-        // /logged-out 페이지면 리다이렉트 안 함 (로그아웃 완료 상태)
-        if (window.location.pathname === '/logged-out') return;
+        // 공개 페이지면 리다이렉트 안 함
+        const publicPages = ['/logged-out', '/access-request'];
+        if (publicPages.includes(window.location.pathname)) return;
         window.location.href = '/auth/login';
         return;
       }
@@ -99,9 +101,10 @@ const App = () => (
       <Toaster />
       <BrowserRouter>
         <Routes>
-          {/* 인증 콜백 / 로그아웃 (공개) */}
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/logged-out"    element={<LoggedOut />} />
+          {/* 인증 콜백 / 로그아웃 / 권한신청 (공개) */}
+          <Route path="/auth/callback"  element={<AuthCallback />} />
+          <Route path="/logged-out"     element={<LoggedOut />} />
+          <Route path="/access-request" element={<AccessRequest />} />
 
           {/* 인증 필요 경로 */}
           <Route path="/" element={<AuthGuard><Index /></AuthGuard>} />
