@@ -37,9 +37,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 # ── 관리자 권한 확인 의존성 ────────────────────────────────
+def _is_auth_configured() -> bool:
+    """인증이 설정된 환경인지 확인 (Synology SSO 또는 Google OAuth 중 하나라도 설정되면 True)"""
+    return bool(os.environ.get("OIDC_ISSUER_URL", "") or os.environ.get("GOOGLE_CLIENT_ID", ""))
+
+
 def require_admin(request: Request):
-    # OIDC 미설정(개발 환경)이면 admin 스킵
-    if not os.environ.get("OIDC_ISSUER_URL", ""):
+    # 인증 미설정(개발 환경)이면 admin 스킵
+    if not _is_auth_configured():
         return request
     role = getattr(request.state, "user_role", "user")
     if role not in ("admin", "audit_viewer"):
@@ -52,7 +57,7 @@ def require_admin(request: Request):
 
 def require_admin_only(request: Request):
     """쓰기 작업은 admin만 허용"""
-    if not os.environ.get("OIDC_ISSUER_URL", ""):
+    if not _is_auth_configured():
         return request
     role = getattr(request.state, "user_role", "user")
     if role != "admin":
