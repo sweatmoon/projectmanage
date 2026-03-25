@@ -369,6 +369,34 @@ export const client = {
         }>;
       };
     },
+    // ── 권한 신청 대기 사용자 관리 ──────────────────────────────
+    async getPendingUsers(params?: { status?: string }) {
+      const res = await http.get('/admin/pending-users', { params });
+      return res.data as Array<{
+        id: number;
+        user_id: string;
+        email: string;
+        name: string | null;
+        status: string;
+        requested_at: string | null;
+        reviewed_at: string | null;
+        reviewed_by: string | null;
+        note: string | null;
+        reject_reason: string | null;
+      }>;
+    },
+    async getPendingCount() {
+      const res = await http.get('/admin/pending-users/count');
+      return res.data as { pending_count: number };
+    },
+    async reviewPendingUser(userId: string, body: { action: string; role?: string; reject_reason?: string }) {
+      const res = await http.post(`/admin/pending-users/${encodeURIComponent(userId)}/review`, body);
+      return res.data;
+    },
+    async deletePendingUser(userId: string) {
+      const res = await http.delete(`/admin/pending-users/${encodeURIComponent(userId)}`);
+      return res.data;
+    },
   },
 
   // ── 공식 인력 변경 이력 ──────────────────────────────────────

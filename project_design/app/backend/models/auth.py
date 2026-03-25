@@ -39,6 +39,22 @@ class OIDCState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PendingUser(Base):
+    """접근 권한 신청 대기 목록 - 구글 로그인 후 관리자 승인 대기 중인 사용자"""
+    __tablename__ = "pending_users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(255), unique=True, index=True, nullable=False)  # Google sub
+    email = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+    status = Column(String(50), default="pending", nullable=False)   # pending / approved / rejected
+    requested_at = Column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(String(255), nullable=True)   # 처리한 관리자 ID
+    note = Column(String(500), nullable=True)          # 신청자 메모
+    reject_reason = Column(String(500), nullable=True) # 거부 사유
+
+
 class AccessLog(Base):
     __tablename__ = "access_logs"
 

@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from models.auth import OIDCState, User, AllowedUser
+from models.auth import OIDCState, User, AllowedUser, PendingUser
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +368,11 @@ async def callback(
     allowed_count_result = await db.execute(select(AllowedUser).limit(1))
     has_allowlist = allowed_count_result.scalar_one_or_none() is not None
 
-    if has_allowlist:
+    # ── ADMIN_USERS 환경변수 체크 (최우선 - 항상 통과) ──────────
+    admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
+    is_env_admin = user_id in admin_users or email in admin_users
+
+    if has_allowlist and not is_env_admin:
         allowed_result = await db.execute(
             select(AllowedUser).where(
                 AllowedUser.user_id == user_id,
@@ -377,25 +381,57 @@ async def callback(
         )
         allowed_entry = allowed_result.scalar_one_or_none()
         if not allowed_entry:
-            logger.warning(f"Access denied for user {user_id!r} - not in allowlist")
+            # ── 미허가 사용자: pending_users에 등록 후 신청 페이지로 ──
+            logger.warning(f"Access pending for user {user_id!r} - saving to pending_users")
             app_url = get_oidc_settings()["app_url"].rstrip("/")
-            return RedirectResponse(
-                url=f"{app_url}/logged-out?reason=not_allowed"
+
+            # pending_users upsert (이미 신청한 경우 상태 확인)
+            pending_result = await db.execute(
+                select(PendingUser).where(PendingUser.user_id == user_id)
             )
+            pending = pending_result.scalar_one_or_none()
+            if pending is None:
+                pending = PendingUser(
+                    user_id=user_id,
+                    email=email,
+                    name=name,
+                    status="pending",
+                )
+                db.add(pending)
+                await db.commit()
+                logger.info(f"New pending access request: {user_id!r} ({email})")
+                return RedirectResponse(
+                    url=f"{app_url}/access-request?status=submitted&email={email}"
+                )
+            elif pending.status == "rejected":
+                await db.commit()
+                from urllib.parse import quote
+                reason = quote(pending.reject_reason or "관리자에 의해 거부되었습니다.")
+                return RedirectResponse(
+                    url=f"{app_url}/access-request?status=rejected&reason={reason}"
+                )
+            else:
+                # 이미 pending 상태
+                await db.commit()
+                return RedirectResponse(
+                    url=f"{app_url}/access-request?status=pending&email={email}"
+                )
         # 허용 목록의 role을 우선 사용 (admin 환경변수보다 DB 설정 우선)
         role = allowed_entry.role
         is_admin = role == "admin"
+    elif is_env_admin:
+        # 환경변수 admin은 항상 통과
+        role = "admin"
+        is_admin = True
     else:
         # 허용 목록이 비어있으면 ADMIN_USERS 환경변수로 폴백
-        admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
-        is_admin = user_id in admin_users or email in admin_users
+        is_admin = is_env_admin
         role = "admin" if is_admin else "user"
 
-    # ADMIN_USERS 환경변수로 admin 역할 자동 지정 (허용 목록 없을 때 폴백)
-    admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
-    if not has_allowlist:
-        is_admin = user_id in admin_users or email in admin_users
-        role = "admin" if is_admin else "user"
+    # 최종 role 정리
+    if is_env_admin:
+        role = "admin"
+        is_admin = True
 
     # DB에 사용자 upsert + 마지막 로그인 시간 확인 (중복 로그 방지용)
     existing = await db.execute(select(User).where(User.id == user_id))
@@ -540,6 +576,26 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 # ── 5. 현재 사용자 정보 ───────────────────────────────────
+@router.get("/request-status")
+async def get_request_status(
+    email: str = Query(..., description="신청자 이메일"),
+    db: AsyncSession = Depends(get_db),
+):
+    """권한 신청 현황 조회 (공개 엔드포인트 - 이메일로 조회)"""
+    from sqlalchemy import select as _select
+    result = await db.execute(
+        _select(PendingUser).where(PendingUser.email == email)
+    )
+    pending = result.scalar_one_or_none()
+    if not pending:
+        return {"status": "not_found"}
+    return {
+        "status": pending.status,
+        "requested_at": pending.requested_at,
+        "reject_reason": pending.reject_reason if pending.status == "rejected" else None,
+    }
+
+
 @router.get("/me")
 async def get_me(request: Request):
     auth_header = request.headers.get("Authorization", "")
