@@ -107,14 +107,17 @@ class DatabaseManager:
                 "echo": settings.debug,
             }
 
-            # PostgreSQL SSL 설정 (Railway postgres-ssl 이미지 대응)
-            # railway.internal(내부) 또는 rlwy.net(외부) 모두 SSL 필요
+            # PostgreSQL SSL 설정 (Railway 호환)
             if "postgresql" in database_url or "postgres" in database_url:
+                import ssl as _ssl
+                ssl_ctx = _ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = _ssl.CERT_NONE  # Railway 자체 인증서 허용
                 engine_kwargs["connect_args"] = {
-                    "ssl": "require",  # SSL 연결 강제 (Railway postgres-ssl 호환)
+                    "ssl": ssl_ctx,
                     "server_settings": {"application_name": "projectmanage"},
                 }
-                logger.info("SSL enabled for PostgreSQL connection")
+                logger.info("SSL enabled for PostgreSQL connection (verify=False)")
 
             # Check if we're in a Lambda environment
             is_lambda = bool(
