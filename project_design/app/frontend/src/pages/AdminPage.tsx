@@ -365,6 +365,18 @@ export default function AdminPage() {
     if (activeTab === 'pending')   { fetchPendingUsers(); fetchPendingCount(); }
   }, [activeTab]);
 
+  // ── 사용자 삭제 ────────────────────────────────────────────
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (!confirm(`'${email}' 사용자를 삭제하시겠습니까?\n삭제 후 재로그인 시 권한 신청이 필요합니다.`)) return;
+    try {
+      await client.admin.deleteUser(userId);
+      toast.success('사용자가 삭제되었습니다.');
+      fetchUsers();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '삭제 실패');
+    }
+  };
+
   // ── 역할 변경 ──────────────────────────────────────────────
   const handleRoleChange = async (userId: string, currentRole: string) => {
     const roles = ['user', 'leader', 'viewer', 'admin', 'audit_viewer'];
@@ -1113,11 +1125,12 @@ export default function AdminPage() {
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">가입일</th>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">마지막 접속</th>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">역할 변경</th>
+                    <th className="px-4 py-3 w-12"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {users.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center text-gray-400 py-8">사용자가 없습니다</td></tr>
+                    <tr><td colSpan={7} className="text-center text-gray-400 py-8">사용자가 없습니다</td></tr>
                   ) : users.map(user => (
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
@@ -1128,7 +1141,7 @@ export default function AdminPage() {
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           user.role === 'admin'        ? 'bg-purple-100 text-purple-700' :
-                          user.role === 'leader'        ? 'bg-indigo-100 text-indigo-700' :
+                          user.role === 'leader'       ? 'bg-indigo-100 text-indigo-700' :
                           user.role === 'audit_viewer' ? 'bg-blue-100 text-blue-700'    :
                                                          'bg-gray-100 text-gray-600'
                         }`}>
@@ -1143,6 +1156,15 @@ export default function AdminPage() {
                           className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
                         >
                           역할 변경
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleDeleteUser(user.id, user.email)}
+                          className="p-1.5 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          title="사용자 삭제"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>

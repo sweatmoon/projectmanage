@@ -277,6 +277,10 @@ export const client = {
       const res = await http.put(`/admin/users/${userId}/role`, { role });
       return res.data;
     },
+    async deleteUser(userId: string) {
+      const res = await http.delete(`/admin/users/${encodeURIComponent(userId)}`);
+      return res.data;
+    },
     async getAuditLogs(params?: {
       event_type?: string; entity_type?: string; project_id?: number;
       user_id?: string; entity_id?: string; is_system_action?: boolean;
