@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { client } from '@/lib/api';
 import {
@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronUp, Search, Download, Archive,
   FileText, Filter, X, ChevronLeft, ChevronRight,
   Trash2, RotateCcw,
-  UserPlus, CheckCircle2, XCircle, Bell,
+  UserPlus, CheckCircle2, XCircle, Bell, HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -227,6 +227,265 @@ const EMPTY_FILTERS: AuditFilters = {
 const EVENT_TYPES = ['CREATE','UPDATE','DELETE','RESTORE','STATUS_CHANGE','BULK_IMPORT','BULK_OVERWRITE','SYNC','LOGIN','LOGOUT','USER_ROLE_CHANGE'];
 const ENTITY_TYPES = ['project','phase','staffing','calendar_entry','people','user'];
 
+// ── 역할 정의 ────────────────────────────────────────────────
+const ROLE_CONFIG: Record<string, {
+  label: string;
+  color: string;       // badge bg+text
+  borderColor: string; // dropdown border
+  dotColor: string;    // 설명 패널 dot
+  description: string;
+  permissions: string[];
+}> = {
+  admin: {
+    label: '관리자',
+    color: 'bg-purple-100 text-purple-700',
+    borderColor: 'border-purple-200 hover:border-purple-400',
+    dotColor: 'bg-purple-400',
+    description: '시스템 전체를 관리할 수 있는 최고 권한입니다.',
+    permissions: [
+      '모든 사업·단계·투입공수 생성/수정/삭제',
+      '달력 일정 추가/제거',
+      '사용자 역할 변경 및 권한 신청 승인/거부',
+      '감사 로그 조회 및 롤백',
+      '접속 로그 및 통계 조회',
+    ],
+  },
+  leader: {
+    label: '리더',
+    color: 'bg-indigo-100 text-indigo-700',
+    borderColor: 'border-indigo-200 hover:border-indigo-400',
+    dotColor: 'bg-indigo-400',
+    description: '프로젝트 리더로서 일정 관리 권한을 가집니다.',
+    permissions: [
+      '모든 사업·단계·투입공수 조회',
+      '달력 일정 추가/제거 (일반 사용자와 차별화)',
+      '데이터 수정 권한 (관리자 승인 불필요)',
+      '감사 로그 조회 불가',
+      '사용자 관리 불가',
+    ],
+  },
+  user: {
+    label: '일반',
+    color: 'bg-gray-100 text-gray-600',
+    borderColor: 'border-gray-200 hover:border-gray-400',
+    dotColor: 'bg-gray-400',
+    description: '기본 사용자 권한으로 조회 및 일부 편집이 가능합니다.',
+    permissions: [
+      '사업·단계·투입공수 조회 및 편집',
+      '달력 일정 조회만 가능 (추가/제거 불가)',
+      '본인 프로필 조회',
+      '감사 로그·접속 로그 조회 불가',
+      '사용자 관리 불가',
+    ],
+  },
+  viewer: {
+    label: '뷰어',
+    color: 'bg-teal-100 text-teal-700',
+    borderColor: 'border-teal-200 hover:border-teal-400',
+    dotColor: 'bg-teal-400',
+    description: '읽기 전용 접근만 허용됩니다. 어떤 데이터도 변경할 수 없습니다.',
+    permissions: [
+      '모든 데이터 조회 전용 (읽기만 가능)',
+      '사업·단계·투입공수 수정 불가',
+      '달력 일정 추가/제거 불가',
+      '관리자 기능 전체 불가',
+    ],
+  },
+  audit_viewer: {
+    label: '감사자',
+    color: 'bg-blue-100 text-blue-700',
+    borderColor: 'border-blue-200 hover:border-blue-400',
+    dotColor: 'bg-blue-400',
+    description: '감사 목적으로 로그만 열람할 수 있는 특수 역할입니다.',
+    permissions: [
+      '감사 로그 전체 조회',
+      '접속 로그 조회',
+      '사업·일정 데이터 수정 불가',
+      '사용자 관리 불가',
+    ],
+  },
+};
+
+const ROLE_ORDER = ['user', 'leader', 'viewer', 'admin', 'audit_viewer'];
+
+// ── 역할 드롭다운 컴포넌트 ─────────────────────────────────────
+function RoleDropdown({
+  userId,
+  currentRole,
+  onRoleChange,
+  disabled = false,
+}: {
+  userId: string;
+  currentRole: string;
+  onRoleChange: (userId: string, newRole: string) => Promise<void>;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const cfg = ROLE_CONFIG[currentRole] ?? ROLE_CONFIG.user;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(v => !v)}
+        disabled={disabled}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all
+          ${cfg.color} ${cfg.borderColor} disabled:opacity-40 disabled:cursor-not-allowed`}
+      >
+        <span>{cfg.label}</span>
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">역할 선택</p>
+          </div>
+          {ROLE_ORDER.map(role => {
+            const rc = ROLE_CONFIG[role];
+            const isActive = role === currentRole;
+            return (
+              <button
+                key={role}
+                onClick={() => {
+                  setOpen(false);
+                  if (!isActive) onRoleChange(userId, role);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-gray-50 transition-colors
+                  ${isActive ? 'bg-gray-50' : ''}`}
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${rc.dotColor}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${rc.color}`}>{rc.label}</span>
+                    {isActive && <span className="text-[10px] text-gray-400">현재</span>}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5 leading-snug truncate">{rc.description.split('.')[0]}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 승인 드롭다운 (권한 신청 탭용) ──────────────────────────────
+function ApproveDropdown({
+  userId,
+  onApprove,
+  disabled = false,
+}: {
+  userId: string;
+  onApprove: (userId: string, role: string) => Promise<void>;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const APPROVE_ROLES = ['user', 'leader', 'admin'];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(v => !v)}
+        disabled={disabled}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        {disabled ? '처리 중...' : '승인'}
+        {!disabled && <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">승인 역할 선택</p>
+          </div>
+          {APPROVE_ROLES.map(role => {
+            const rc = ROLE_CONFIG[role];
+            return (
+              <button
+                key={role}
+                onClick={() => { setOpen(false); onApprove(userId, role); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-gray-50 transition-colors"
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${rc.dotColor}`} />
+                <div className="flex-1 min-w-0">
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${rc.color}`}>{rc.label}</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">{rc.description.split('.')[0]}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 권한 설명 패널 ─────────────────────────────────────────────
+function RoleInfoPanel() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+      >
+        <HelpCircle className="w-4 h-4" />
+        권한 안내
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-4">
+          {ROLE_ORDER.map(role => {
+            const rc = ROLE_CONFIG[role];
+            return (
+              <div key={role} className={`rounded-xl border p-4 ${rc.color.includes('purple') ? 'border-purple-100 bg-purple-50/40' : rc.color.includes('indigo') ? 'border-indigo-100 bg-indigo-50/40' : rc.color.includes('teal') ? 'border-teal-100 bg-teal-50/40' : rc.color.includes('blue') ? 'border-blue-100 bg-blue-50/40' : 'border-gray-100 bg-gray-50/40'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${rc.dotColor}`} />
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${rc.color}`}>{rc.label}</span>
+                </div>
+                <p className="text-xs text-gray-600 mb-2.5">{rc.description}</p>
+                <ul className="space-y-1">
+                  {rc.permissions.map((p, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-[11px] text-gray-500">
+                      <span className="mt-0.5 flex-shrink-0">•</span>
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 메인 컴포넌트 ────────────────────────────────────────────
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -377,15 +636,13 @@ export default function AdminPage() {
     }
   };
 
-  // ── 역할 변경 ──────────────────────────────────────────────
-  const handleRoleChange = async (userId: string, currentRole: string) => {
-    const roles = ['user', 'leader', 'viewer', 'admin', 'audit_viewer'];
-    const roleNames: Record<string, string> = { user: '일반사용자', leader: '리더', viewer: '뷰어', admin: '관리자', audit_viewer: '감사자' };
-    const nextRole = roles[(roles.indexOf(currentRole) + 1) % roles.length];
-    if (!confirm(`역할을 '${roleNames[nextRole]}'(으)로 변경하시겠습니까?`)) return;
+  // ── 역할 변경 (드롭다운용 - 직접 역할 지정) ─────────────────
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    const rc = ROLE_CONFIG[newRole];
+    if (!confirm(`역할을 '${rc?.label ?? newRole}'(으)로 변경하시겠습니까?`)) return;
     try {
-      await client.admin.updateUserRole(userId, nextRole);
-      toast.success('역할이 변경되었습니다.');
+      await client.admin.updateUserRole(userId, newRole);
+      toast.success(`역할이 '${rc?.label ?? newRole}'(으)로 변경되었습니다.`);
       fetchUsers();
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? '역할 변경 실패');
@@ -1106,6 +1363,11 @@ export default function AdminPage() {
       {/* ── 사용자 관리 탭 ── */}
       {activeTab === 'users' && (
         <div>
+          {/* 권한 안내 토글 패널 */}
+          <div className="mb-4">
+            <RoleInfoPanel />
+          </div>
+
           <div className="flex justify-end mb-4">
             <button onClick={fetchUsers} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
               <RefreshCw className="w-4 h-4" /> 새로고침
@@ -1121,10 +1383,9 @@ export default function AdminPage() {
                   <tr>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">사용자</th>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">ID</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">역할</th>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">가입일</th>
                     <th className="text-left px-4 py-3 text-gray-600 font-medium">마지막 접속</th>
-                    <th className="text-left px-4 py-3 text-gray-600 font-medium">역할 변경</th>
+                    <th className="text-left px-4 py-3 text-gray-600 font-medium">역할</th>
                     <th className="px-4 py-3 w-12"></th>
                   </tr>
                 </thead>
@@ -1137,26 +1398,15 @@ export default function AdminPage() {
                         <div className="font-medium text-gray-800">{user.name ?? '-'}</div>
                         <div className="text-xs text-gray-400">{user.email}</div>
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono text-gray-500">{user.id}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          user.role === 'admin'        ? 'bg-purple-100 text-purple-700' :
-                          user.role === 'leader'       ? 'bg-indigo-100 text-indigo-700' :
-                          user.role === 'audit_viewer' ? 'bg-blue-100 text-blue-700'    :
-                                                         'bg-gray-100 text-gray-600'
-                        }`}>
-                          {user.role === 'audit_viewer' ? '감사자' : user.role === 'admin' ? '관리자' : user.role === 'leader' ? '리더' : user.role === 'viewer' ? '뷰어' : '일반'}
-                        </span>
-                      </td>
+                      <td className="px-4 py-3 text-xs font-mono text-gray-500 max-w-[120px] truncate" title={user.id}>{user.id}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(user.created_at)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(user.last_login)}</td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => handleRoleChange(user.id, user.role)}
-                          className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                        >
-                          역할 변경
-                        </button>
+                        <RoleDropdown
+                          userId={user.id}
+                          currentRole={user.role}
+                          onRoleChange={handleRoleChange}
+                        />
                       </td>
                       <td className="px-4 py-3">
                         <button
@@ -1268,30 +1518,11 @@ export default function AdminPage() {
                         {u.status === 'pending' && (
                           <div className="flex items-center gap-2">
                             <div className="flex gap-1">
-                              <button
-                                onClick={() => handleApproveUser(u.user_id, 'user')}
+                              <ApproveDropdown
+                                userId={u.user_id}
+                                onApprove={handleApproveUser}
                                 disabled={reviewingUser === u.user_id}
-                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                일반
-                              </button>
-                              <button
-                                onClick={() => handleApproveUser(u.user_id, 'leader')}
-                                disabled={reviewingUser === u.user_id}
-                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                리더
-                              </button>
-                              <button
-                                onClick={() => handleApproveUser(u.user_id, 'admin')}
-                                disabled={reviewingUser === u.user_id}
-                                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors disabled:opacity-50"
-                              >
-                                <Shield className="w-3.5 h-3.5" />
-                                관리자
-                              </button>
+                              />
                             </div>
                             <button
                               onClick={() => setShowRejectDialog(u.user_id)}
