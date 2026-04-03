@@ -262,6 +262,44 @@ async def update_user_role(
     return {"message": f"사용자 {user_id} 역할이 {body.role}로 변경되었습니다."}
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """사용자 삭제 (users 테이블에서 제거 → 재로그인 시 권한 신청 필요)"""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    # ADMIN_USERS 환경변수로 지정된 관리자는 삭제 불가
+    admin_users = [u.strip() for u in os.environ.get("ADMIN_USERS", "").split(",") if u.strip()]
+    if user_id in admin_users or user.email in admin_users:
+        raise HTTPException(status_code=403, detail="환경변수로 지정된 관리자는 삭제할 수 없습니다.")
+
+    # 자기 자신은 삭제 불가
+    requester_id = getattr(request.state, "user_id", None)
+    if requester_id and requester_id == user_id:
+        raise HTTPException(status_code=403, detail="자기 자신은 삭제할 수 없습니다.")
+
+    await write_audit_log(
+        db,
+        event_type=EventType.DELETE,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        before_obj={"user_id": user_id, "email": user.email, "name": user.name, "role": user.role},
+        request=request,
+        description=f"사용자 삭제: {user.email} (role={user.role})",
+    )
+    await db.delete(user)
+    await db.commit()
+    logger.info(f"User deleted: {user_id} ({user.email}) by {requester_id}")
+    return {"ok": True, "deleted": user_id}
+
+
 # ── 5. 감사 로그 조회 ─────────────────────────────────────
 @router.get("/audit", response_model=AuditLogListResponse)
 async def get_audit_logs(
