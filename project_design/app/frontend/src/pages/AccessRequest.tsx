@@ -13,26 +13,39 @@ export default function AccessRequest() {
 
   const [currentStatus, setCurrentStatus] = useState(statusParam);
   const [rejectReason] = useState(decodeURIComponent(reasonParam));
+  const [approved, setApproved] = useState(false);
+  const [countdown, setCountdown] = useState(3);
 
-  // pending / submitted 상태면 5초마다 승인 여부 폴링
+  // pending / submitted 상태면 3초마다 승인 여부 폴링
   useEffect(() => {
     if (!(statusParam === 'pending' || statusParam === 'submitted') || !emailParam) return;
 
     // 즉시 1회 체크
     checkStatus(emailParam);
 
-    // 5초 간격 폴링
-    const intervalId = setInterval(() => checkStatus(emailParam), 5000);
+    // 3초 간격 폴링
+    const intervalId = setInterval(() => checkStatus(emailParam), 3000);
     return () => clearInterval(intervalId);
   }, []);
+
+  // 승인됐을 때 카운트다운 후 자동 로그인
+  useEffect(() => {
+    if (!approved) return;
+    if (countdown <= 0) {
+      window.location.href = '/auth/login';
+      return;
+    }
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [approved, countdown]);
 
   async function checkStatus(email: string) {
     try {
       const res = await fetch(`/auth/request-status?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data.status === 'approved') {
-        // 승인된 경우 → 로그인 다시 시도 (새 토큰 발급받아야 하므로 재로그인)
-        window.location.href = '/auth/login';
+        // 승인된 경우 → 카운트다운 후 재로그인 (새 JWT 발급)
+        setApproved(true);
         return;
       }
       if (data.status === 'rejected') {
@@ -68,6 +81,32 @@ export default function AccessRequest() {
           로그인하면 자동으로 접근 권한 신청이 등록됩니다.<br />
           관리자 승인 후 서비스를 이용할 수 있습니다.
         </p>
+      </PageWrapper>
+    );
+  }
+
+  // ── 승인 완료 (폴링으로 감지됨) ─────────────────────────
+  if (approved) {
+    return (
+      <PageWrapper>
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-5">
+          <CheckCircle className="w-8 h-8 text-green-500" />
+        </div>
+        <h1 className="text-xl font-bold text-slate-800 mb-2">승인되었습니다! 🎉</h1>
+        <p className="text-sm text-slate-600 mb-4">
+          접근 권한이 승인되었습니다.<br />
+          잠시 후 자동으로 로그인 페이지로 이동합니다.
+        </p>
+        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <span className="text-xl font-bold text-blue-600">{countdown}</span>
+        </div>
+        <button
+          onClick={() => { window.location.href = '/auth/login'; }}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
+        >
+          지금 로그인하기
+        </button>
+        <p className="text-xs text-slate-300 mt-4">악티보 일정관리 시스템</p>
       </PageWrapper>
     );
   }
@@ -130,14 +169,14 @@ export default function AccessRequest() {
         )}
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-left">
           <p className="text-sm text-blue-800">
-            관리자가 신청을 검토 중입니다. 승인이 완료되면 아래 버튼으로 다시 로그인하세요.
+            관리자가 신청을 검토 중입니다. <strong>승인되면 이 화면에서 자동으로 로그인 페이지로 이동</strong>합니다.
           </p>
         </div>
         <button
           onClick={handleRetryLogin}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors mb-2"
         >
-          승인 후 다시 로그인
+          지금 다시 확인하기
         </button>
         <p className="text-xs text-slate-300 mt-4">악티보 일정관리 시스템</p>
       </PageWrapper>
