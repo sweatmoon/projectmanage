@@ -1548,21 +1548,24 @@ async def review_pending_user(
     now = datetime.now(timezone.utc)
 
     if body.action == "approve":
-        # AllowedUser에 추가
-        existing_allowed = await db.execute(
-            select(AllowedUser).where(AllowedUser.user_id == user_id)
+        # users 테이블에 추가 (없으면 INSERT, 있으면 role 업데이트)
+        # auth.py 콜백은 users 테이블 존재 여부로 접근 허용을 판단하므로 반드시 추가해야 함
+        existing_user_result = await db.execute(
+            select(User).where(User.id == user_id)
         )
-        if existing_allowed.scalar_one_or_none() is None:
-            new_allowed = AllowedUser(
-                user_id=user_id,
-                display_name=pending.name,
+        existing_user = existing_user_result.scalar_one_or_none()
+        if existing_user is None:
+            new_user = User(
+                id=user_id,
+                email=pending.email,
+                name=pending.name,
                 role=body.role,
-                is_active=True,
-                created_by=admin_id,
-                note=f"권한 신청 승인 ({pending.email})",
             )
-            db.add(new_allowed)
-            logger.info(f"Approved pending user: {user_id} as role={body.role} by {admin_id}")
+            db.add(new_user)
+            logger.info(f"Approved pending user: added to users table {user_id} role={body.role} by {admin_id}")
+        else:
+            existing_user.role = body.role
+            logger.info(f"Approved pending user: updated role in users table {user_id} role={body.role} by {admin_id}")
 
         # pending 상태 업데이트
         pending.status = "approved"

@@ -14,11 +14,16 @@ export default function AccessRequest() {
   const [currentStatus, setCurrentStatus] = useState(statusParam);
   const [rejectReason] = useState(decodeURIComponent(reasonParam));
 
-  // 이미 pending 또는 submitted 상태면 상태 체크
+  // pending / submitted 상태면 5초마다 승인 여부 폴링
   useEffect(() => {
-    if ((statusParam === 'pending' || statusParam === 'submitted') && emailParam) {
-      checkStatus(emailParam);
-    }
+    if (!(statusParam === 'pending' || statusParam === 'submitted') || !emailParam) return;
+
+    // 즉시 1회 체크
+    checkStatus(emailParam);
+
+    // 5초 간격 폴링
+    const intervalId = setInterval(() => checkStatus(emailParam), 5000);
+    return () => clearInterval(intervalId);
   }, []);
 
   async function checkStatus(email: string) {
@@ -26,7 +31,7 @@ export default function AccessRequest() {
       const res = await fetch(`/auth/request-status?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data.status === 'approved') {
-        // 승인된 경우 → 로그인 다시 시도
+        // 승인된 경우 → 로그인 다시 시도 (새 토큰 발급받아야 하므로 재로그인)
         window.location.href = '/auth/login';
         return;
       }
