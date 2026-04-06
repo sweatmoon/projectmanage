@@ -20,6 +20,9 @@ const WON_CELL_STYLE = `
     color: #fff !important;
     text-shadow: 0 1px 3px rgba(0,0,0,0.55) !important;
     box-shadow: 0 0 6px 1px rgba(255,200,50,0.55) !important;
+    border-left-color: rgba(255,255,255,0.6) !important;
+    overflow: hidden;
+    position: relative;
   }
   .won-cell::after {
     content: '';
@@ -1561,6 +1564,7 @@ const DayRow = React.memo(function DayRow({
                       </div>
                       {pBadges.map((badge) => {
                         const isChecked = checkedProjectIds.has(badge.projectId);
+                        const isBadgeWon = badge.is_won === true;
                         return (
                           <div key={badge.phaseId} className="flex items-center gap-1">
                             <Checkbox
@@ -1569,8 +1573,10 @@ const DayRow = React.memo(function DayRow({
                               className="h-3 w-3 flex-shrink-0"
                             />
                             <button
-                              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
-                              style={{
+                              className={`flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0 ${isBadgeWon ? 'won-cell' : ''}`}
+                              style={isBadgeWon ? {
+                                borderLeft: '3px solid rgba(255,255,255,0.6)',
+                              } : {
                                 backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
                                 backgroundImage: badge.pattern,
                                 backgroundSize: badge.patternSize,
@@ -1582,11 +1588,11 @@ const DayRow = React.memo(function DayRow({
                               onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
                               onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
                               onMouseLeave={() => setHoveredBadgePhaseId(null)}
-                              title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
+                              title={`${badge.label} (${badge.status}${isBadgeWon ? ' 👑수주완료' : ''})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
                             >
                               <span className="truncate flex-1">{badge.label}</span>
-                              <span className="text-[7px] font-bold rounded px-0.5 flex-shrink-0" style={{ backgroundColor: badge.color.border, color: '#fff' }}>
-                                {badge.status}
+                              <span className="text-[7px] font-bold rounded px-0.5 flex-shrink-0" style={isBadgeWon ? { backgroundColor: 'rgba(0,0,0,0.25)', color: '#fff' } : { backgroundColor: badge.color.border, color: '#fff' }}>
+                                {isBadgeWon ? 'P👑' : badge.status}
                               </span>
                             </button>
                           </div>
