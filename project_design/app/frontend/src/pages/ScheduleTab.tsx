@@ -605,30 +605,37 @@ export default function ScheduleTab() {
                                 const status = entry?.status
                                 const isTogglingThis = toggling === `${s.id}_${dateS}`
                                 const isReadOnly = viewMode !== 'month' || !canToggleCalendar
+                                const proj = projects.find(p => p.id === s.project_id)
+                                const isWonProposal = isSelected && status === 'P' && proj?.is_won
 
                                 return (
                                   <button
                                     key={s.id}
                                     onClick={() => {
                                       if (isReadOnly) return
-                                      const proj = projects.find(p => p.id === s.project_id)
                                       const st = proj?.status === '감리' ? 'A' : 'P'
                                       handleCellClick(s.id, dateS, st)
                                     }}
                                     disabled={isTogglingThis || isReadOnly}
-                                    title={`${projects.find(p => p.id === s.project_id)?.project_name} / ${phases.find(p => p.id === s.phase_id)?.phase_name}\n${s.field} - ${s.sub_field}${viewMode !== 'month' ? '\n(월 단위에서 편집 가능)' : !canToggleCalendar ? '\n(리더 이상 권한 필요)' : ''}`}
+                                    title={`${proj?.project_name} / ${phases.find(p => p.id === s.phase_id)?.phase_name}\n${s.field} - ${s.sub_field}${proj?.is_won ? '\n👑 수주 완료' : ''}${viewMode !== 'month' ? '\n(월 단위에서 편집 가능)' : !canToggleCalendar ? '\n(리더 이상 권한 필요)' : ''}`}
                                     className={`h-7 rounded transition flex items-center justify-center font-bold text-[11px]
                                       ${isTogglingThis ? 'opacity-50' : ''}
                                       ${isReadOnly ? 'cursor-default' : ''}
                                       ${isSelected
-                                        ? `${color.bg} ${color.text} border ${color.border}`
+                                        ? isWonProposal
+                                          ? `bg-amber-100 text-amber-700 border border-amber-400`
+                                          : `${color.bg} ${color.text} border ${color.border}`
                                         : isReadOnly
                                           ? 'bg-gray-50 text-gray-300 border border-gray-200'
                                           : 'bg-gray-100 text-gray-400 hover:bg-gray-200 border border-dashed border-gray-300'
                                       }`}
                                     style={{ width: `${Math.floor(88 / dayStaffings.length)}px` }}
                                   >
-                                    {isSelected && status}
+                                    {isSelected && (
+                                      isWonProposal
+                                        ? <span className="flex items-center gap-px leading-none">P<span className="text-[9px]">👑</span></span>
+                                        : status
+                                    )}
                                   </button>
                                 )
                               })}
@@ -654,6 +661,10 @@ export default function ScheduleTab() {
         <div className="flex items-center gap-1">
           <div className="w-5 h-4 rounded bg-orange-100 border border-orange-300 flex items-center justify-center text-orange-700 font-bold text-[10px]">P</div>
           <span>제안 (Proposal)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-5 h-4 rounded bg-amber-100 border border-amber-400 flex items-center justify-center text-amber-700 font-bold text-[10px] gap-px">P<span className="text-[8px]">👑</span></div>
+          <span>수주 완료</span>
         </div>
         {viewMode === 'month' && (
           <div className="flex items-center gap-1">

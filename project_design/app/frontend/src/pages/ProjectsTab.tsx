@@ -89,6 +89,11 @@ export default function ProjectsTab({ headerBtnId }: Props) {
                   </svg>
                   <span className="font-semibold text-gray-900 text-sm">{p.project_name}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}>{p.status}</span>
+                  {p.is_won && (
+                    <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 flex items-center gap-0.5">
+                      👑 수주
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 mt-1.5 ml-6.5 text-xs text-gray-500">
                   <span className="flex items-center gap-1">

@@ -27,6 +27,7 @@ interface Project {
   deadline?: string;
   notes?: string;
   updated_at?: string;
+  is_won?: boolean;
 }
 
 interface Phase {
@@ -1087,6 +1088,7 @@ export default function ProjectDetail() {
           status: editProject.status,
           notes: editProject.notes || '',
           updated_at: new Date().toISOString(),
+          is_won: editProject.status === '제안' ? (editProject.is_won ?? false) : false,
         },
       });
       toast.success('프로젝트 정보가 저장되었습니다.');
@@ -1762,7 +1764,7 @@ export default function ProjectDetail() {
                   <Label>상태</Label>
                   <Select
                     value={editProject.status || '감리'}
-                    onValueChange={(v) => setEditProject({ ...editProject, status: v })}
+                    onValueChange={(v) => setEditProject({ ...editProject, status: v, ...(v !== '제안' ? { is_won: false } : {}) })}
                     disabled={isLocked}
                   >
                     <SelectTrigger>
@@ -1774,6 +1776,28 @@ export default function ProjectDetail() {
                     </SelectContent>
                   </Select>
                 </div>
+                {/* 수주여부 — 제안 상태일 때만 표시 */}
+                {editProject.status === '제안' && (
+                  <div className="flex flex-col justify-end pb-1">
+                    <Label className="mb-2">수주여부</Label>
+                    <label className={`flex items-center gap-2 cursor-pointer select-none w-fit px-3 py-2 rounded-lg border transition-colors
+                      ${editProject.is_won
+                        ? 'bg-amber-50 border-amber-300 text-amber-700'
+                        : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                      } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={!!editProject.is_won}
+                        onChange={(e) => !isLocked && setEditProject({ ...editProject, is_won: e.target.checked })}
+                        disabled={isLocked}
+                        className="w-4 h-4 accent-amber-500"
+                      />
+                      <span className="text-sm font-medium flex items-center gap-1">
+                        {editProject.is_won ? '👑 수주 완료' : '수주 대기'}
+                      </span>
+                    </label>
+                  </div>
+                )}
                 <div>
                   <Label>비고</Label>
                   <Input
