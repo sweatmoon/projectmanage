@@ -1,6 +1,18 @@
 import axios from 'axios'
 
+const TOKEN_KEY = 'gantt_token_v3'
+
 const api = axios.create({ baseURL: '/api/v1' })
+
+// 인증 인터셉터: sessionStorage의 JWT 토큰을 자동으로 헤더에 첨부
+api.interceptors.request.use((config) => {
+  const token = sessionStorage.getItem(TOKEN_KEY)
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
 
 export interface Project {
   id: number
