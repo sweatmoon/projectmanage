@@ -2,6 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
+// 빌드마다 고유한 타임스탬프 생성 → Vite 해시가 바뀌도록 강제
+const BUILD_TS = Date.now();
+
 // ── HMR 호스트 자동 감지 ────────────────────────────────────
 // 로컬(localhost), 샌드박스(*.sandbox.novita.ai), 기타 환경 모두 대응
 // VITE_HMR_HOST 환경변수로 명시적 지정 가능 (CI/CD 등)
@@ -49,6 +52,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // 빌드 타임스탬프를 파일명에 포함 → CDN 캐시 강제 무효화
+        entryFileNames: `assets/[name]-[hash]-${BUILD_TS}.js`,
+        chunkFileNames: `assets/[name]-[hash]-${BUILD_TS}.js`,
+        assetFileNames: `assets/[name]-[hash].[ext]`,
         manualChunks: {
           'react-vendor':  ['react', 'react-dom'],
           'router-vendor': ['react-router-dom'],

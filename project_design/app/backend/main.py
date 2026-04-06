@@ -257,15 +257,30 @@ if FRONTEND_DIST.exists():
 
     @app.get("/")
     def serve_root():
-        return FileResponse(str(FRONTEND_DIST / "index.html"))
+        resp = FileResponse(str(FRONTEND_DIST / "index.html"))
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         # API routes are handled above, serve SPA for everything else
         file_path = FRONTEND_DIST / full_path
         if file_path.exists() and file_path.is_file():
-            return FileResponse(str(file_path))
-        return FileResponse(str(FRONTEND_DIST / "index.html"))
+            resp = FileResponse(str(file_path))
+            # assets 폴더(JS/CSS)는 해시 기반 파일명이므로 장기 캐시 허용
+            # index.html은 항상 최신 버전 제공
+            if not full_path.startswith("assets/"):
+                resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                resp.headers["Pragma"] = "no-cache"
+                resp.headers["Expires"] = "0"
+            return resp
+        resp = FileResponse(str(FRONTEND_DIST / "index.html"))
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 else:
     @app.get("/")
     def root():

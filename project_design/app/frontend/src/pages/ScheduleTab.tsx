@@ -608,9 +608,7 @@ export default function ScheduleTab() {
                                 const isTogglingThis = toggling === `${s.id}_${dateS}`
                                 const isReadOnly = viewMode !== 'month' || !canToggleCalendar
                                 const proj = projects.find(p => p.id === s.project_id)
-                                // is_won: API에서 true/false/undefined 모두 올 수 있으므로 명시적으로 === true 비교
-                                // status 대신 proj.status로 판단 (entry.status 불일치 방어)
-                                const isWonProposal = isSelected && proj?.status !== '감리' && proj?.is_won === true
+                                const isWonProposal = Boolean(isSelected && proj && proj.status === '제안' && proj.is_won === true)
 
                                 return (
                                   <button
