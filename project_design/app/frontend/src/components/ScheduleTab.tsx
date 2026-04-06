@@ -1010,7 +1010,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       });
     });
 
-    const projectUpdates = { project_name: projectName, organization, status: projectStatus };
+    // status는 프로젝트 상세 페이지에서만 변경 — 여기서는 제외
+    const projectUpdates = { project_name: projectName, organization };
     const phaseUpdates = { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined };
 
     // 제안 사업은 인력 변경 이력 관리 불필요 → 바로 저장
@@ -1133,17 +1134,20 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
             </div>
             <div>
               <Label className="text-xs">상태</Label>
-              <Select value={projectStatus} onValueChange={setProjectStatus} disabled={readOnly}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="감리">감리 (A)</SelectItem>
-                  <SelectItem value="제안">제안 (P)</SelectItem>
-                  <SelectItem value="완료">완료</SelectItem>
-                  <SelectItem value="대기">대기</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* 상태는 프로젝트 상세 페이지에서만 변경 — 여기서는 표시만 */}
+              <div className="flex items-center gap-2 h-8 px-3 rounded-md border bg-gray-50 text-sm">
+                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  projectStatus === '감리' ? 'bg-blue-100 text-blue-700' :
+                  projectStatus === '제안' ? 'bg-amber-100 text-amber-700' :
+                  projectStatus === '완료' ? 'bg-green-100 text-green-700' :
+                  'bg-gray-100 text-gray-500'
+                }`}>
+                  {projectStatus === '감리' ? '감리 (A)' :
+                   projectStatus === '제안' ? '제안 (P)' :
+                   projectStatus}
+                </span>
+                <span className="text-[10px] text-gray-400">· 상태 변경은 프로젝트 상세에서</span>
+              </div>
             </div>
           </div>
 
