@@ -133,6 +133,10 @@ export default function ScheduleTab() {
       setPeople(pe)
       setPhases(ph)
       setStaffings(st)
+      // DEBUG: is_won 확인 (임시)
+      const wonProjects = p.filter(x => x.is_won)
+      console.warn('[DEBUG is_won] 전체:', p.map(x => `${x.project_name}(is_won=${x.is_won})`))
+      console.warn('[DEBUG is_won] 수주완료:', wonProjects.map(x => x.project_name))
     } finally {
       setLoading(false)
     }
