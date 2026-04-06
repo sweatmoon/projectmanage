@@ -206,7 +206,9 @@ async def update_projects(
     update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
     # is_won은 False도 유효한 값이므로 별도 처리
     if data.is_won is not None:
-        update_dict['is_won'] = data.is_won if "status" in update_dict else EventType.UPDATE
+        update_dict['is_won'] = data.is_won
+    result = await service.update(id, update_dict)
+    event_type = EventType.STATUS_CHANGE if "status" in update_dict else EventType.UPDATE
     await write_audit_log(
         db, event_type=event_type, entity_type=EntityType.PROJECT,
         entity_id=id, before_obj=before, after_obj=result, request=request,
