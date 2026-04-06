@@ -13,12 +13,45 @@ import { useUserRole } from '@/hooks/useUserRole';
 import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
 
 
+/* ───────── Rainbow animation CSS (won projects) ───────── */
+const wonGanttStyle = `
+@keyframes ganttRainbow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes ganttShimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.won-gantt-bar {
+  background: linear-gradient(90deg,
+    #ff6b6b, #ff9f43, #feca57,
+    #48dbfb, #ff6b81, #a29bfe, #6c5ce7,
+    #fd79a8, #ff6b6b) !important;
+  background-size: 300% 300% !important;
+  animation: ganttRainbow 3s ease infinite !important;
+  position: relative;
+  overflow: hidden;
+}
+.won-gantt-bar::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+  animation: ganttShimmer 2s ease-in-out infinite;
+  pointer-events: none;
+}
+`;
+
 /* ───────── Types ───────── */
 interface Project {
   id: number;
   project_name: string;
   organization: string;
   status: string;
+  is_won?: boolean;
 }
 
 interface Phase {
@@ -1547,6 +1580,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
   return (
     <div className="space-y-4">
+      {/* won-gantt rainbow CSS */}
+      <style>{wonGanttStyle}</style>
       {/* ── 컨트롤 바 ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
@@ -1813,6 +1848,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                         );
                       }
 
+                      const isWon = project.is_won === true;
+
                       if (!isExpanded) {
                         // 접힌 상태: 모든 phase bar를 한 행에 표시
                         return (
@@ -1826,14 +1863,14 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                 <button
                                   key={phase.id}
                                   type="button"
-                                  className="absolute cursor-pointer hover:brightness-90 transition-all hover:shadow-md"
+                                  className={`absolute cursor-pointer hover:brightness-90 transition-all hover:shadow-md${isWon ? ' won-gantt-bar' : ''}`}
                                   style={{
                                     left: geo.x,
                                     width: geo.w,
                                     top: BAR_TOP,
                                     height: BAR_H,
-                                    backgroundColor: color.cell,
-                                    border: `1.5px solid ${color.border}`,
+                                    ...(!isWon ? { backgroundColor: color.cell } : {}),
+                                    border: isWon ? '1.5px solid rgba(255,255,255,0.6)' : `1.5px solid ${color.border}`,
                                     borderRadius: 4,
                                     zIndex: 5,
                                     display: 'flex',
@@ -1842,10 +1879,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                     overflow: 'hidden',
                                   }}
                                   onClick={() => handleCollapsedProjectClick(project)}
-                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n인력: ${staffCount}명`}
+                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n인력: ${staffCount}명${isWon ? '\n👑 수주 완료' : ''}`}
                                 >
-                                  <span className="text-[9px] font-semibold truncate" style={{ color: color.text }}>
-                                    {phase.phase_name}
+                                  <span className="text-[9px] font-semibold truncate" style={{ color: isWon ? '#fff' : color.text }}>
+                                    {isWon ? '👑 ' : ''}{phase.phase_name}
                                   </span>
                                 </button>
                               );
@@ -1912,46 +1949,50 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                 {geo && (
                                   <button
                                     type="button"
-                                    className="absolute cursor-pointer transition-all group"
+                                    className={`absolute cursor-pointer transition-all group${isWon ? ' won-gantt-bar' : ''}`}
                                     style={{
                                       left: geo.x,
                                       width: geo.w,
                                       top: BAR_TOP,
                                       height: BAR_H,
                                       zIndex: 5,
+                                      borderRadius: 6,
+                                      border: isWon ? '2px solid rgba(255,255,255,0.6)' : undefined,
                                     }}
                                     onClick={() => handleBadgeClick(project, phase)}
-                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일 | 인력: ${staffCount}명\n클릭하여 수정`}
+                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일 | 인력: ${staffCount}명\n클릭하여 수정${isWon ? '\n👑 수주 완료' : ''}`}
                                   >
-                                    {/* 공휴일/주말 패턴 렌더 */}
-                                    <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: 6 }}>
-                                      {/* 전체 배경 bar */}
-                                      <div className="absolute inset-0"
-                                        style={{ backgroundColor: color.cell, border: `2px solid ${color.border}`, borderRadius: 6 }}
-                                      />
-                                      {/* 공휴일/주말 줄무늬 */}
-                                      {scale === 'day' && columns.map((col, ci) => {
-                                        if (col.type !== 'day') return null;
-                                        const dc = col as DayColumn;
-                                        if (!dc.isWeekend && !dc.isHoliday) return null;
-                                        const colX = ci * COL_WIDTH;
-                                        if (colX < geo.x || colX >= geo.x + geo.w) return null;
-                                        const relX = colX - geo.x;
-                                        return (
-                                          <div key={ci} className="absolute top-0 bottom-0"
-                                            style={{
-                                              left: relX,
-                                              width: COL_WIDTH,
-                                              backgroundColor: dc.isHoliday ? 'rgba(239,68,68,0.25)' : 'rgba(0,0,0,0.15)',
-                                            }}
-                                          />
-                                        );
-                                      })}
-                                    </div>
+                                    {/* 공휴일/주말 패턴 렌더 (won이 아닐 때만) */}
+                                    {!isWon && (
+                                      <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: 6 }}>
+                                        {/* 전체 배경 bar */}
+                                        <div className="absolute inset-0"
+                                          style={{ backgroundColor: color.cell, border: `2px solid ${color.border}`, borderRadius: 6 }}
+                                        />
+                                        {/* 공휴일/주말 줄무늬 */}
+                                        {scale === 'day' && columns.map((col, ci) => {
+                                          if (col.type !== 'day') return null;
+                                          const dc = col as DayColumn;
+                                          if (!dc.isWeekend && !dc.isHoliday) return null;
+                                          const colX = ci * COL_WIDTH;
+                                          if (colX < geo.x || colX >= geo.x + geo.w) return null;
+                                          const relX = colX - geo.x;
+                                          return (
+                                            <div key={ci} className="absolute top-0 bottom-0"
+                                              style={{
+                                                left: relX,
+                                                width: COL_WIDTH,
+                                                backgroundColor: dc.isHoliday ? 'rgba(239,68,68,0.25)' : 'rgba(0,0,0,0.15)',
+                                              }}
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                    )}
                                     {/* 레이블 */}
                                     <div className="absolute inset-0 flex items-center px-2 overflow-hidden" style={{ zIndex: 2 }}>
-                                      <span className="text-[9px] font-semibold truncate select-none" style={{ color: color.text }}>
-                                        {phase.phase_name}
+                                      <span className="text-[9px] font-semibold truncate select-none" style={{ color: isWon ? '#fff' : color.text }}>
+                                        {isWon ? '👑 ' : ''}{phase.phase_name}
                                         {bizDays && geo.w > 60 && <span className="ml-1 opacity-70">({bizDays}일)</span>}
                                       </span>
                                     </div>
@@ -1972,34 +2013,65 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     <div className="border-t-2 border-slate-300 relative bg-slate-50/70"
                       style={{ height: ROW_H }}>
                       {columns.map((col, ci) => {
-                        if (col.type !== 'day') return null;
-                        const dc = col as DayColumn;
-                        if (dc.isWeekend || dc.isHoliday) return null;
-                        const idlePeople = idleRowData[ci] || [];
-                        const count = idlePeople.length;
-                        if (count === 0) return null;
-                        return (
-                          <button
-                            key={ci}
-                            type="button"
-                            className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-green-700 hover:bg-green-200 rounded transition-colors"
-                            style={{
-                              left: ci * COL_WIDTH + 1,
-                              width: COL_WIDTH - 2,
-                              top: 4,
-                              height: ROW_H - 8,
-                              backgroundColor: 'rgba(209,250,229,0.8)',
-                              zIndex: 5,
-                            }}
-                            title={`유휴 인력 ${count}명: ${idlePeople.map(p=>p.person_name).join(', ')}`}
-                            onClick={(e) => {
-                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                              setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, anchorRect: rect });
-                            }}
-                          >
-                            {count}
-                          </button>
-                        );
+                        // ── 일 뷰: 공휴일/주말 제외 ──
+                        if (col.type === 'day') {
+                          const dc = col as DayColumn;
+                          if (dc.isWeekend || dc.isHoliday) return null;
+                          const idlePeople = idleRowData[ci] || [];
+                          const count = idlePeople.length;
+                          if (count === 0) return null;
+                          return (
+                            <button
+                              key={ci}
+                              type="button"
+                              className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-green-700 hover:bg-green-200 rounded transition-colors"
+                              style={{
+                                left: ci * COL_WIDTH + 1,
+                                width: COL_WIDTH - 2,
+                                top: 4,
+                                height: ROW_H - 8,
+                                backgroundColor: 'rgba(209,250,229,0.8)',
+                                zIndex: 5,
+                              }}
+                              title={`유휴 인력 ${count}명: ${idlePeople.map(p=>p.person_name).join(', ')}`}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, anchorRect: rect });
+                              }}
+                            >
+                              {count}
+                            </button>
+                          );
+                        }
+                        // ── 주 뷰: 해당 주의 유휴인력 집계 ──
+                        if (col.type === 'week') {
+                          const idlePeople = idleRowData[ci] || [];
+                          const count = idlePeople.length;
+                          if (count === 0) return null;
+                          return (
+                            <button
+                              key={ci}
+                              type="button"
+                              className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-green-700 hover:bg-green-200 rounded transition-colors"
+                              style={{
+                                left: ci * COL_WIDTH + 1,
+                                width: COL_WIDTH - 2,
+                                top: 4,
+                                height: ROW_H - 8,
+                                backgroundColor: 'rgba(209,250,229,0.8)',
+                                zIndex: 5,
+                              }}
+                              title={`유휴 인력 ${count}명: ${idlePeople.map(p=>p.person_name).join(', ')}`}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, anchorRect: rect });
+                              }}
+                            >
+                              {count}
+                            </button>
+                          );
+                        }
+                        return null;
                       })}
                     </div>
 
