@@ -1120,57 +1120,60 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
     return map;
   }, [localProjects]);
 
-  // ── 인력별 날짜 Set 로드 (실제 엔트리 기반 중복 체크용) ──
+  // ── staffing_id별 실제 선택된 날짜 Set (Calendar Entry 기반) ──
+  // Map<staffingId, Set<dateStr>>  — status가 있는(선택된) 날짜만 포함
+  const [staffingEntryDates, setStaffingEntryDates] = useState<Map<number, Set<string>>>(new Map());
+  // ── EditModal 투입가능일 계산용: Map<projectId, Map<personId, Set<dateStr>>> ──
   const [personDatesByProject, setPersonDatesByProject] = useState<Map<number, Map<number, Set<string>>>>(new Map());
 
   useEffect(() => {
-    const personIds = people.map((p) => p.id).filter(Boolean);
-    if (personIds.length === 0) return;
+    const staffingIds = localStaffing.map((s) => s.id).filter(Boolean);
+    if (staffingIds.length === 0) {
+      setStaffingEntryDates(new Map());
+      setPersonDatesByProject(new Map());
+      return;
+    }
     (async () => {
       try {
-        // 모든 프로젝트의 person 일정 로드 (exclude_project_id 없이 전체)
         const res = await client.apiCall.invoke({
-          url: '/api/v1/calendar/entries_by_person_ids',
+          url: '/api/v1/calendar/by_staffing_ids',
           method: 'POST',
-          data: { person_ids: personIds },
-        }) as { person_dates: Record<string, string[]> };
-        // staffing → project_id 매핑
-        const staffingToProject = new Map<number, number>();
-        for (const s of localStaffing) {
-          const ph = localPhases.find((p) => p.id === s.phase_id);
-          if (ph && s.person_id) staffingToProject.set(s.person_id, ph.project_id);
-        }
-        // person별 날짜를 project별로 그룹핑
-        // 백엔드에서 person_id → [dates] 로 오므로, 여기선 staffing→phase→project 매핑 필요
-        // 간단히: 각 person이 배정된 모든 staffing에 대해 project별로 묶기
+          data: { staffing_ids: staffingIds },
+        }) as { entries: { staffing_id: number; entry_date: string; status?: string }[] };
+
+        // 1) staffingId → Set<날짜> (중복 체크용)
+        const entryMap = new Map<number, Set<string>>();
+        // 2) projectId → personId → Set<날짜> (EditModal 투입가능일 계산용)
         const byProject = new Map<number, Map<number, Set<string>>>();
-        // staffing 전체에서 person_id → project_id 매핑 구축
-        const personProjectDates = new Map<string, { personId: number; projectId: number; dates: string[] }>();
+
+        // staffingId → (person_id, project_id) 매핑
+        const staffingMeta = new Map<number, { personId: number; projectId: number }>();
         for (const s of localStaffing) {
           if (!s.person_id) continue;
           const ph = localPhases.find((p) => p.id === s.phase_id);
           if (!ph) continue;
-          const key = `${s.person_id}_${ph.project_id}`;
-          if (!personProjectDates.has(key)) {
-            personProjectDates.set(key, { personId: s.person_id, projectId: ph.project_id, dates: [] });
-          }
+          staffingMeta.set(s.id, { personId: s.person_id, projectId: ph.project_id });
         }
-        // person_dates에서 날짜를 해당 personId의 모든 project에 배분
-        for (const [pidStr, dates] of Object.entries(res.person_dates || {})) {
-          const personId = Number(pidStr);
-          // 이 person이 속한 모든 project에 날짜 배분
-          for (const [key, entry] of personProjectDates.entries()) {
-            if (entry.personId !== personId) continue;
-            if (!byProject.has(entry.projectId)) byProject.set(entry.projectId, new Map());
-            const projMap = byProject.get(entry.projectId)!;
-            if (!projMap.has(personId)) projMap.set(personId, new Set());
-            dates.forEach((d) => projMap.get(personId)!.add(d));
-          }
+
+        for (const e of (res.entries || [])) {
+          if (!e.status) continue;  // 선택되지 않은 엔트리 제외
+          // 1) staffing별 날짜 맵
+          if (!entryMap.has(e.staffing_id)) entryMap.set(e.staffing_id, new Set());
+          entryMap.get(e.staffing_id)!.add(e.entry_date);
+          // 2) project별 person별 날짜 맵
+          const meta = staffingMeta.get(e.staffing_id);
+          if (!meta) continue;
+          if (!byProject.has(meta.projectId)) byProject.set(meta.projectId, new Map());
+          const projMap = byProject.get(meta.projectId)!;
+          if (!projMap.has(meta.personId)) projMap.set(meta.personId, new Set());
+          projMap.get(meta.personId)!.add(e.entry_date);
         }
+
+        setStaffingEntryDates(entryMap);
         setPersonDatesByProject(byProject);
       } catch { /* ignore */ }
     })();
-  }, [people, localStaffing, localPhases]);
+  }, [localStaffing, localPhases]);
 
   /* ───────── Generate columns ───────── */
   const columns: GanttColumn[] = useMemo(() => {
@@ -1389,7 +1392,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
     expanded: number | null;   // 펼친 personId
   } | null>(null);
 
-  /* ───────── Overlap row data: per-column list of people assigned to 2+ phases ───────── */
+  /* ───────── Overlap row data: Calendar Entry 기반 실제 선택 날짜로 중복 판정 ───────── */
   const overlapRowData = useMemo(() => {
     return columns.map((col) => {
       if (col.type === 'day') {
@@ -1402,25 +1405,28 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
       const colEnd   = col.type === 'day' ? col.dateStr : (col as WeekColumn).endDate;
       const periodDays = col.type === 'week' ? calcBizDaysHoliday(colStart, colEnd) : 1;
 
-      // person_id → 겹치는 staffing 목록 수집
-      const personAssignments = new Map<number, {
+      // person_id → { 날짜별 staffing 목록 } 수집
+      // 각 날짜에 2개 이상의 staffing이 배정된 경우 → 실제 중복
+      // person별로 colStart~colEnd 내 실제 선택된 날짜를 staffing별로 모음
+      const personDateStaffings = new Map<number, Map<string, {
+        staffingId: number;
         projectId: number; projectName: string;
         phaseId: number; phaseName: string;
         field: string; phaseStart: string; phaseEnd: string;
-      }[]>();
+      }[]>>();
 
       for (const s of localStaffing) {
         if (!s.person_id) continue;
         const ph = localPhases.find((p) => p.id === s.phase_id);
         if (!ph) continue;
-        const phStart = ph.start_date || '2000-01-01';
-        const phEnd   = ph.end_date   || '2099-12-31';
-        const overlaps = phStart <= colEnd && phEnd >= colStart;
-        if (!overlaps) continue;
+
+        // 이 staffing의 실제 선택된 날짜 중 컬럼 기간과 겹치는 날짜만
+        const entryDates = staffingEntryDates.get(s.id);
+        if (!entryDates || entryDates.size === 0) continue;
 
         const proj = localProjects.find((p) => p.id === s.project_id);
-        if (!personAssignments.has(s.person_id)) personAssignments.set(s.person_id, []);
-        personAssignments.get(s.person_id)!.push({
+        const info = {
+          staffingId:  s.id,
           projectId:   proj?.id ?? s.project_id,
           projectName: proj?.project_name ?? '(미정)',
           phaseId:     ph.id,
@@ -1428,38 +1434,63 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
           field:       s.field || '',
           phaseStart:  ph.start_date || '',
           phaseEnd:    ph.end_date   || '',
-        });
+        };
+
+        for (const dateStr of entryDates) {
+          if (dateStr < colStart || dateStr > colEnd) continue;
+          const personId = s.person_id;
+          if (!personDateStaffings.has(personId)) personDateStaffings.set(personId, new Map());
+          const dateMap = personDateStaffings.get(personId)!;
+          if (!dateMap.has(dateStr)) dateMap.set(dateStr, []);
+          dateMap.get(dateStr)!.push(info);
+        }
       }
 
-      // 2개 이상 배정된 인력만 추출 → 가나다 정렬
+      // person별로 같은 날에 2개 이상 staffing이 있는 날짜(실제 중복 날짜) 집계
       const items: OverlapDetail[] = [];
-      for (const [personId, assignments] of personAssignments.entries()) {
-        if (assignments.length < 2) continue;
+      for (const [personId, dateMap] of personDateStaffings.entries()) {
+        // 실제 중복 날짜: 해당 날짜에 서로 다른 프로젝트의 staffing이 2개 이상
+        const overlapDates = new Set<string>();
+        // 중복에 참여한 assignment 수집 (project 단위로 de-dup)
+        const seenProjectIds = new Set<number>();
+        const assignments: OverlapDetail['assignments'] = [];
+
+        for (const [dateStr, staffings] of dateMap.entries()) {
+          // 같은 날 서로 다른 프로젝트가 2개 이상인 경우만 중복
+          const projectIds = [...new Set(staffings.map((x) => x.projectId))];
+          if (projectIds.length < 2) continue;
+          overlapDates.add(dateStr);
+          for (const st of staffings) {
+            if (!seenProjectIds.has(st.projectId)) {
+              seenProjectIds.add(st.projectId);
+              assignments.push({
+                projectId:   st.projectId,
+                projectName: st.projectName,
+                phaseId:     st.phaseId,
+                phaseName:   st.phaseName,
+                field:       st.field,
+                phaseStart:  st.phaseStart,
+                phaseEnd:    st.phaseEnd,
+              });
+            }
+          }
+        }
+
+        if (overlapDates.size === 0) continue;
         const person = people.find((p) => p.id === personId);
-        // 중복 영업일: 해당 기간에서 실제로 겹치는 일 수
-        const overlapDays = col.type === 'week'
-          ? calcBizDaysHoliday(
-              assignments.reduce((a, b) => a.phaseStart > b.phaseStart ? b : a).phaseStart > colStart
-                ? assignments.reduce((a, b) => a.phaseStart > b.phaseStart ? b : a).phaseStart
-                : colStart,
-              assignments.reduce((a, b) => a.phaseEnd < b.phaseEnd ? b : a).phaseEnd < colEnd
-                ? assignments.reduce((a, b) => a.phaseEnd < b.phaseEnd ? b : a).phaseEnd
-                : colEnd
-            )
-          : 1;
         items.push({
           personId,
           personName: person?.person_name ?? '(미상)',
           grade: person?.grade,
           team:  person?.team,
-          overlapDays,
+          overlapDays: overlapDates.size,
           assignments,
         });
       }
       items.sort((a, b) => a.personName.localeCompare(b.personName, 'ko'));
       return { items, periodDays };
     });
-  }, [columns, localStaffing, localPhases, localProjects, people]);
+  }, [columns, localStaffing, localPhases, localProjects, people, staffingEntryDates]);
 
   const toggleProjectExpand = (projectId: number) => {
     setExpandedProjectIds((prev) => {
