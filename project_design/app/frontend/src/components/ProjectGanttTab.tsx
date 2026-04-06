@@ -766,8 +766,15 @@ function EditModal({
         newMd: mEdit !== undefined ? (mEdit ?? null) : undefined,
       });
     });
-    const projectUpdates = { project_name: projectName, organization, status: projectStatus };
+    // status는 프로젝트 상세에서만 변경 — 여기서는 제외
+    const projectUpdates = { project_name: projectName, organization };
     const phaseUpdates = { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined };
+
+    // 제안 사업은 인력변경 사유 다이얼로그 스킵 — 바로 저장
+    if (projectStatus === '제안') {
+      onSave(projectUpdates, phaseUpdates, staffingChanges.length > 0 ? staffingChanges : undefined);
+      return;
+    }
 
     // 인력이 실제로 바뀐 항목 감지
     const personChangedItems = staffingChanges
@@ -848,15 +855,20 @@ function EditModal({
             </div>
             <div>
               <Label className="text-xs">상태</Label>
-              <Select value={projectStatus} onValueChange={setProjectStatus} disabled={readOnly}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="감리">감리 (A)</SelectItem>
-                  <SelectItem value="제안">제안 (P)</SelectItem>
-                  <SelectItem value="완료">완료</SelectItem>
-                  <SelectItem value="대기">대기</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* 상태는 표시만 — 프로젝트 상세에서만 변경 */}
+              <div className="flex items-center gap-2 h-8 px-3 rounded-md border bg-gray-50 text-sm">
+                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  projectStatus === '감리' ? 'bg-blue-100 text-blue-700' :
+                  projectStatus === '제안' ? 'bg-amber-100 text-amber-700' :
+                  projectStatus === '완료' ? 'bg-green-100 text-green-700' :
+                  'bg-gray-100 text-gray-500'
+                }`}>
+                  {projectStatus === '감리' ? '감리 (A)' :
+                   projectStatus === '제안' ? '제안 (P)' :
+                   projectStatus}
+                </span>
+                <span className="text-[10px] text-gray-400">· 상태 변경은 프로젝트 상세에서</span>
+              </div>
             </div>
           </div>
           <div className="space-y-2">
@@ -914,7 +926,7 @@ function EditModal({
                               <span className="text-[9px] text-muted-foreground">MD</span>
                             </div>
                             {readOnly ? (
-                              hatMap.has(s.id) ? (
+                              hatMap.has(s.id) && projectStatus !== '제안' ? (
                                 <span className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0" title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대신 투입 중`}>
                                   <HardHat className="h-3 w-3" />
                                   <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
@@ -924,28 +936,30 @@ function EditModal({
                               <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.delete(s.id); return n; })} className="p-1 text-blue-500 hover:bg-blue-50 rounded flex-shrink-0" title="삭제 취소"><span className="text-[10px]">↩</span></button>
                             ) : (
                               <>
-                                {/* 🎩 모자 버튼 */}
-                                {hatEditId === s.id ? (
-                                  <HatPersonCombobox
-                                    currentName={hatMap.get(s.id)?.actual_person_name || ''}
-                                    allPeople={allPeople}
-                                    onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
-                                    onClear={() => saveHatInline(s.id, '', null)}
-                                    onCancel={() => setHatEditId(null)}
-                                  />
-                                ) : hatMap.has(s.id) ? (
-                                  <button type="button" onClick={() => openHatInline(s.id)}
-                                    title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
-                                    className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors">
-                                    <HardHat className="h-3 w-3 flex-shrink-0" />
-                                    <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
-                                  </button>
-                                ) : (
-                                  <button type="button" onClick={() => openHatInline(s.id)}
-                                    title="모자(대체인력) 씌우기"
-                                    className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50">
-                                    <HardHat className="h-3.5 w-3.5" />
-                                  </button>
+                                {/* 🎩 모자 버튼 — 제안 사업에서는 숨김 */}
+                                {projectStatus !== '제안' && (
+                                  hatEditId === s.id ? (
+                                    <HatPersonCombobox
+                                      currentName={hatMap.get(s.id)?.actual_person_name || ''}
+                                      allPeople={allPeople}
+                                      onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
+                                      onClear={() => saveHatInline(s.id, '', null)}
+                                      onCancel={() => setHatEditId(null)}
+                                    />
+                                  ) : hatMap.has(s.id) ? (
+                                    <button type="button" onClick={() => openHatInline(s.id)}
+                                      title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
+                                      className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors">
+                                      <HardHat className="h-3 w-3 flex-shrink-0" />
+                                      <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
+                                    </button>
+                                  ) : (
+                                    <button type="button" onClick={() => openHatInline(s.id)}
+                                      title="모자(대체인력) 씌우기"
+                                      className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50">
+                                      <HardHat className="h-3.5 w-3.5" />
+                                    </button>
+                                  )
                                 )}
                                 <button type="button" onClick={() => setDeletedIds((prev) => { const n = new Set(prev); n.add(s.id); return n; })} className="p-1 text-red-400 hover:bg-red-50 hover:text-red-600 rounded flex-shrink-0" title="투입인력 삭제"><X className="h-3 w-3" /></button>
                               </>
@@ -1304,36 +1318,46 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   const [idlePopover, setIdlePopover] = useState<{
     colIdx: number;
     people: People[];
+    availDays: number;      // 해당 일/주의 영업일 수
+    colLabel: string;       // ex) "4/7" or "10/1주"
     anchorRect: DOMRect | null;
+    search: string;
   } | null>(null);
 
-  /* ───────── Idle row data: per-column list of people NOT assigned to any phase in that period ───────── */
+  /* ───────── Idle row data: per-column { people, availDays } ───────── */
   const idleRowData = useMemo(() => {
-    // Build a set of person_ids that are busy on each column
     return columns.map((col) => {
-      // 일 뷰: 공휴일/주말이면 빈 배열 반환 (유휴 표시 불필요)
+      // 일 뷰: 공휴일/주말이면 빈 배열 반환
       if (col.type === 'day') {
         const dayC = col as DayColumn;
-        if (dayC.isWeekend || dayC.isHoliday) return [] as People[];
+        if (dayC.isWeekend || dayC.isHoliday) return { people: [] as People[], availDays: 0 };
       }
       const busyPersonIds = new Set<number>();
       for (const s of localStaffing) {
         if (!s.person_id) continue;
         const ph = localPhases.find((p) => p.id === s.phase_id);
         if (!ph) continue;
-        // Check if this phase overlaps the column
         const phStart = ph.start_date || '2000-01-01';
         const phEnd = ph.end_date || '2099-12-31';
         let overlaps = false;
         if (col.type === 'day') {
           overlaps = phStart <= col.dateStr && phEnd >= col.dateStr;
         } else {
-          overlaps = phStart <= col.endDate && phEnd >= col.startDate;
+          overlaps = phStart <= (col as WeekColumn).endDate && phEnd >= (col as WeekColumn).startDate;
         }
         if (overlaps) busyPersonIds.add(s.person_id);
       }
-      const idle = people.filter((p) => !busyPersonIds.has(p.id));
-      return idle;
+      // 가나다 정렬
+      const idle = people
+        .filter((p) => !busyPersonIds.has(p.id))
+        .sort((a, b) => a.person_name.localeCompare(b.person_name, 'ko'));
+      // 영업일 수 계산
+      let availDays = 1;
+      if (col.type === 'week') {
+        const wc = col as WeekColumn;
+        availDays = calcBizDaysHoliday(wc.startDate, wc.endDate);
+      }
+      return { people: idle, availDays };
     });
   }, [columns, localStaffing, localPhases, people]);
 
@@ -2013,58 +2037,48 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     <div className="border-t-2 border-slate-300 relative bg-slate-50/70"
                       style={{ height: ROW_H }}>
                       {columns.map((col, ci) => {
+                        const rowData = idleRowData[ci];
+                        if (!rowData) return null;
+                        const { people: idlePeople, availDays } = rowData;
+                        const count = idlePeople.length;
+
                         // ── 일 뷰: 공휴일/주말 제외 ──
                         if (col.type === 'day') {
                           const dc = col as DayColumn;
                           if (dc.isWeekend || dc.isHoliday) return null;
-                          const idlePeople = idleRowData[ci] || [];
-                          const count = idlePeople.length;
                           if (count === 0) return null;
+                          const colLabel = `${dc.month}/${dc.day}`;
                           return (
                             <button
                               key={ci}
                               type="button"
                               className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-green-700 hover:bg-green-200 rounded transition-colors"
-                              style={{
-                                left: ci * COL_WIDTH + 1,
-                                width: COL_WIDTH - 2,
-                                top: 4,
-                                height: ROW_H - 8,
-                                backgroundColor: 'rgba(209,250,229,0.8)',
-                                zIndex: 5,
-                              }}
-                              title={`유휴 인력 ${count}명: ${idlePeople.map(p=>p.person_name).join(', ')}`}
+                              style={{ left: ci * COL_WIDTH + 1, width: COL_WIDTH - 2, top: 4, height: ROW_H - 8, backgroundColor: 'rgba(209,250,229,0.8)', zIndex: 5 }}
+                              title={`유휴 인력 ${count}명 (1일 투입 가능)`}
                               onClick={(e) => {
                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, anchorRect: rect });
+                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, availDays: 1, colLabel, anchorRect: rect, search: '' });
                               }}
                             >
                               {count}
                             </button>
                           );
                         }
-                        // ── 주 뷰: 해당 주의 유휴인력 집계 ──
+                        // ── 주 뷰 ──
                         if (col.type === 'week') {
-                          const idlePeople = idleRowData[ci] || [];
-                          const count = idlePeople.length;
+                          const wc = col as WeekColumn;
                           if (count === 0) return null;
+                          const colLabel = wc.label;
                           return (
                             <button
                               key={ci}
                               type="button"
                               className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-green-700 hover:bg-green-200 rounded transition-colors"
-                              style={{
-                                left: ci * COL_WIDTH + 1,
-                                width: COL_WIDTH - 2,
-                                top: 4,
-                                height: ROW_H - 8,
-                                backgroundColor: 'rgba(209,250,229,0.8)',
-                                zIndex: 5,
-                              }}
-                              title={`유휴 인력 ${count}명: ${idlePeople.map(p=>p.person_name).join(', ')}`}
+                              style={{ left: ci * COL_WIDTH + 1, width: COL_WIDTH - 2, top: 4, height: ROW_H - 8, backgroundColor: 'rgba(209,250,229,0.8)', zIndex: 5 }}
+                              title={`유휴 인력 ${count}명 (이 주 영업일 ${availDays}일 투입 가능)`}
                               onClick={(e) => {
                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, anchorRect: rect });
+                                setIdlePopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, people: idlePeople, availDays, colLabel, anchorRect: rect, search: '' });
                               }}
                             >
                               {count}
@@ -2083,31 +2097,66 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         </CardContent>
       </Card>
 
-      {/* 유휴 인력 팝오버 */}
-      {idlePopover && (
-        <div className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 min-w-[180px] max-w-[260px]"
-          style={{
-            top: Math.min(idlePopover.anchorRect?.bottom ?? 0, window.innerHeight - 300) + 4,
-            left: Math.min(idlePopover.anchorRect?.left ?? 0, window.innerWidth - 270),
-          }}
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-green-50 rounded-t-lg">
-            <span className="text-xs font-semibold text-green-800">유휴 인력 ({idlePopover.people.length}명)</span>
-            <button className="text-gray-400 hover:text-gray-700 ml-2" onClick={() => setIdlePopover(null)}>
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="max-h-52 overflow-y-auto py-1">
-            {idlePopover.people.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="text-xs text-gray-800 font-medium">{p.person_name}</span>
-                {p.grade && <span className="text-[10px] text-gray-400 ml-auto">{p.grade}</span>}
+      {/* 유휴 인력 팝오버 — 검색·가나다 정렬·투입 가능 일수 */}
+      {idlePopover && (() => {
+        const filtered = idlePopover.people.filter((p) =>
+          p.person_name.includes(idlePopover.search) ||
+          (p.team || '').includes(idlePopover.search) ||
+          (p.grade || '').includes(idlePopover.search)
+        );
+        return (
+          <div
+            className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 w-[260px]"
+            style={{
+              top: Math.min(idlePopover.anchorRect?.bottom ?? 0, window.innerHeight - 380) + 4,
+              left: Math.min(idlePopover.anchorRect?.left ?? 0, window.innerWidth - 270),
+            }}
+          >
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-green-50 rounded-t-lg">
+              <div>
+                <span className="text-xs font-semibold text-green-800">
+                  유휴 인력 ({idlePopover.people.length}명)
+                </span>
+                <span className="ml-1.5 text-[10px] text-green-600 font-medium">
+                  · {idlePopover.colLabel} ({idlePopover.availDays}일 투입 가능)
+                </span>
               </div>
-            ))}
+              <button className="text-gray-400 hover:text-gray-700 ml-2 flex-shrink-0" onClick={() => setIdlePopover(null)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {/* 검색 */}
+            <div className="px-2 py-1.5 border-b border-gray-100">
+              <input
+                type="text"
+                placeholder="이름/팀/등급 검색..."
+                value={idlePopover.search}
+                onChange={(e) => setIdlePopover((prev) => prev ? { ...prev, search: e.target.value } : prev)}
+                className="w-full h-7 px-2 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-green-400"
+                autoFocus
+              />
+            </div>
+            {/* 목록 (가나다 정렬은 idleRowData에서 이미 처리) */}
+            <div className="max-h-56 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-3 text-xs text-gray-400 text-center">검색 결과 없음</div>
+              ) : filtered.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                  <span className="text-xs text-gray-800 font-medium flex-1">{p.person_name}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {p.grade && <span className="text-[10px] text-gray-400">{p.grade}</span>}
+                    <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-1 py-0.5 rounded">
+                      {idlePopover.availDays}일
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 프로젝트 기본정보 팝업 (접혀있는 프로젝트 클릭) */}
       {projectInfoTarget && (() => {
