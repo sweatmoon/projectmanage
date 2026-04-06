@@ -1,4 +1,42 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+
+/* ── 수주 완료 셀 무지개 애니메이션 (전역 style 주입) ── */
+const WON_CELL_STYLE = `
+  @keyframes won-rainbow-shift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  @keyframes won-shimmer {
+    0%   { transform: translateX(-150%) rotate(25deg); }
+    100% { transform: translateX(250%) rotate(25deg); }
+  }
+  .won-cell {
+    background: linear-gradient(270deg,
+      #ff6b6b, #ffa94d, #ffe066, #69db7c,
+      #4dabf7, #cc5de8, #ff6b6b) !important;
+    background-size: 300% 300% !important;
+    animation: won-rainbow-shift 3s ease infinite !important;
+    color: #fff !important;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.55) !important;
+    box-shadow: 0 0 6px 1px rgba(255,200,50,0.55) !important;
+  }
+  .won-cell::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 40%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+    animation: won-shimmer 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+`;
+if (typeof document !== 'undefined' && !document.getElementById('won-cell-style')) {
+  const el = document.createElement('style');
+  el.id = 'won-cell-style';
+  el.textContent = WON_CELL_STYLE;
+  document.head.appendChild(el);
+}
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -1645,12 +1683,13 @@ const DayRow = React.memo(function DayRow({
           if (cellData && cellData.isSelected) {
             const isNonWorkSelected = !cellData.isAvailable;
             const isLockedCell = isHatCell || isHatActualCell;
-            const cellPattern = isNonWorkSelected ? 'none' : cellData.badge.pattern;
-            const cellPatternSize = isNonWorkSelected ? 'auto' : cellData.badge.patternSize;
+            const isWonCell = cellData.badge.is_won === true && !isNonWorkSelected;
+            const cellPattern = (isNonWorkSelected || isWonCell) ? 'none' : cellData.badge.pattern;
+            const cellPatternSize = (isNonWorkSelected || isWonCell) ? 'auto' : cellData.badge.patternSize;
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''}`}
                 style={{
                   position: 'relative', zIndex: 0,
                   backgroundColor: isNonWorkSelected
@@ -1667,9 +1706,9 @@ const DayRow = React.memo(function DayRow({
                     ? { opacity: 0.75 }
                     : isNonWorkSelected
                       ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
-                      : isHoveredBadgeCell
+                      : isHoveredBadgeCell && !isWonCell
                         ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
-                        : isFocused ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
+                        : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
