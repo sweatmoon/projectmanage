@@ -1,5 +1,5 @@
 from core.database import Base
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 
 
 class Projects(Base):
@@ -14,4 +14,5 @@ class Projects(Base):
     notes        = Column(String,  nullable=True)
     updated_at   = Column(DateTime(timezone=True), nullable=True)
     deleted_at   = Column(DateTime(timezone=True), nullable=True, index=True)  # soft-delete
-    color_hue    = Column(Integer, nullable=True)  # 0~359, HSL 색상환 Hue값
+    color_hue    = Column(Integer, nullable=True)   # 0~359, HSL 색상환 Hue값
+    is_won       = Column(Boolean, nullable=False, default=False)  # 수주여부 (제안 사업만 사용)

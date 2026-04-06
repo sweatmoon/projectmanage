@@ -10,6 +10,8 @@ export interface Project {
   deadline?: string
   notes?: string
   updated_at?: string
+  color_hue?: number
+  is_won?: boolean
 }
 
 export interface Person {

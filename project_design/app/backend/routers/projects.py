@@ -30,6 +30,7 @@ class ProjectsData(BaseModel):
     deadline: Optional[datetime] = None
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_won: bool = False
 
 class ProjectsUpdateData(BaseModel):
     project_name: Optional[str] = None
@@ -38,6 +39,7 @@ class ProjectsUpdateData(BaseModel):
     deadline: Optional[datetime] = None
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_won: Optional[bool] = None
 
 class ProjectsResponse(BaseModel):
     id: int
@@ -48,6 +50,7 @@ class ProjectsResponse(BaseModel):
     notes: Optional[str] = None
     updated_at: Optional[datetime] = None
     color_hue: Optional[int] = None
+    is_won: bool = False
     class Config:
         from_attributes = True
 
@@ -177,6 +180,9 @@ async def update_projectss_batch(
     for item in req.items:
         before = await service.get_by_id(item.id)
         update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
+        # is_won은 False도 유효한 값이므로 별도 처리
+        if item.updates.is_won is not None:
+            update_dict['is_won'] = item.updates.is_won
         r = await service.update(item.id, update_dict)
         if r:
             results.append(r)
@@ -198,8 +204,9 @@ async def update_projects(
     if not before:
         raise HTTPException(status_code=404, detail="Projects not found")
     update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
-    result = await service.update(id, update_dict)
-    event_type = EventType.STATUS_CHANGE if "status" in update_dict else EventType.UPDATE
+    # is_won은 False도 유효한 값이므로 별도 처리
+    if data.is_won is not None:
+        update_dict['is_won'] = data.is_won if "status" in update_dict else EventType.UPDATE
     await write_audit_log(
         db, event_type=event_type, entity_type=EntityType.PROJECT,
         entity_id=id, before_obj=before, after_obj=result, request=request,
