@@ -194,6 +194,7 @@ interface PhaseBadgeInfo {
   label: string;
   color: typeof PROJECT_COLORS[0];
   status: string;
+  is_won?: boolean;
   startDate?: string;
   endDate?: string;
 }
@@ -1555,9 +1556,9 @@ const DayRow = React.memo(function DayRow({
                   changeRecords.length > 0
                     ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, fontSize: 8 }}>
                         <span style={{ color: '#3b82f6', fontWeight: 700 }}>🔁</span>
-                        <span style={{ fontWeight: 700 }}>{cellData.badge.status}</span>
+                        <span style={{ fontWeight: 700 }}>{cellData.badge.is_won ? 'P👑' : cellData.badge.status}</span>
                       </span>
-                    : cellData.badge.status
+                    : (cellData.badge.is_won ? 'P👑' : cellData.badge.status)
                 ))}
               </td>
             );
@@ -2018,6 +2019,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const proj = projectMap.get(ph.project_id);
       const projName = proj?.project_name || '미정';
       const status = proj?.status === '제안' ? 'P' : 'A';
+      const is_won = proj?.status === '제안' && proj?.is_won === true;
       return {
         phaseId: ph.id,
         projectId: ph.project_id,
@@ -2026,6 +2028,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         label: `${projName}_${ph.phase_name}`,
         color: projectColorMap.get(ph.project_id) || PROJECT_COLORS[0],
         status,
+        is_won,
         startDate: ph.start_date,
         endDate: ph.end_date,
       };
