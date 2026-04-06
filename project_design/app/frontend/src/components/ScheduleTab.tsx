@@ -81,6 +81,29 @@ const PROJECT_COLORS = [
   { bg: '#e0e7ff', border: '#6366f1', text: '#3730a3', cell: '#c7d2fe', available: '#eef2ff' },
 ];
 
+/**
+ * 셀 구분을 위한 CSS background-image 무늬 패턴 (8종)
+ * 색상은 rgba로 반투명하게 처리해 배경색과 자연스럽게 어울림
+ */
+const PROJECT_PATTERNS: string[] = [
+  'none',                                                                                          // 0: 패턴 없음 (단색)
+  'repeating-linear-gradient(45deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 4px)',   // 1: 대각선 (/)
+  'repeating-linear-gradient(-45deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 4px)',  // 2: 대각선 (\)
+  'repeating-linear-gradient(0deg, rgba(0,0,0,0.08) 0px, rgba(0,0,0,0.08) 1px, transparent 1px, transparent 5px)',    // 3: 가로줄
+  'repeating-linear-gradient(90deg, rgba(0,0,0,0.08) 0px, rgba(0,0,0,0.08) 1px, transparent 1px, transparent 5px)',   // 4: 세로줄
+  // 5: 격자 (가로+세로)
+  'repeating-linear-gradient(0deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 5px), repeating-linear-gradient(90deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 5px)',
+  // 6: 크로스해치 (대각선 양방향)
+  'repeating-linear-gradient(45deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 5px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 5px)',
+  // 7: 점선 (도트)
+  'radial-gradient(circle, rgba(0,0,0,0.15) 1px, transparent 1px)',
+];
+
+/** 점선(도트) 패턴의 경우 background-size도 필요 */
+const PATTERN_SIZES: string[] = [
+  'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', '5px 5px',
+];
+
 /** HSL hue값으로 PROJECT_COLORS 형태의 색상 객체 생성 */
 function hueToProjectColor(hue: number): typeof PROJECT_COLORS[0] {
   const h = hue;
@@ -193,6 +216,8 @@ interface PhaseBadgeInfo {
   phaseName: string;
   label: string;
   color: typeof PROJECT_COLORS[0];
+  pattern: string;        // CSS background-image 무늬
+  patternSize: string;    // CSS background-size
   status: string;
   is_won?: boolean;
   startDate?: string;
@@ -1377,6 +1402,8 @@ const DayRow = React.memo(function DayRow({
                               className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
                               style={{
                                 backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
+                                backgroundImage: badge.pattern,
+                                backgroundSize: badge.patternSize,
                                 color: badge.color.text,
                                 borderLeft: `3px solid ${badge.color.border}`,
                                 boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
@@ -1418,6 +1445,8 @@ const DayRow = React.memo(function DayRow({
                               className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
                               style={{
                                 backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
+                                backgroundImage: badge.pattern,
+                                backgroundSize: badge.patternSize,
                                 color: badge.color.text,
                                 borderLeft: `3px solid ${badge.color.border}`,
                                 boxShadow: hoveredBadgePhaseId === badge.phaseId ? `0 0 0 2px ${badge.color.border}` : undefined,
@@ -1527,6 +1556,8 @@ const DayRow = React.memo(function DayRow({
           if (cellData && cellData.isSelected) {
             const isNonWorkSelected = !cellData.isAvailable;
             const isLockedCell = isHatCell || isHatActualCell;
+            const cellPattern = isNonWorkSelected ? 'none' : cellData.badge.pattern;
+            const cellPatternSize = isNonWorkSelected ? 'auto' : cellData.badge.patternSize;
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
@@ -1536,6 +1567,8 @@ const DayRow = React.memo(function DayRow({
                   backgroundColor: isNonWorkSelected
                     ? (cellData.isHoliday ? '#fee2e2' : '#f3f4f6')
                     : cellData.badge.color.cell,
+                  backgroundImage: cellPattern,
+                  backgroundSize: cellPatternSize,
                   color: isNonWorkSelected
                     ? (cellData.isHoliday ? '#ef4444' : '#6b7280')
                     : cellData.badge.color.text,
@@ -1575,6 +1608,8 @@ const DayRow = React.memo(function DayRow({
                   backgroundColor: isHatCell
                     ? (cellData.badge.color.available || '#f9fafb')
                     : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
+                  backgroundImage: cellData.badge.pattern,
+                  backgroundSize: cellData.badge.patternSize,
                   width: colWidth, height: rowHeight, padding: 0,
                   borderTop: borderStyle.borderTop,
                   borderBottom: borderStyle.borderBottom,
@@ -1967,6 +2002,26 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return map;
   }, [localProjects]);
 
+  /**
+   * 프로젝트별 무늬 패턴 매핑
+   * - 같은 색상 팔레트(0~7)에서 8개 프로젝트마다 패턴을 순환 할당
+   * - colorPalette 인덱스가 같은 프로젝트끼리도 패턴으로 구분 가능
+   */
+  const projectPatternMap = useMemo(() => {
+    const map = new Map<number, { pattern: string; patternSize: string }>();
+    const uniqueIds = [...new Set(localProjects.map((p) => p.id))];
+    uniqueIds.forEach((pid, idx) => {
+      // 색상 팔레트 8개 * 패턴 8개 = 64개 고유 조합
+      // 패턴 인덱스: 전체 순서를 8로 나눈 몫 (색상 한 바퀴 돌 때마다 다음 패턴)
+      const patternIdx = Math.floor(idx / PROJECT_COLORS.length) % PROJECT_PATTERNS.length;
+      map.set(pid, {
+        pattern: PROJECT_PATTERNS[patternIdx],
+        patternSize: PATTERN_SIZES[patternIdx],
+      });
+    });
+    return map;
+  }, [localProjects]);
+
   const projectMap = useMemo(() => {
     const map = new Map<number, Project>();
     localProjects.forEach((p) => map.set(p.id, p));
@@ -2020,6 +2075,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const projName = proj?.project_name || '미정';
       const status = proj?.status === '제안' ? 'P' : 'A';
       const is_won = proj?.status === '제안' && proj?.is_won === true;
+      const patternInfo = projectPatternMap.get(ph.project_id) ?? { pattern: 'none', patternSize: 'auto' };
       return {
         phaseId: ph.id,
         projectId: ph.project_id,
@@ -2027,13 +2083,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         phaseName: ph.phase_name,
         label: `${projName}_${ph.phase_name}`,
         color: projectColorMap.get(ph.project_id) || PROJECT_COLORS[0],
+        pattern: patternInfo.pattern,
+        patternSize: patternInfo.patternSize,
         status,
         is_won,
         startDate: ph.start_date,
         endDate: ph.end_date,
       };
     });
-  }, [visiblePhases, projectMap, projectColorMap]);
+  }, [visiblePhases, projectMap, projectColorMap, projectPatternMap]);
 
   // Unique project IDs from badges (for checkbox list)
   const badgeProjectIds = useMemo(() => {
