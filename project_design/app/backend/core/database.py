@@ -233,6 +233,39 @@ class DatabaseManager:
         except Exception as e:
             logger.warning(f"Migration _migrate_people_table 중 오류 (무시): {e}")
 
+    async def _migrate_projects_is_won(self):
+        """projects 테이블에 is_won 컬럼을 안전하게 추가 (데이터 보존)"""
+        try:
+            async with self.engine.begin() as conn:
+                db_url = str(self.engine.url)
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='projects' AND column_name='is_won'"
+                        )
+                    )
+                    exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(projects)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    exists = "is_won" in cols
+
+                if not exists:
+                    if "postgresql" in db_url:
+                        await conn.execute(
+                            text("ALTER TABLE projects ADD COLUMN is_won BOOLEAN NOT NULL DEFAULT FALSE")
+                        )
+                    else:
+                        await conn.execute(
+                            text("ALTER TABLE projects ADD COLUMN is_won BOOLEAN NOT NULL DEFAULT 0")
+                        )
+                    logger.info("Migration: projects.is_won 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: projects.is_won 컬럼 이미 존재")
+        except Exception as e:
+            logger.warning(f"Migration _migrate_projects_is_won 중 오류 (무시): {e}")
+
     async def close_db(self):
         """Close database connection and dispose engine
 
@@ -281,6 +314,8 @@ class DatabaseManager:
 
                 # people 테이블 컬럼 마이그레이션 (position 컬럼 추가)
                 await self._migrate_people_table()
+                # projects 테이블 컬럼 마이그레이션 (is_won 컬럼 추가)
+                await self._migrate_projects_is_won()
 
             except (UniqueViolationError, DuplicateTableError) as e:
                 self._initialized = True
