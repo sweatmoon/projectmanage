@@ -1361,6 +1361,106 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
     });
   }, [columns, localStaffing, localPhases, people]);
 
+  /* ───────── Overlap person popup state ───────── */
+  interface OverlapDetail {
+    personId: number;
+    personName: string;
+    grade?: string;
+    team?: string;
+    overlapDays: number;        // 해당 기간 내 중복 영업일 수
+    assignments: {              // 배정된 단계 목록
+      projectId: number;
+      projectName: string;
+      phaseId: number;
+      phaseName: string;
+      field: string;
+      phaseStart: string;
+      phaseEnd: string;
+    }[];
+  }
+
+  const [overlapPopover, setOverlapPopover] = useState<{
+    colIdx: number;
+    items: OverlapDetail[];
+    colLabel: string;
+    periodDays: number;
+    anchorRect: DOMRect | null;
+    search: string;
+    expanded: number | null;   // 펼친 personId
+  } | null>(null);
+
+  /* ───────── Overlap row data: per-column list of people assigned to 2+ phases ───────── */
+  const overlapRowData = useMemo(() => {
+    return columns.map((col) => {
+      if (col.type === 'day') {
+        const dc = col as DayColumn;
+        if (dc.isWeekend || dc.isHoliday) return { items: [] as OverlapDetail[], periodDays: 0 };
+      }
+
+      // 컬럼 기간 정의
+      const colStart = col.type === 'day' ? col.dateStr : (col as WeekColumn).startDate;
+      const colEnd   = col.type === 'day' ? col.dateStr : (col as WeekColumn).endDate;
+      const periodDays = col.type === 'week' ? calcBizDaysHoliday(colStart, colEnd) : 1;
+
+      // person_id → 겹치는 staffing 목록 수집
+      const personAssignments = new Map<number, {
+        projectId: number; projectName: string;
+        phaseId: number; phaseName: string;
+        field: string; phaseStart: string; phaseEnd: string;
+      }[]>();
+
+      for (const s of localStaffing) {
+        if (!s.person_id) continue;
+        const ph = localPhases.find((p) => p.id === s.phase_id);
+        if (!ph) continue;
+        const phStart = ph.start_date || '2000-01-01';
+        const phEnd   = ph.end_date   || '2099-12-31';
+        const overlaps = phStart <= colEnd && phEnd >= colStart;
+        if (!overlaps) continue;
+
+        const proj = localProjects.find((p) => p.id === s.project_id);
+        if (!personAssignments.has(s.person_id)) personAssignments.set(s.person_id, []);
+        personAssignments.get(s.person_id)!.push({
+          projectId:   proj?.id ?? s.project_id,
+          projectName: proj?.project_name ?? '(미정)',
+          phaseId:     ph.id,
+          phaseName:   ph.phase_name,
+          field:       s.field || '',
+          phaseStart:  ph.start_date || '',
+          phaseEnd:    ph.end_date   || '',
+        });
+      }
+
+      // 2개 이상 배정된 인력만 추출 → 가나다 정렬
+      const items: OverlapDetail[] = [];
+      for (const [personId, assignments] of personAssignments.entries()) {
+        if (assignments.length < 2) continue;
+        const person = people.find((p) => p.id === personId);
+        // 중복 영업일: 해당 기간에서 실제로 겹치는 일 수
+        const overlapDays = col.type === 'week'
+          ? calcBizDaysHoliday(
+              assignments.reduce((a, b) => a.phaseStart > b.phaseStart ? b : a).phaseStart > colStart
+                ? assignments.reduce((a, b) => a.phaseStart > b.phaseStart ? b : a).phaseStart
+                : colStart,
+              assignments.reduce((a, b) => a.phaseEnd < b.phaseEnd ? b : a).phaseEnd < colEnd
+                ? assignments.reduce((a, b) => a.phaseEnd < b.phaseEnd ? b : a).phaseEnd
+                : colEnd
+            )
+          : 1;
+        items.push({
+          personId,
+          personName: person?.person_name ?? '(미상)',
+          grade: person?.grade,
+          team:  person?.team,
+          overlapDays,
+          assignments,
+        });
+      }
+      items.sort((a, b) => a.personName.localeCompare(b.personName, 'ko'));
+      return { items, periodDays };
+    });
+  }, [columns, localStaffing, localPhases, localProjects, people]);
+
   const toggleProjectExpand = (projectId: number) => {
     setExpandedProjectIds((prev) => {
       const next = new Set(prev);
@@ -1770,6 +1870,11 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     style={{ height: ROW_H }}>
                     <span className="text-[11px] font-semibold text-slate-500">유휴 인력</span>
                   </div>
+                  {/* 중복 인력 행 */}
+                  <div className="flex items-center px-3 border-t border-slate-200 bg-orange-50"
+                    style={{ height: ROW_H }}>
+                    <span className="text-[11px] font-semibold text-orange-600">중복 인력</span>
+                  </div>
                 </div>
               </div>
 
@@ -2089,6 +2194,60 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                       })}
                     </div>
 
+                    {/* ── 중복 인력 행 ── */}
+                    <div className="border-t border-slate-200 relative bg-orange-50/40"
+                      style={{ height: ROW_H }}>
+                      {columns.map((col, ci) => {
+                        const rowData = overlapRowData[ci];
+                        if (!rowData) return null;
+                        const { items, periodDays } = rowData;
+                        const count = items.length;
+
+                        if (col.type === 'day') {
+                          const dc = col as DayColumn;
+                          if (dc.isWeekend || dc.isHoliday) return null;
+                          if (count === 0) return null;
+                          const colLabel = `${dc.month}/${dc.day}`;
+                          return (
+                            <button
+                              key={ci}
+                              type="button"
+                              className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-orange-700 hover:bg-orange-200 rounded transition-colors"
+                              style={{ left: ci * COL_WIDTH + 1, width: COL_WIDTH - 2, top: 4, height: ROW_H - 8, backgroundColor: 'rgba(254,215,170,0.85)', zIndex: 5 }}
+                              title={`중복 인력 ${count}명`}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setOverlapPopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, items, colLabel, periodDays: 1, anchorRect: rect, search: '', expanded: null });
+                              }}
+                            >
+                              {count}
+                            </button>
+                          );
+                        }
+                        if (col.type === 'week') {
+                          const wc = col as WeekColumn;
+                          if (count === 0) return null;
+                          const colLabel = wc.label;
+                          return (
+                            <button
+                              key={ci}
+                              type="button"
+                              className="absolute flex items-center justify-center cursor-pointer text-[9px] font-bold text-orange-700 hover:bg-orange-200 rounded transition-colors"
+                              style={{ left: ci * COL_WIDTH + 1, width: COL_WIDTH - 2, top: 4, height: ROW_H - 8, backgroundColor: 'rgba(254,215,170,0.85)', zIndex: 5 }}
+                              title={`중복 인력 ${count}명`}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setOverlapPopover((prev) => prev?.colIdx === ci ? null : { colIdx: ci, items, colLabel, periodDays, anchorRect: rect, search: '', expanded: null });
+                              }}
+                            >
+                              {count}
+                            </button>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+
                   </div>{/* 바디 끝 */}
                 </div>{/* 타임라인 너비 끝 */}
               </div>{/* 오른쪽 패널 끝 */}
@@ -2153,6 +2312,113 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 중복 인력 팝오버 */}
+      {overlapPopover && (() => {
+        const filtered = overlapPopover.items.filter((item) =>
+          item.personName.includes(overlapPopover.search) ||
+          (item.team || '').includes(overlapPopover.search) ||
+          (item.grade || '').includes(overlapPopover.search)
+        );
+        return (
+          <div
+            className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-orange-200 w-[320px]"
+            style={{
+              top: Math.min(overlapPopover.anchorRect?.bottom ?? 0, window.innerHeight - 420) + 4,
+              left: Math.min(overlapPopover.anchorRect?.left ?? 0, window.innerWidth - 330),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-orange-100 bg-orange-50 rounded-t-lg">
+              <div>
+                <span className="text-xs font-semibold text-orange-800">
+                  중복 인력 ({overlapPopover.items.length}명)
+                </span>
+                <span className="ml-1.5 text-[10px] text-orange-600 font-medium">
+                  · {overlapPopover.colLabel} ({overlapPopover.periodDays}일 기준)
+                </span>
+              </div>
+              <button className="text-gray-400 hover:text-gray-700 ml-2 flex-shrink-0"
+                onClick={() => setOverlapPopover(null)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {/* 검색 */}
+            <div className="px-2 py-1.5 border-b border-orange-100">
+              <input
+                type="text"
+                placeholder="이름/팀/등급 검색..."
+                value={overlapPopover.search}
+                onChange={(e) => setOverlapPopover((prev) => prev ? { ...prev, search: e.target.value } : prev)}
+                className="w-full h-7 px-2 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-orange-400"
+                autoFocus
+              />
+            </div>
+            {/* 목록 */}
+            <div className="max-h-72 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-3 text-xs text-gray-400 text-center">검색 결과 없음</div>
+              ) : filtered.map((item) => {
+                const isExpanded = overlapPopover.expanded === item.personId;
+                return (
+                  <div key={item.personId} className="border-b border-gray-50 last:border-0">
+                    {/* 인력 행 — 클릭 시 상세 토글 */}
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-orange-50 transition-colors text-left"
+                      onClick={() => setOverlapPopover((prev) => prev
+                        ? { ...prev, expanded: isExpanded ? null : item.personId }
+                        : prev
+                      )}
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
+                      <span className="text-xs text-gray-800 font-medium flex-1">{item.personName}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {item.grade && <span className="text-[10px] text-gray-400">{item.grade}</span>}
+                        <span className="text-[10px] font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-1 py-0.5 rounded">
+                          {item.assignments.length}개 사업
+                        </span>
+                        <span className="text-[10px] text-orange-500">{isExpanded ? '▲' : '▼'}</span>
+                      </div>
+                    </button>
+                    {/* 상세 — 사업/단계/역할 목록 */}
+                    {isExpanded && (
+                      <div className="mx-3 mb-2 rounded-md border border-orange-100 bg-orange-50/60 overflow-hidden">
+                        {item.assignments.map((a, ai) => {
+                          const projColor = projectColorMap.get(a.projectId) || PROJECT_COLORS[0];
+                          // 이 단계에서 해당 컬럼 기간과 겹치는 영업일 수
+                          const colStart = overlapPopover.colLabel; // 표시용
+                          return (
+                            <div key={ai} className="flex items-start gap-2 px-2 py-1.5 border-b border-orange-100 last:border-0">
+                              <div className="w-2 h-2 rounded-sm flex-shrink-0 mt-0.5"
+                                style={{ backgroundColor: projColor.border }} />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] font-semibold text-gray-700 truncate" title={a.projectName}>
+                                  {a.projectName}
+                                </div>
+                                <div className="text-[10px] text-gray-500 truncate">
+                                  {a.phaseName} · <span className="text-blue-600">{a.field}</span>
+                                </div>
+                                <div className="text-[9px] text-gray-400">
+                                  {a.phaseStart} ~ {a.phaseEnd}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="px-2 py-1 bg-orange-100/60 text-[10px] text-orange-700 font-semibold">
+                          ⚠️ {item.assignments.length}개 사업에 동시 배정 — {item.overlapDays}일 중복
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
