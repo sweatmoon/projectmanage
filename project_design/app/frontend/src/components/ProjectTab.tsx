@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { useUserRole } from '@/hooks/useUserRole';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -15,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Search, FolderOpen, Building2, Trash2 } from 'lucide-react';
+import { Search, FolderOpen, Building2, Trash2, ChevronDown, ChevronRight, Crown, ClipboardList, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { client } from '@/lib/api';
 
@@ -27,6 +26,7 @@ interface Project {
   deadline?: string;
   notes?: string;
   updated_at?: string;
+  is_won?: boolean;
 }
 
 interface ProjectTabProps {
@@ -36,16 +36,21 @@ interface ProjectTabProps {
   onRefresh?: () => void;
 }
 
-const statusConfig: Record<string, { label: string; className: string; sectionLabel: string }> = {
-  '감리': { label: '감리', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100', sectionLabel: '📋 감리 사업' },
-  '제안': { label: '제안', className: 'bg-amber-100 text-amber-700 hover:bg-amber-100', sectionLabel: '📝 제안 사업' },
-};
+// 가나다순 정렬
+function sortKorean(a: Project, b: Project) {
+  return a.project_name.localeCompare(b.project_name, 'ko');
+}
 
 export default function ProjectTab({ projects, loading, onSelectProject, onRefresh }: ProjectTabProps) {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 섹션 접기/펼치기 상태
+  const [gamriOpen, setGamriOpen] = useState(true);
+  const [jeanOpen, setJeanOpen] = useState(true);
+  const [wonOpen, setWonOpen] = useState(true);
+
   const { canWrite, isViewer } = useUserRole();
 
   const filtered = projects.filter(
@@ -54,9 +59,10 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
       p.organization?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Group by status
-  const gamriProjects = filtered.filter((p) => p.status === '감리');
-  const jeanProjects = filtered.filter((p) => p.status === '제안');
+  // 그룹 분류
+  const gamriProjects = filtered.filter((p) => p.status === '감리').sort(sortKorean);
+  const jeanProjects = filtered.filter((p) => p.status === '제안' && !p.is_won).sort(sortKorean);
+  const wonProjects = filtered.filter((p) => p.status === '제안' && p.is_won).sort(sortKorean);
 
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => {
@@ -86,10 +92,8 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
     try {
       const idsToDelete = Array.from(selectedIds);
 
-      // 각 프로젝트를 개별 삭제 (soft-delete → 감사 로그 자동 기록)
       for (const pid of idsToDelete) {
         try {
-          // 관련 단계/투입공수 먼저 소프트 삭제
           const phasesRes = await client.entities.phases.query({ query: { project_id: pid }, limit: 100 });
           const phaseItems = phasesRes?.data?.items || [];
           const allStaffIds: number[] = [];
@@ -107,7 +111,6 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
             client.entities.phases.delete({ id: String(phase.id) }).catch(() => {})
           ));
         } catch { /* continue */ }
-        // 프로젝트 소프트 삭제 — 감사 로그에 기록됨
         await client.entities.projects.delete({ id: String(pid) });
       }
 
@@ -123,80 +126,129 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
     }
   };
 
-  const renderProjectList = (projectList: Project[], sectionLabel: string, borderColor: string) => {
-    if (projectList.length === 0) return null;
-    const allSelected = projectList.every((p) => selectedIds.has(p.id));
-    const someSelected = projectList.some((p) => selectedIds.has(p.id));
+  // 개별 프로젝트 카드 렌더링
+  const renderProjectCard = (project: Project, accentColor: string) => {
+    const isSelected = selectedIds.has(project.id);
+    const isWon = !!project.is_won;
 
     return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-3 px-1">
-          <Checkbox
-            checked={allSelected}
-            ref={(el) => {
-              if (el) {
-                const input = el as unknown as HTMLButtonElement;
-                input.dataset.indeterminate = String(someSelected && !allSelected);
-              }
-            }}
-            onCheckedChange={() => toggleSelectAll(projectList)}
-            className="h-4 w-4"
-          />
-          <h3 className="text-sm font-bold text-slate-700">{sectionLabel}</h3>
-          <Badge variant="outline" className="text-[10px]">{projectList.length}건</Badge>
-        </div>
-        {projectList.map((project) => {
-          const sc = statusConfig[project.status] || statusConfig['감리'];
-          const isSelected = selectedIds.has(project.id);
-          return (
-            <Card
-              key={project.id}
-              className={`hover:shadow-md transition-shadow border-l-4 ${isSelected ? 'ring-2 ring-blue-300 bg-blue-50/30' : ''}`}
-              style={{ borderLeftColor: borderColor }}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={() => toggleSelect(project.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-4 w-4 flex-shrink-0"
-                  />
-                  <div
-                    className="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => onSelectProject(project.id)}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      <h3 className="font-semibold text-sm truncate">{project.project_name}</h3>
-                      <Badge className={sc.className}>{sc.label}</Badge>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Building2 className="h-3 w-3" />
-                        {project.organization}
-                      </span>
-                      {project.notes && (
-                        <span className="truncate max-w-[200px]">{project.notes}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+      <div
+        key={project.id}
+        className={`
+          flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-all cursor-pointer
+          ${isSelected ? 'ring-2 ring-blue-300 bg-blue-50/40 border-blue-200' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}
+          ${isWon ? 'bg-gradient-to-r from-amber-50/60 to-yellow-50/40' : ''}
+        `}
+        style={{ borderLeftWidth: '3px', borderLeftColor: accentColor }}
+        onClick={() => onSelectProject(project.id)}
+      >
+        {/* 체크박스 */}
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={() => toggleSelect(project.id)}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 flex-shrink-0"
+        />
+
+        {/* 폴더 아이콘 */}
+        <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" style={{ color: accentColor }} />
+
+        {/* 사업명 */}
+        <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate">
+          {project.project_name}
+        </span>
+
+        {/* 기관명 */}
+        <span className="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0 max-w-[120px] truncate">
+          <Building2 className="h-3 w-3 flex-shrink-0" />
+          {project.organization}
+        </span>
+
+        {/* 수주 배지 */}
+        {isWon && (
+          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 flex-shrink-0">
+            <Crown className="h-2.5 w-2.5" />
+            수주
+          </span>
+        )}
+
+        {/* 비고 */}
+        {project.notes && (
+          <span className="text-[10px] text-slate-400 flex-shrink-0 max-w-[100px] truncate hidden sm:block" title={project.notes}>
+            {project.notes}
+          </span>
+        )}
       </div>
     );
   };
 
+  // 섹션 헤더 렌더링
+  const renderSectionHeader = (
+    label: string,
+    icon: React.ReactNode,
+    count: number,
+    totalCount: number,
+    open: boolean,
+    onToggle: () => void,
+    color: string,
+    bgColor: string,
+    projectList: Project[],
+    showSelectAll = true
+  ) => {
+    const allSelected = projectList.length > 0 && projectList.every((p) => selectedIds.has(p.id));
+    const someSelected = projectList.some((p) => selectedIds.has(p.id));
+
+    return (
+      <div
+        className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer select-none"
+        style={{ backgroundColor: bgColor }}
+        onClick={onToggle}
+      >
+        {/* 체크박스 전체 선택 */}
+        {showSelectAll && projectList.length > 0 && (
+          <Checkbox
+            checked={allSelected}
+            data-indeterminate={someSelected && !allSelected ? 'true' : undefined}
+            onCheckedChange={() => toggleSelectAll(projectList)}
+            onClick={(e) => e.stopPropagation()}
+            className="h-3.5 w-3.5 flex-shrink-0"
+          />
+        )}
+        {/* 접기/펼치기 아이콘 */}
+        {open
+          ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" style={{ color }} />
+          : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" style={{ color }} />
+        }
+        {/* 섹션 아이콘 + 레이블 */}
+        {icon}
+        <span className="text-sm font-bold" style={{ color }}>{label}</span>
+        {/* 건수 배지 */}
+        <span
+          className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+          style={{ backgroundColor: color + '22', color }}
+        >
+          {count}건
+        </span>
+        {/* 검색 결과가 전체와 다를 때 전체 표시 */}
+        {search && count !== totalCount && (
+          <span className="text-[10px] text-slate-400">(전체 {totalCount}건)</span>
+        )}
+      </div>
+    );
+  };
+
+  const totalGamri = projects.filter(p => p.status === '감리').length;
+  const totalJean = projects.filter(p => p.status === '제안' && !p.is_won).length;
+  const totalWon = projects.filter(p => p.status === '제안' && p.is_won).length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* 검색 + 삭제 버튼 */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="프로젝트명 또는 기관명으로 검색..."
+            placeholder="사업명 또는 기관명으로 검색..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -216,14 +268,131 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
         )}
       </div>
 
+      {/* 전체 요약 바 */}
+      {!loading && filtered.length > 0 && (
+        <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-500">
+          <span>전체 <strong className="text-slate-700">{filtered.length}</strong>건</span>
+          <span className="text-slate-300">|</span>
+          <span className="text-blue-600">감리 <strong>{gamriProjects.length}</strong></span>
+          <span className="text-slate-300">|</span>
+          <span className="text-amber-600">제안 <strong>{jeanProjects.length}</strong></span>
+          {wonProjects.length > 0 && (
+            <>
+              <span className="text-slate-300">|</span>
+              <span className="text-yellow-600">👑 수주 <strong>{wonProjects.length}</strong></span>
+            </>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-12 text-muted-foreground">로딩 중...</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">프로젝트가 없습니다.</div>
+        <div className="text-center py-12 text-muted-foreground">
+          {search ? `"${search}"에 해당하는 프로젝트가 없습니다.` : '프로젝트가 없습니다.'}
+        </div>
       ) : (
-        <div className="space-y-6">
-          {renderProjectList(gamriProjects, '📋 감리 사업', '#2563EB')}
-          {renderProjectList(jeanProjects, '📝 제안 사업', '#D97706')}
+        <div className="space-y-3">
+
+          {/* ── 감리 사업 섹션 ── */}
+          {(gamriProjects.length > 0 || totalGamri > 0) && (
+            <div className="rounded-xl border border-blue-100 overflow-hidden">
+              {renderSectionHeader(
+                '감리 사업',
+                <ClipboardList className="h-3.5 w-3.5 flex-shrink-0 text-blue-600" />,
+                gamriProjects.length,
+                totalGamri,
+                gamriOpen,
+                () => setGamriOpen(v => !v),
+                '#2563EB',
+                '#EFF6FF',
+                gamriProjects
+              )}
+              {gamriOpen && gamriProjects.length > 0 && (
+                <div className="p-2 space-y-1 bg-white">
+                  {gamriProjects.map(p => renderProjectCard(p, '#2563EB'))}
+                </div>
+              )}
+              {gamriOpen && gamriProjects.length === 0 && search && (
+                <div className="py-3 text-center text-xs text-slate-400 bg-white">검색 결과 없음</div>
+              )}
+            </div>
+          )}
+
+          {/* ── 제안 사업 섹션 ── */}
+          {(jeanProjects.length > 0 || wonProjects.length > 0 || totalJean > 0 || totalWon > 0) && (
+            <div className="rounded-xl border border-amber-100 overflow-hidden">
+              {/* 제안 섹션 헤더 – 제안 + 수주 전체 카운트 */}
+              {renderSectionHeader(
+                '제안 사업',
+                <FileText className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />,
+                jeanProjects.length + wonProjects.length,
+                totalJean + totalWon,
+                jeanOpen,
+                () => setJeanOpen(v => !v),
+                '#D97706',
+                '#FFFBEB',
+                [...jeanProjects, ...wonProjects]
+              )}
+
+              {jeanOpen && (
+                <div className="bg-white">
+                  {/* 수주 완료 하위 그룹 */}
+                  {(wonProjects.length > 0 || totalWon > 0) && (
+                    <div className="mx-2 mt-2 mb-1 rounded-lg border border-yellow-200 overflow-hidden">
+                      {/* 수주 소헤더 */}
+                      <div
+                        className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none"
+                        style={{ background: 'linear-gradient(90deg, #fef9c3 0%, #fef3c7 100%)' }}
+                        onClick={() => setWonOpen(v => !v)}
+                      >
+                        {wonProjects.length > 0 && (
+                          <Checkbox
+                            checked={wonProjects.every(p => selectedIds.has(p.id))}
+                            data-indeterminate={wonProjects.some(p => selectedIds.has(p.id)) && !wonProjects.every(p => selectedIds.has(p.id)) ? 'true' : undefined}
+                            onCheckedChange={() => toggleSelectAll(wonProjects)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-3.5 w-3.5 flex-shrink-0"
+                          />
+                        )}
+                        {wonOpen
+                          ? <ChevronDown className="h-3 w-3 text-yellow-600 flex-shrink-0" />
+                          : <ChevronRight className="h-3 w-3 text-yellow-600 flex-shrink-0" />
+                        }
+                        <Crown className="h-3.5 w-3.5 text-yellow-600 flex-shrink-0" />
+                        <span className="text-xs font-bold text-yellow-700">수주 완료</span>
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-yellow-200 text-yellow-700">
+                          {wonProjects.length}건
+                        </span>
+                        {search && wonProjects.length !== totalWon && (
+                          <span className="text-[10px] text-slate-400">(전체 {totalWon}건)</span>
+                        )}
+                      </div>
+                      {wonOpen && wonProjects.length > 0 && (
+                        <div className="p-2 space-y-1 bg-white">
+                          {wonProjects.map(p => renderProjectCard(p, '#D97706'))}
+                        </div>
+                      )}
+                      {wonOpen && wonProjects.length === 0 && search && (
+                        <div className="py-2 text-center text-xs text-slate-400 bg-white">검색 결과 없음</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 일반 제안 목록 */}
+                  {jeanProjects.length > 0 && (
+                    <div className="p-2 space-y-1">
+                      {jeanProjects.map(p => renderProjectCard(p, '#D97706'))}
+                    </div>
+                  )}
+                  {jeanProjects.length === 0 && search && wonProjects.length === 0 && (
+                    <div className="py-3 text-center text-xs text-slate-400">검색 결과 없음</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       )}
 
