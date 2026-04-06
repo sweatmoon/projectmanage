@@ -972,7 +972,13 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
     const projectUpdates = { project_name: projectName, organization, status: projectStatus };
     const phaseUpdates = { phase_name: phaseName, start_date: startDate || undefined, end_date: endDate || undefined };
 
-    // 인력이 실제로 바뀐 항목 감지
+    // 제안 사업은 인력 변경 이력 관리 불필요 → 바로 저장
+    if (projectStatus === '제안') {
+      onSave(projectUpdates, phaseUpdates, staffingChanges.length > 0 ? staffingChanges : undefined);
+      return;
+    }
+
+    // 인력이 실제로 바뀐 항목 감지 (감리 사업만)
     const personChangedItems = staffingChanges
       .filter((c) => !c.deleteStaffing)
       .map((c) => {
@@ -1190,8 +1196,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                               <span className="text-[9px] text-muted-foreground">MD</span>
                             </div>
                             {readOnly ? (
-                              /* 읽기전용: 모자 씌워진 경우만 표시 */
-                              hatMap.has(s.id) ? (
+                              /* 읽기전용: 모자(감리만 표시) */
+                              projectStatus !== '제안' && hatMap.has(s.id) ? (
                                 <span
                                   className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0"
                                   title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대신 투입 중`}
@@ -1211,40 +1217,41 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
                               </button>
                             ) : (
                               <>
-                                {/* 🎩 모자 버튼 */}
-                                {hatEditId === s.id ? (
-                                  <HatPersonCombobox
-                                    currentName={hatMap.get(s.id)?.actual_person_name || ''}
-                                    allPeople={allPeople}
-                                    onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
-                                    onClear={() => saveHatInline(s.id, '', null)}
-                                    onCancel={() => setHatEditId(null)}
-                                  />
-                                ) : (
-                                  hatMap.has(s.id) ? (
-                                    /* 모자 씌워진 상태: 이름 + 아이콘 함께 표시, 클릭하면 수정 */
-                                    <button
-                                      type="button"
-                                      onClick={() => openHatInline(s.id)}
-                                      title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
-                                      className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors"
-                                    >
-                                      <HardHat className="h-3 w-3 flex-shrink-0" />
-                                      <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
-                                    </button>
+                                {/* 🎩 모자 버튼 — 제안 사업에서는 숨김 */}
+                                {projectStatus !== '제안' && (
+                                  hatEditId === s.id ? (
+                                    <HatPersonCombobox
+                                      currentName={hatMap.get(s.id)?.actual_person_name || ''}
+                                      allPeople={allPeople}
+                                      onChange={(personId, personName) => saveHatInline(s.id, personName, personId)}
+                                      onClear={() => saveHatInline(s.id, '', null)}
+                                      onCancel={() => setHatEditId(null)}
+                                    />
                                   ) : (
-                                    /* 모자 없는 상태: 아이콘만 */
-                                    <button
-                                      type="button"
-                                      onClick={() => openHatInline(s.id)}
-                                      title="모자(대체인력) 씌우기"
-                                      className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50"
-                                    >
-                                      <HardHat className="h-3.5 w-3.5" />
-                                    </button>
+                                    hatMap.has(s.id) ? (
+                                      /* 모자 씌워진 상태: 이름 + 아이콘 함께 표시, 클릭하면 수정 */
+                                      <button
+                                        type="button"
+                                        onClick={() => openHatInline(s.id)}
+                                        title={`🎩 ${hatMap.get(s.id)?.actual_person_name} 대체 중 — 클릭하여 수정`}
+                                        className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0 hover:bg-orange-100 transition-colors"
+                                      >
+                                        <HardHat className="h-3 w-3 flex-shrink-0" />
+                                        <span className="max-w-[60px] truncate">{hatMap.get(s.id)?.actual_person_name}</span>
+                                      </button>
+                                    ) : (
+                                      /* 모자 없는 상태: 아이콘만 */
+                                      <button
+                                        type="button"
+                                        onClick={() => openHatInline(s.id)}
+                                        title="모자(대체인력) 씌우기"
+                                        className="p-1 rounded flex-shrink-0 transition-colors text-slate-300 hover:text-slate-500 hover:bg-slate-50"
+                                      >
+                                        <HardHat className="h-3.5 w-3.5" />
+                                      </button>
+                                    )
                                   )
                                 )}
-                                {/* 🔁 공식 인력 변경 버튼 */}
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteStaffing(s.id)}
@@ -1266,8 +1273,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
           </div>
         </div>
 
-        {/* 🔁 공식 인력 변경 이력 섹션 (뷰어도 볼 수 있음) */}
-        {changeHistoryLoaded && changeHistory.length > 0 && (
+        {/* 🔁 공식 인력 변경 이력 섹션 — 제안 사업에는 표시 안 함 */}
+        {projectStatus !== '제안' && changeHistoryLoaded && changeHistory.length > 0 && (
           <div className="px-5 pb-3">
             <h4 className="text-[11px] font-semibold text-blue-600 flex items-center gap-1 mb-2">
               <ArrowLeftRight className="h-3 w-3" />
