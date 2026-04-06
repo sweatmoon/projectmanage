@@ -70,15 +70,54 @@ interface ScheduleTabProps {
 }
 
 /* ───────── Color Palette ───────── */
+
+/**
+ * hex 색상 → WCAG 상대 휘도 (0~1)
+ */
+function hexLuminance(hex: string): number {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  const toLinear = (v: number) => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+/**
+ * cell 배경색(hex) 기준으로 WCAG 고대비 텍스트 색상 결정
+ * - 흰색(#fff) vs 어두운 계열 중 대비비가 높은 쪽 반환
+ * - 어두운 쪽은 border 색상을 기준으로 명도를 낮춰 사용
+ */
+function contrastTextForCell(cellHex: string, borderHex: string): string {
+  const bgLum = hexLuminance(cellHex);
+  const darkLum = hexLuminance(borderHex) * 0.15; // border 색의 극단적 어두운 버전 근사
+  const contrastWhite = (1.0 + 0.05) / (bgLum + 0.05);
+  const contrastDark  = (bgLum + 0.05) / (Math.min(darkLum, 0.05) + 0.05);
+  if (contrastWhite >= contrastDark) return '#ffffff';
+  // 어두운 텍스트: border 색을 기반으로 명도를 대폭 낮춤
+  // hex → 직접 darken은 복잡하므로 border가 충분히 어두우면 그대로 사용
+  const borderLum = hexLuminance(borderHex);
+  return borderLum < 0.18 ? borderHex : darkenHex(borderHex, 0.35);
+}
+
+/** hex 색상의 RGB 채널을 factor 배로 어둡게 */
+function darkenHex(hex: string, factor: number): string {
+  const h = hex.replace('#', '');
+  const r = Math.round(parseInt(h.slice(0, 2), 16) * factor);
+  const g = Math.round(parseInt(h.slice(2, 4), 16) * factor);
+  const b = Math.round(parseInt(h.slice(4, 6), 16) * factor);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 const PROJECT_COLORS = [
-  { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af', cell: '#bfdbfe', available: '#eff6ff' },
-  { bg: '#d1fae5', border: '#10b981', text: '#065f46', cell: '#a7f3d0', available: '#ecfdf5' },
-  { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', cell: '#fde68a', available: '#fffbeb' },
-  { bg: '#ede9fe', border: '#8b5cf6', text: '#5b21b6', cell: '#c4b5fd', available: '#f5f3ff' },
-  { bg: '#ffe4e6', border: '#f43f5e', text: '#9f1239', cell: '#fecdd3', available: '#fff1f2' },
-  { bg: '#cffafe', border: '#06b6d4', text: '#155e75', cell: '#a5f3fc', available: '#ecfeff' },
-  { bg: '#ffedd5', border: '#f97316', text: '#9a3412', cell: '#fed7aa', available: '#fff7ed' },
-  { bg: '#e0e7ff', border: '#6366f1', text: '#3730a3', cell: '#c7d2fe', available: '#eef2ff' },
+  { bg: '#dbeafe', border: '#3b82f6', text: contrastTextForCell('#bfdbfe', '#3b82f6'), cell: '#bfdbfe', available: '#eff6ff' },
+  { bg: '#d1fae5', border: '#10b981', text: contrastTextForCell('#a7f3d0', '#10b981'), cell: '#a7f3d0', available: '#ecfdf5' },
+  { bg: '#fef3c7', border: '#f59e0b', text: contrastTextForCell('#fde68a', '#f59e0b'), cell: '#fde68a', available: '#fffbeb' },
+  { bg: '#ede9fe', border: '#8b5cf6', text: contrastTextForCell('#c4b5fd', '#8b5cf6'), cell: '#c4b5fd', available: '#f5f3ff' },
+  { bg: '#ffe4e6', border: '#f43f5e', text: contrastTextForCell('#fecdd3', '#f43f5e'), cell: '#fecdd3', available: '#fff1f2' },
+  { bg: '#cffafe', border: '#06b6d4', text: contrastTextForCell('#a5f3fc', '#06b6d4'), cell: '#a5f3fc', available: '#ecfeff' },
+  { bg: '#ffedd5', border: '#f97316', text: contrastTextForCell('#fed7aa', '#f97316'), cell: '#fed7aa', available: '#fff7ed' },
+  { bg: '#e0e7ff', border: '#6366f1', text: contrastTextForCell('#c7d2fe', '#6366f1'), cell: '#c7d2fe', available: '#eef2ff' },
 ];
 
 /**
@@ -104,6 +143,49 @@ const PATTERN_SIZES: string[] = [
   'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', '5px 5px',
 ];
 
+/**
+ * HSL → 상대 휘도(relative luminance) 변환 (WCAG 2.1 기준)
+ * l: 0~100 (HSL lightness %), s: 0~100 (HSL saturation %)
+ * 근사값: 채도가 낮을수록 L ≈ 휘도에 가까워짐
+ */
+function hslLuminance(h: number, s: number, l: number): number {
+  // HSL → sRGB
+  const sl = s / 100;
+  const ll = l / 100;
+  const c = (1 - Math.abs(2 * ll - 1)) * sl;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = ll - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60)       { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else              { r = c; g = 0; b = x; }
+  const toLinear = (v: number) => {
+    const sv = v + m;
+    return sv <= 0.03928 ? sv / 12.92 : Math.pow((sv + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+/**
+ * WCAG 대비비 기반으로 배경색 대비가 높은 텍스트 색상 반환
+ * 흰색(#fff, 휘도 1.0) vs 짙은 색(해당 hue 15% 명도, 높은 채도) 중 선택
+ */
+function highContrastText(h: number, bgS: number, bgL: number): string {
+  const bgLum = hslLuminance(h, bgS, bgL);
+  // 흰색 대비비
+  const contrastWhite = (1.0 + 0.05) / (bgLum + 0.05);
+  // 짙은 색 (같은 hue, 채도 80%, 명도 15%) 대비비
+  const darkLum = hslLuminance(h, 80, 15);
+  const contrastDark = (bgLum + 0.05) / (darkLum + 0.05);
+  // 더 높은 대비비 쪽 선택
+  return contrastWhite >= contrastDark
+    ? '#ffffff'
+    : `hsl(${h}, 80%, 15%)`;
+}
+
 /** HSL hue값으로 PROJECT_COLORS 형태의 색상 객체 생성 */
 function hueToProjectColor(hue: number): typeof PROJECT_COLORS[0] {
   const h = hue;
@@ -111,7 +193,7 @@ function hueToProjectColor(hue: number): typeof PROJECT_COLORS[0] {
   return {
     bg:        hsl(70, 90),
     border:    hsl(70, 48),
-    text:      hsl(70, 25),
+    text:      highContrastText(h, 70, 80),   // cell 배경 기준 고대비 텍스트
     cell:      hsl(70, 80),
     available: hsl(70, 96),
   };
