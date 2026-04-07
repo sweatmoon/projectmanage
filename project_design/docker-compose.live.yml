@@ -1,0 +1,131 @@
+# ============================================================
+# docker-compose.live.yml  ← 라이브(운영) 환경 오버라이드
+# ============================================================
+# 스테이징(docker-compose.prod.yml)과 분리된 라이브 서버 구성
+#
+# 사용법:
+#   docker compose -f docker-compose.yml -f docker-compose.live.yml up -d
+#
+# 환경변수는 .env.live 파일로 관리 (절대 Git에 커밋하지 마세요!)
+#   cp .env.live.example .env.live
+#   vi .env.live   ← 실제 값 입력 후 저장
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Docker Hub 이미지 태그 전략
+#   main  브랜치 → sweatmoon/gantt-app:latest       ← 스테이징
+#   live  브랜치 → sweatmoon/gantt-app:live         ← 라이브
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+version: '3.9'
+
+services:
+
+  app:
+    # 라이브 전용 이미지 태그 사용 (latest 와 분리)
+    image: sweatmoon/gantt-app:${IMAGE_TAG:-live}
+    container_name: gantt-app-live
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "${APP_HOST_PORT:-8090}:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgresql+asyncpg://gantt:${POSTGRES_PASSWORD}@db-live:5432/ganttdb_live
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-8}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - APP_URL=${APP_URL}
+      - ADMIN_USERS=${ADMIN_USERS:-}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    networks:
+      - gantt-live-net
+    depends_on:
+      db-live:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── 라이브 전용 PostgreSQL DB ────────────────────────────
+  db-live:
+    image: postgres:16-alpine
+    container_name: gantt-db-live
+    restart: unless-stopped
+    networks:
+      - gantt-live-net
+    volumes:
+      - postgres_live_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=ganttdb_live
+      - POSTGRES_USER=gantt
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - TZ=Asia/Seoul
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gantt -d ganttdb_live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── 라이브 DB 자동 백업 ──────────────────────────────────
+  backup-live:
+    image: postgres:16-alpine
+    container_name: gantt-backup-live
+    restart: unless-stopped
+    networks:
+      - gantt-live-net
+    volumes:
+      - backup_live_data:/backups
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - BACKUP_KEEP_DAYS=${BACKUP_KEEP_DAYS:-30}
+      - TZ=Asia/Seoul
+    depends_on:
+      db-live:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c",
+      "echo '[시작] db-live 준비 대기 중...';
+       until pg_isready -h db-live -U gantt -q; do
+         echo '[대기] db-live 아직 준비 안 됨, 5초 후 재시도...';
+         sleep 5;
+       done;
+       echo '[완료] db-live 연결 확인 - 백업 스케줄러 시작 (6시간 주기)';
+       while true; do
+         pg_dump -h db-live -U gantt -d ganttdb_live | gzip > /backups/live_backup_$(date +%Y%m%d_%H%M%S).sql.gz
+         && echo \"[$(date)] ✅ 라이브 백업 완료\"
+         || echo \"[$(date)] ❌ 라이브 백업 실패\";
+         find /backups -name '*.sql.gz' -mtime +${BACKUP_KEEP_DAYS:-30} -delete;
+         sleep 21600;
+       done"]
+
+  # ── Watchtower: 라이브 전용 (gantt-app-live 만 모니터링) ──
+  watchtower-live:
+    image: containrrr/watchtower
+    container_name: watchtower-live
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_CLEANUP=true
+      - TZ=Asia/Seoul
+    command: gantt-app-live
+
+networks:
+  gantt-live-net:
+    driver: bridge
+
+volumes:
+  postgres_live_data:
+    driver: local
+  backup_live_data:
+    driver: local
