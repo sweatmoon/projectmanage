@@ -1,0 +1,92 @@
+name: 고아 calendar_entries 정리 (1회성)
+
+on:
+  workflow_dispatch:  # 수동 실행만
+
+jobs:
+  cleanup:
+    name: 고아 calendar_entries hard-delete
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: PostgreSQL 클라이언트 설치
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y postgresql-client
+
+      - name: staging DB 고아 정리
+        env:
+          PGPASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          echo "=== [staging] 고아 calendar_entries 수 확인 ==="
+          ORPHAN_COUNT=$(psql \
+            -h autorack.proxy.rlwy.net \
+            -p 16524 \
+            -U postgres \
+            -d railway \
+            -t -c "
+              SELECT COUNT(*) FROM calendar_entries
+              WHERE staffing_id NOT IN (
+                SELECT id FROM staffing WHERE deleted_at IS NULL
+              );
+            " | xargs)
+          echo "고아 수: ${ORPHAN_COUNT}건"
+
+          echo "=== [staging] 고아 삭제 ==="
+          DELETED=$(psql \
+            -h autorack.proxy.rlwy.net \
+            -p 16524 \
+            -U postgres \
+            -d railway \
+            -t -c "
+              WITH deleted AS (
+                DELETE FROM calendar_entries
+                WHERE staffing_id NOT IN (
+                  SELECT id FROM staffing WHERE deleted_at IS NULL
+                )
+                RETURNING id
+              )
+              SELECT COUNT(*) FROM deleted;
+            " | xargs)
+          echo "✅ staging 삭제 완료: ${DELETED}건"
+
+      - name: live DB 고아 정리
+        env:
+          PGPASSWORD: ${{ secrets.LIVE_DB_PASSWORD }}
+        run: |
+          echo "=== [live] 고아 calendar_entries 수 확인 ==="
+          ORPHAN_COUNT=$(psql \
+            -h maglev.proxy.rlwy.net \
+            -p 24651 \
+            -U postgres \
+            -d railway \
+            -t -c "
+              SELECT COUNT(*) FROM calendar_entries
+              WHERE staffing_id NOT IN (
+                SELECT id FROM staffing WHERE deleted_at IS NULL
+              );
+            " | xargs)
+          echo "고아 수: ${ORPHAN_COUNT}건"
+
+          echo "=== [live] 고아 삭제 ==="
+          DELETED=$(psql \
+            -h maglev.proxy.rlwy.net \
+            -p 24651 \
+            -U postgres \
+            -d railway \
+            -t -c "
+              WITH deleted AS (
+                DELETE FROM calendar_entries
+                WHERE staffing_id NOT IN (
+                  SELECT id FROM staffing WHERE deleted_at IS NULL
+                )
+                RETURNING id
+              )
+              SELECT COUNT(*) FROM deleted;
+            " | xargs)
+          echo "✅ live 삭제 완료: ${DELETED}건"
+
+      - name: 결과 요약
+        run: |
+          echo "## 🧹 고아 calendar_entries 정리 완료" >> $GITHUB_STEP_SUMMARY
+          echo "staging/live DB의 soft-delete된 staffing에 연결된 calendar_entries를 삭제했습니다." >> $GITHUB_STEP_SUMMARY
