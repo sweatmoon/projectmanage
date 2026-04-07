@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -121,6 +122,20 @@ async def get_staffing(id: int, db: AsyncSession = Depends(get_db)):
 async def create_staffing(
     data: StaffingData, request: Request, db: AsyncSession = Depends(get_db)
 ):
+    # FK 무결성 검증: project_id, phase_id가 실제 존재하는지 확인
+    from models.projects import Projects  # noqa: PLC0415
+    from models.phases import Phases      # noqa: PLC0415
+    proj_exists = await db.execute(
+        select(Projects.id).where(Projects.id == data.project_id, Projects.deleted_at.is_(None))
+    )
+    if proj_exists.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"project_id {data.project_id} 를 찾을 수 없습니다.")
+    phase_exists = await db.execute(
+        select(Phases.id).where(Phases.id == data.phase_id, Phases.deleted_at.is_(None))
+    )
+    if phase_exists.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"phase_id {data.phase_id} 를 찾을 수 없습니다.")
+
     service = StaffingService(db)
     result = await service.create(data.model_dump())
     if not result:

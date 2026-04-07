@@ -130,7 +130,8 @@ app = FastAPI(
 # X-Forwarded-Proto: https 헤더를 올바르게 반영한다.
 class ReverseProxyMiddleware(BaseHTTPMiddleware):
     """X-Forwarded-Proto / X-Forwarded-Host 헤더를 신뢰하여
-    FastAPI가 올바른 스킴(https)과 호스트를 인식하게 한다."""
+    FastAPI가 올바른 스킴(https)과 호스트를 인식하게 한다.
+    추가: HTTP 보안 헤더 일괄 주입 (정보시스템 감리 보안 요건)"""
     async def dispatch(self, request: Request, call_next):
         # X-Forwarded-Proto 처리
         forwarded_proto = request.headers.get("x-forwarded-proto", "")
@@ -153,6 +154,31 @@ class ReverseProxyMiddleware(BaseHTTPMiddleware):
             request.scope["server"] = (host, port)
 
         response = await call_next(request)
+
+        # ── HTTP 보안 헤더 주입 ──────────────────────────────
+        # 클릭재킹(Clickjacking) 방어
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        # MIME 타입 스니핑 방어
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # XSS 필터 활성화 (레거시 브라우저용)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # HTTPS 강제 (HSTS) — Railway는 항상 HTTPS 제공
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # 참조 정보 보호
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # 불필요한 브라우저 기능 비활성화
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # CSP: 자체 도메인 + 인라인 스크립트(React 빌드용)만 허용
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob: https:; "
+            "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com; "
+            "frame-ancestors 'self';"
+        )
+
         return response
 
 
