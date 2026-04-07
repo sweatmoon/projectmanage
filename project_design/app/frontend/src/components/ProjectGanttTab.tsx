@@ -1433,11 +1433,13 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
     assignments: {              // 배정된 단계 목록
       projectId: number;
       projectName: string;
+      projectStatus: string;    // 감리(A) / 제안(P) 등
       phaseId: number;
       phaseName: string;
       field: string;
       phaseStart: string;
       phaseEnd: string;
+      overlapMd: number;        // 해당 컬럼 기간 내 이 사업에서 중복되는 MD 수
     }[];
   }
 
@@ -1514,14 +1516,15 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
         const proj = localProjects.find((p) => p.id === s.project_id);
         const info = {
-          staffingId:  s.id,
-          projectId:   proj?.id ?? s.project_id,
-          projectName: proj?.project_name ?? '(미정)',
-          phaseId:     ph.id,
-          phaseName:   ph.phase_name,
-          field:       s.field || '',
-          phaseStart:  ph.start_date || '',
-          phaseEnd:    ph.end_date   || '',
+          staffingId:   s.id,
+          projectId:    proj?.id ?? s.project_id,
+          projectName:  proj?.project_name ?? '(미정)',
+          projectStatus: proj?.status ?? '',
+          phaseId:      ph.id,
+          phaseName:    ph.phase_name,
+          field:        s.field || '',
+          phaseStart:   ph.start_date || '',
+          phaseEnd:     ph.end_date   || '',
         };
 
         for (const dateStr of entryDates) {
@@ -1543,25 +1546,34 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         const seenProjectIds = new Set<number>();
         const assignments: OverlapDetail['assignments'] = [];
 
+        // 프로젝트별 중복 날짜 수 집계용
+        const projectOverlapDays = new Map<number, number>();
         for (const [dateStr, staffings] of dateMap.entries()) {
           // 같은 날 서로 다른 프로젝트가 2개 이상인 경우만 중복
           const projectIds = [...new Set(staffings.map((x) => x.projectId))];
           if (projectIds.length < 2) continue;
           overlapDates.add(dateStr);
           for (const st of staffings) {
+            projectOverlapDays.set(st.projectId, (projectOverlapDays.get(st.projectId) ?? 0) + 1);
             if (!seenProjectIds.has(st.projectId)) {
               seenProjectIds.add(st.projectId);
               assignments.push({
-                projectId:   st.projectId,
-                projectName: st.projectName,
-                phaseId:     st.phaseId,
-                phaseName:   st.phaseName,
-                field:       st.field,
-                phaseStart:  st.phaseStart,
-                phaseEnd:    st.phaseEnd,
+                projectId:     st.projectId,
+                projectName:   st.projectName,
+                projectStatus: st.projectStatus,
+                phaseId:       st.phaseId,
+                phaseName:     st.phaseName,
+                field:         st.field,
+                phaseStart:    st.phaseStart,
+                phaseEnd:      st.phaseEnd,
+                overlapMd:     0, // 아래서 채움
               });
             }
           }
+        }
+        // overlapMd 채우기
+        for (const a of assignments) {
+          a.overlapMd = projectOverlapDays.get(a.projectId) ?? 0;
         }
 
         if (overlapDates.size === 0) continue;
@@ -2512,21 +2524,36 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                       <div className="mx-3 mb-2 rounded-md border border-orange-100 bg-orange-50/60 overflow-hidden">
                         {item.assignments.map((a, ai) => {
                           const projColor = projectColorMap.get(a.projectId) || PROJECT_COLORS[0];
-                          // 이 단계에서 해당 컬럼 기간과 겹치는 영업일 수
-                          const colStart = overlapPopover.colLabel; // 표시용
+                          const isProposal = a.projectStatus === '제안';
+                          const statusLabel = isProposal ? 'P' : 'A';
+                          const statusBg = isProposal ? '#f59e0b' : '#3b82f6';
                           return (
                             <div key={ai} className="flex items-start gap-2 px-2 py-1.5 border-b border-orange-100 last:border-0">
-                              <div className="w-2 h-2 rounded-sm flex-shrink-0 mt-0.5"
+                              <div className="w-2 h-2 rounded-sm flex-shrink-0 mt-1"
                                 style={{ backgroundColor: projColor.border }} />
                               <div className="flex-1 min-w-0">
-                                <div className="text-[10px] font-semibold text-gray-700 truncate" title={a.projectName}>
-                                  {a.projectName}
+                                {/* 사업명 + A/P 배지 */}
+                                <div className="flex items-center gap-1 min-w-0">
+                                  <span className="text-[10px] font-semibold text-gray-700 truncate flex-1" title={a.projectName}>
+                                    {a.projectName}
+                                  </span>
+                                  <span className="text-[9px] font-bold text-white px-1 py-0.5 rounded flex-shrink-0"
+                                    style={{ backgroundColor: statusBg }}>
+                                    {statusLabel}
+                                  </span>
                                 </div>
+                                {/* 단계 · 분야 */}
                                 <div className="text-[10px] text-gray-500 truncate">
                                   {a.phaseName} · <span className="text-blue-600">{a.field}</span>
                                 </div>
-                                <div className="text-[9px] text-gray-400">
-                                  {a.phaseStart} ~ {a.phaseEnd}
+                                {/* 기간 + 중복 MD */}
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[9px] text-gray-400">
+                                    {a.phaseStart} ~ {a.phaseEnd}
+                                  </span>
+                                  <span className="text-[9px] font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-1 py-0.5 rounded flex-shrink-0">
+                                    {a.overlapMd}MD 중복
+                                  </span>
                                 </div>
                               </div>
                             </div>
