@@ -62,6 +62,25 @@ def get_first_n_business_days(start_date: date, end_date: date, n: int) -> List[
     return get_consecutive_business_days(start_date, end_date, n)
 
 
+# 단계감리팀으로 분류되는 field 패턴 (프론트 getTeamInfo 함수와 동일 기준)
+_TEAM_FIELD_PATTERNS = [
+    '사업관리',
+    '응용시스템',
+    '데이터베이스',
+    '시스템구조',
+    '시스템 구조',
+]
+
+def _classify_category_by_field(field: str) -> str:
+    """section_map 없을 때 field명으로 단계감리팀/전문가팀 자동 분류.
+    프론트엔드 getTeamInfo() 함수와 동일한 기준 적용.
+    """
+    for pattern in _TEAM_FIELD_PATTERNS:
+        if pattern in field:
+            return '단계감리팀'
+    return '전문가팀'
+
+
 async def _import_phases_logic(
     db: AsyncSession,
     project: Projects,
@@ -150,10 +169,11 @@ async def _import_phases_logic(
             person_id = person.id if person else None
 
             # Determine category from section_map (for proposal mode)
+            # section_map 없으면 field명으로 자동 분류 (단계감리팀 / 전문가팀)
             if section_map and person_name in section_map:
                 category_val = section_map[person_name]
             else:
-                category_val = '단계감리팀'
+                category_val = _classify_category_by_field(field_name)
 
             # Create staffing entry
             new_staffing = Staffing(

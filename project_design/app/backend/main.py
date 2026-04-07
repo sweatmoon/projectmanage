@@ -16,6 +16,10 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 # MODULE_IMPORTS_START
 from services.database import initialize_database, close_database
@@ -123,6 +127,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate Limiter 설정 ────────────────────────────────────────
+# RATE_LIMIT 환경변수로 조정 가능. 기본: 일반 API 200req/min, 인증 API 20req/min
+# X-Forwarded-For 헤더를 우선 사용하여 프록시 뒤 클라이언트 IP 식별
+def _get_real_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return get_remote_address(request)
+
+limiter = Limiter(
+    key_func=_get_real_ip,
+    default_limits=[os.environ.get("RATE_LIMIT_DEFAULT", "200/minute")],
+    storage_uri="memory://",   # 단일 인스턴스용 인메모리 저장소
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 
 # ── 역방향 프록시 헤더 처리 미들웨어 ─────────────────────────
 # NAS DSM 역방향 프록시(Synology Application Portal)를 통해
@@ -186,13 +208,40 @@ class ReverseProxyMiddleware(BaseHTTPMiddleware):
 # 역방향 프록시 헤더 처리 (NAS DSM Application Portal / nginx proxy)
 app.add_middleware(ReverseProxyMiddleware)
 
+# ── CORS 허용 출처 설정 ─────────────────────────────────────
+# ALLOWED_ORIGINS 환경변수로 쉼표 구분 도메인 목록을 지정할 수 있음.
+# 예) ALLOWED_ORIGINS=https://my.app.com,https://staging.app.com
+# 미설정 시 APP_URL(자신의 서버) + localhost(개발용)만 허용.
+def _build_cors_origins() -> list[str]:
+    raw = os.environ.get("ALLOWED_ORIGINS", "")
+    app_url = os.environ.get("APP_URL", "").rstrip("/")
+    # 기본 허용 목록: 자체 서버 + 로컬 개발 포트
+    defaults = {
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    }
+    if app_url:
+        defaults.add(app_url)
+    # 환경변수로 추가 도메인 병합
+    if raw:
+        for o in raw.split(","):
+            o = o.strip().rstrip("/")
+            if o:
+                defaults.add(o)
+    return sorted(defaults)
+
+_CORS_ORIGINS = _build_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r".*",
+    allow_origins=_CORS_ORIGINS,          # 명시적 허용 도메인 목록
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Accept"],
+    expose_headers=["X-Total-Count", "Content-Disposition"],
+    max_age=600,                           # preflight 캐시 10분
 )
 # JWT 인증 미들웨어 (OIDC_ISSUER_URL 환경변수 설정 시 활성화)
 app.add_middleware(AuthMiddleware)

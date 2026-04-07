@@ -14,6 +14,8 @@ from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from core.database import get_db
 from models.auth import OIDCState, User, PendingUser
@@ -21,6 +23,9 @@ from models.auth import OIDCState, User, PendingUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# 인증 라우터 전용 limiter (엄격한 제한: brute-force 방어)
+_auth_limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 
 # ── Google OAuth 엔드포인트 상수 ─────────────────────────
 GOOGLE_TOKEN_URL    = "https://oauth2.googleapis.com/token"
@@ -169,6 +174,7 @@ async def dev_login_user(db: AsyncSession = Depends(get_db)):
 
 # ── 1. 로그인 시작 ──────────────────────────────────────────
 @router.get("/login")
+@_auth_limiter.limit("20/minute")  # 로그인 시도 분당 20회 제한
 async def login(request: Request, db: AsyncSession = Depends(get_db)):
     cfg = get_oidc_settings()
     if not cfg["use_google"] and not cfg["issuer_url"]:
@@ -511,6 +517,7 @@ class TokenVerifyResponse(BaseModel):
 
 
 @router.post("/verify", response_model=TokenVerifyResponse)
+@_auth_limiter.limit("60/minute")  # 토큰 검증 분당 60회 제한
 async def verify_token(request: Request):
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):

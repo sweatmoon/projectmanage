@@ -9,10 +9,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import timezone
+from sqlalchemy import select, and_
 from core.database import get_db
+from models.staffing import Staffing
 from services.phases import PhasesService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
@@ -163,15 +165,32 @@ async def update_phases(
     return result
 
 
+async def _cascade_soft_delete_phase(db: AsyncSession, phase_id: int) -> dict:
+    """phase 삭제 시 하위 staffing을 cascade soft-delete하고 건수를 반환"""
+    now = __import__('datetime').datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Staffing).where(
+            and_(Staffing.phase_id == phase_id, Staffing.deleted_at.is_(None))
+        )
+    )
+    staffing_list = result.scalars().all()
+    for s in staffing_list:
+        s.deleted_at = now
+    return {"staffing": len(staffing_list)}
+
+
 @router.delete("/batch")
 async def delete_phasess_batch(
     req: PhasesBatchDeleteRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
     service = PhasesService(db)
     deleted_count = 0
+    total_cascade = {"staffing": 0}
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
+            cascade_stats = await _cascade_soft_delete_phase(db, item_id)
+            total_cascade["staffing"] += cascade_stats["staffing"]
             soft_delete(obj)
             deleted_count += 1
             ctx = await get_audit_context(db, project_id=obj.project_id)
@@ -180,8 +199,13 @@ async def delete_phasess_batch(
                 entity_id=item_id, project_id=obj.project_id, before_obj=obj, request=request,
                 project_name=ctx["project_name"], phase_name=obj.phase_name,
             )
+            logger.info(f"[CASCADE] Phase {item_id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete")
     await db.commit()
-    return {"message": f"Deleted {deleted_count} phases", "deleted_count": deleted_count}
+    return {
+        "message": f"Deleted {deleted_count} phases",
+        "deleted_count": deleted_count,
+        "cascade": total_cascade,
+    }
 
 
 @router.delete("/{id}")
@@ -190,6 +214,7 @@ async def delete_phases(id: int, request: Request, db: AsyncSession = Depends(ge
     obj = await service.get_by_id(id)
     if not obj:
         raise HTTPException(status_code=404, detail="Phases not found")
+    cascade_stats = await _cascade_soft_delete_phase(db, id)
     soft_delete(obj)
     ctx = await get_audit_context(db, project_id=obj.project_id)
     await write_audit_log(
@@ -198,7 +223,12 @@ async def delete_phases(id: int, request: Request, db: AsyncSession = Depends(ge
         project_name=ctx["project_name"], phase_name=obj.phase_name,
     )
     await db.commit()
-    return {"message": "Phases deleted", "id": id}
+    logger.info(f"[CASCADE] Phase {id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete")
+    return {
+        "message": "Phases deleted",
+        "id": id,
+        "cascade": cascade_stats,
+    }
 
 
 @router.post("/{id}/restore")

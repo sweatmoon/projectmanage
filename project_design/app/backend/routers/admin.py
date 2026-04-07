@@ -26,6 +26,9 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from core.database import get_db
 from models.auth import AccessLog, User, AllowedUser, PendingUser
 from models.audit import AuditLog, AuditLogArchive
@@ -34,6 +37,9 @@ from services.audit_service import write_audit_log, archive_old_logs, EventType,
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+# 관리자 API 전용 limiter (CSV 내보내기 등 무거운 API 보호)
+_admin_limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 
 
 # ── 관리자 권한 확인 의존성 ────────────────────────────────
@@ -425,6 +431,7 @@ async def get_audit_log_detail(
 
 # ── 7. 감사 로그 CSV 내보내기 ─────────────────────────────
 @router.get("/audit/export/csv")
+@_admin_limiter.limit("10/minute")  # CSV 내보내기: 분당 10회 제한
 async def export_audit_logs_csv(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -510,6 +517,7 @@ async def export_audit_logs_csv(
 
 # ── 8. 아카이빙 트리거 ────────────────────────────────────
 @router.post("/audit/archive")
+@_admin_limiter.limit("5/minute")   # 아카이빙: 분당 5회 제한
 async def trigger_archive(
     request: Request,
     db: AsyncSession = Depends(get_db),

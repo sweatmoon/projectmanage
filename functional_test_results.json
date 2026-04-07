@@ -1,0 +1,318 @@
+{
+  "run_at": "2026-04-07T12:39:31.292836+00:00",
+  "base_url": "https://projectmanage-production-13e7.up.railway.app",
+  "summary": {
+    "total": 51,
+    "pass": 50,
+    "warn": 1,
+    "fail": 0
+  },
+  "results": [
+    {
+      "id": "FT-01-01",
+      "name": "사업 생성 (201)",
+      "status": "PASS",
+      "detail": "ID=119"
+    },
+    {
+      "id": "FT-01-02",
+      "name": "단계 3개 생성",
+      "status": "PASS",
+      "detail": "IDs=[393, 394, 395]"
+    },
+    {
+      "id": "FT-01-03",
+      "name": "스태핑 2명 등록",
+      "status": "PASS",
+      "detail": "IDs=[3080, 3081]"
+    },
+    {
+      "id": "FT-01-04",
+      "name": "사업 수주 상태 변경 (is_won=True)",
+      "status": "PASS",
+      "detail": "status=확정, is_won=True"
+    },
+    {
+      "id": "FT-01-05",
+      "name": "단계 필터 조회",
+      "status": "PASS",
+      "detail": "total=3"
+    },
+    {
+      "id": "FT-01-06",
+      "name": "스태핑 MD 업데이트",
+      "status": "PASS",
+      "detail": "md=35"
+    },
+    {
+      "id": "FT-01-07",
+      "name": "삭제 후 404 확인",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-01",
+      "name": "미인증 요청 401 차단",
+      "status": "PASS",
+      "detail": "auth_required=True"
+    },
+    {
+      "id": "FT-02-02",
+      "name": "만료 토큰 401 차단",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-03",
+      "name": "위조 토큰 401 차단",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-04",
+      "name": "Viewer 쓰기 403 차단",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-05",
+      "name": "Viewer 읽기 200 허용",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-06",
+      "name": "User 관리자 API 403 차단",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-07",
+      "name": "Viewer 관리자 API 403 차단",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-08",
+      "name": "dev-login 프로덕션 비활성화 (403)",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-02-09",
+      "name": "Admin 관리자 API 200 접근",
+      "status": "PASS",
+      "detail": "users=3명"
+    },
+    {
+      "id": "FT-03-01",
+      "name": "사업 생성 → CREATE 감사 로그 증가",
+      "status": "PASS",
+      "detail": "366 → 367"
+    },
+    {
+      "id": "FT-03-02",
+      "name": "상태 변경 → STATUS_CHANGE 감사 로그 증가",
+      "status": "PASS",
+      "detail": "93 → 94"
+    },
+    {
+      "id": "FT-03-03",
+      "name": "감사 로그 불변성 (DELETE/PUT → 405)",
+      "status": "PASS",
+      "detail": "DELETE=405, PUT=405"
+    },
+    {
+      "id": "FT-03-04",
+      "name": "감사 로그 CSV 내보내기",
+      "status": "PASS",
+      "detail": "rows=10"
+    },
+    {
+      "id": "FT-03-05",
+      "name": "감사 로그 아카이빙 API",
+      "status": "PASS",
+      "detail": "archived=0"
+    },
+    {
+      "id": "FT-04-01",
+      "name": "홈 통계 응답 필드 완전성 (8개)",
+      "status": "PASS",
+      "detail": "all 8 fields present"
+    },
+    {
+      "id": "FT-04-02",
+      "name": "가동률 범위 (0.0 ~ 1.0)",
+      "status": "PASS",
+      "detail": "utilization_rate=13.18%"
+    },
+    {
+      "id": "FT-04-03",
+      "name": "업무일수 양수",
+      "status": "PASS",
+      "detail": "biz_days_ytd=64"
+    },
+    {
+      "id": "FT-04-04",
+      "name": "제안 추가 시 proposal_count 증가",
+      "status": "PASS",
+      "detail": "1 → 2"
+    },
+    {
+      "id": "FT-05-01",
+      "name": "동시 10요청 읽기 안정성",
+      "status": "PASS",
+      "detail": "10/10 성공, 406ms"
+    },
+    {
+      "id": "FT-05-02",
+      "name": "동시 5건 생성, ID 중복 없음",
+      "status": "PASS",
+      "detail": "생성=5, 고유=5, IDs=[122, 123, 124, 125, 126]"
+    },
+    {
+      "id": "FT-06-01",
+      "name": "7종 보안 헤더 모두 존재",
+      "status": "PASS",
+      "detail": "7/7 모두 정상"
+    },
+    {
+      "id": "FT-06-02",
+      "name": "악성 Origin CORS 차단",
+      "status": "PASS",
+      "detail": "ACAO='' (status=401)"
+    },
+    {
+      "id": "FT-07-01",
+      "name": "없는 ID 조회 → 404",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-07-02",
+      "name": "잘못된 경로 파라미터 → 422",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-07-03",
+      "name": "필수 필드 누락 → 422",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-07-04",
+      "name": "에러 응답에 스택 트레이스 미노출",
+      "status": "PASS",
+      "detail": "안전한 에러 응답 확인"
+    },
+    {
+      "id": "FT-07-05",
+      "name": "FK 무결성: 없는 project_id 스태핑 → 404",
+      "status": "PASS",
+      "detail": "status=404, response={\"detail\":\"project_id 999999 를 찾을 수 없습니다.\"}"
+    },
+    {
+      "id": "FT-07-06",
+      "name": "limit 초과(9999) → 422",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-07-07",
+      "name": "skip 음수(-1) → 422",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "FT-08",
+      "name": "헬스체크 < 3000ms",
+      "status": "PASS",
+      "detail": "130ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "프로젝트 목록 < 3000ms",
+      "status": "PASS",
+      "detail": "167ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "인력 목록 < 3000ms",
+      "status": "PASS",
+      "detail": "152ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "단계 목록 < 3000ms",
+      "status": "PASS",
+      "detail": "137ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "스태핑 목록 < 3000ms",
+      "status": "PASS",
+      "detail": "160ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "홈 통계 < 3000ms",
+      "status": "PASS",
+      "detail": "282ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "관리자 통계 < 3000ms",
+      "status": "PASS",
+      "detail": "227ms (HTTP 200)"
+    },
+    {
+      "id": "FT-08",
+      "name": "감사 로그 50건 < 3000ms",
+      "status": "PASS",
+      "detail": "302ms (HTTP 200)"
+    },
+    {
+      "id": "FT-09-01",
+      "name": "삭제된 항목 목록 미노출",
+      "status": "PASS",
+      "detail": "ID 127 목록에 없음 ✓"
+    },
+    {
+      "id": "FT-09-02",
+      "name": "페이지 아이템 수 ≤ total",
+      "status": "PASS",
+      "detail": "items=5, total=15"
+    },
+    {
+      "id": "FT-09-03",
+      "name": "XSS 입력 저장 (프런트 이스케이프 필요)",
+      "status": "WARN",
+      "detail": "저장 가능 (백엔드 저장 허용, 프런트 이스케이프 별도 필요) → WARN"
+    },
+    {
+      "id": "FT-09-04",
+      "name": "SQL 인젝션 차단 (ORM 파라미터화 쿼리)",
+      "status": "PASS",
+      "detail": "DB 무결성 유지: 16건"
+    },
+    {
+      "id": "FT-10-01",
+      "name": "배치 프로젝트 3건 생성",
+      "status": "PASS",
+      "detail": "status=201, ids=[130, 131, 132]"
+    },
+    {
+      "id": "FT-10-02",
+      "name": "배치 상태 업데이트 (감리→확정)",
+      "status": "PASS",
+      "detail": "status=200, all=확정: True"
+    },
+    {
+      "id": "FT-10-03",
+      "name": "배치 프로젝트 삭제",
+      "status": "PASS",
+      "detail": "status=200"
+    }
+  ]
+}
