@@ -1065,15 +1065,34 @@ function EditModal({
   );
 }
 
+/* ───────── Gantt settings persistence ───────── */
+const GANTT_STORAGE_KEY = 'gantt_view_settings';
+function loadGanttSettings(now: Date): { viewYear: number; viewMonth: number; periodMonths: number; scale: ScaleMode } {
+  try {
+    const raw = localStorage.getItem(GANTT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        viewYear:     typeof parsed.viewYear === 'number'     ? parsed.viewYear     : now.getFullYear(),
+        viewMonth:    typeof parsed.viewMonth === 'number'    ? parsed.viewMonth    : now.getMonth() + 1,
+        periodMonths: typeof parsed.periodMonths === 'number' ? parsed.periodMonths : 3,
+        scale:        parsed.scale === 'day' || parsed.scale === 'week' ? parsed.scale : 'week',
+      };
+    }
+  } catch { /* ignore */ }
+  return { viewYear: now.getFullYear(), viewMonth: now.getMonth() + 1, periodMonths: 3, scale: 'week' };
+}
+
 /* ───────── Main Component ───────── */
 export default function ProjectGanttTab({ projects, phases, staffing, people, onRefresh }: ProjectGanttTabProps) {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
-  const [periodMonths, setPeriodMonths] = useState(3); // 3, 6, 12
-  const [scale, setScale] = useState<ScaleMode>('week');
+  const initSettings = loadGanttSettings(now);
+  const [viewYear, setViewYear] = useState(initSettings.viewYear);
+  const [viewMonth, setViewMonth] = useState(initSettings.viewMonth);
+  const [periodMonths, setPeriodMonths] = useState(initSettings.periodMonths); // 3, 6, 12
+  const [scale, setScale] = useState<ScaleMode>(initSettings.scale);
   const { isViewer } = useUserRole();
   const [editTarget, setEditTarget] = useState<{ project: Project; phase: Phase } | null>(null);
   const [projectInfoTarget, setProjectInfoTarget] = useState<Project | null>(null);
@@ -1127,8 +1146,16 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   useEffect(() => { setLocalPhases(phases); }, [phases]);
   useEffect(() => { setLocalStaffing(staffing); }, [staffing]);
 
-  // Auto-navigate to earliest phase month
+  // ── localStorage에 간트 설정값 저장 ──
   useEffect(() => {
+    try {
+      localStorage.setItem(GANTT_STORAGE_KEY, JSON.stringify({ viewYear, viewMonth, periodMonths, scale }));
+    } catch { /* ignore */ }
+  }, [viewYear, viewMonth, periodMonths, scale]);
+
+  // Auto-navigate to earliest phase month (저장된 설정이 없을 때만)
+  useEffect(() => {
+    if (localStorage.getItem(GANTT_STORAGE_KEY)) return; // 저장값 있으면 skip
     if (localPhases.length === 0) return;
     let earliest: Date | null = null;
     localPhases.forEach((ph) => {
@@ -1423,6 +1450,35 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
     search: string;
     expanded: number | null;   // 펼친 personId
   } | null>(null);
+
+  // ── 팝오버 DOM ref (외부 클릭 감지용) ──
+  const idlePopoverRef   = useRef<HTMLDivElement>(null);
+  const overlapPopoverRef = useRef<HTMLDivElement>(null);
+
+  // ── 팝오버 외부 클릭 시 닫기 ──
+  useEffect(() => {
+    if (!idlePopover && !overlapPopover) return;
+    const handler = (e: MouseEvent) => {
+      if (idlePopover   && idlePopoverRef.current   && !idlePopoverRef.current.contains(e.target as Node))   setIdlePopover(null);
+      if (overlapPopover && overlapPopoverRef.current && !overlapPopoverRef.current.contains(e.target as Node)) setOverlapPopover(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [idlePopover, overlapPopover]);
+
+  // ── 간트 스크롤 시 팝오버 닫기 ──
+  useEffect(() => {
+    if (!idlePopover && !overlapPopover) return;
+    const closeAll = () => { setIdlePopover(null); setOverlapPopover(null); };
+    const timelineEl  = document.getElementById('gantt-timeline-scroll');
+    const labelEl     = document.getElementById('gantt-label-scroll');
+    timelineEl?.addEventListener('scroll', closeAll);
+    labelEl?.addEventListener('scroll', closeAll);
+    return () => {
+      timelineEl?.removeEventListener('scroll', closeAll);
+      labelEl?.removeEventListener('scroll', closeAll);
+    };
+  }, [idlePopover, overlapPopover]);
 
   /* ───────── Overlap row data: Calendar Entry 기반 실제 선택 날짜로 중복 판정 ───────── */
   const overlapRowData = useMemo(() => {
@@ -2328,6 +2384,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         );
         return (
           <div
+            ref={idlePopoverRef}
             className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 w-[260px]"
             style={{
               top: Math.min(idlePopover.anchorRect?.bottom ?? 0, window.innerHeight - 380) + 4,
@@ -2389,6 +2446,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         );
         return (
           <div
+            ref={overlapPopoverRef}
             className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-orange-200 w-[320px]"
             style={{
               top: Math.min(overlapPopover.anchorRect?.bottom ?? 0, window.innerHeight - 420) + 4,
