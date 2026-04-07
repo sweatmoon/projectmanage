@@ -2,7 +2,7 @@ name: DB 자동 백업 (staging + live)
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 매일 새벽 5시 (KST = UTC+9, 20:00 UTC)
+    - cron: '0 18 * * *'  # 매일 새벽 3시 (KST = UTC+9, 18:00 UTC)
   workflow_dispatch:       # 수동 실행 가능
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
           path: |
             staging_backup_*.sql.gz
             live_backup_*.sql.gz
-          retention-days: 30  # 30일 보관
+          retention-days: 90  # 90일 보관 (GitHub Artifacts 최대 90일)
 
       - name: 백업 완료 요약
         run: |
@@ -72,4 +72,4 @@ jobs:
             echo "| live | $f | $SIZE |" >> $GITHUB_STEP_SUMMARY
           done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "보관 기간: 30일" >> $GITHUB_STEP_SUMMARY
+          echo "보관 기간: 90일" >> $GITHUB_STEP_SUMMARY
