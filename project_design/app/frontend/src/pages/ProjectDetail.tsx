@@ -534,6 +534,11 @@ export default function ProjectDetail() {
   const [exportHasChange, setExportHasChange] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
+  // 팀구분 일괄 변경 dialog
+  const [showCategoryDialog, setShowCategoryDialog] = useState(false);
+  const [categoryChanges, setCategoryChanges] = useState<Record<string, string>>({});
+  const [savingCategory, setSavingCategory] = useState(false);
+
   // Text edit dialog (overwrite phases)
   const [showTextEdit, setShowTextEdit] = useState(false);
   const [textEditContent, setTextEditContent] = useState('');
@@ -1265,6 +1270,41 @@ export default function ProjectDetail() {
     }
   };
 
+  // 팀구분 일괄 변경 열기 — 현재 staffing의 category 값으로 초기화
+  const openCategoryDialog = () => {
+    const init: Record<string, string> = {};
+    staffingList.forEach((s) => {
+      init[String(s.id)] = s.category || '단계감리팀';
+    });
+    setCategoryChanges(init);
+    setShowCategoryDialog(true);
+  };
+
+  // 팀구분 일괄 저장
+  const saveCategoryChanges = async () => {
+    if (isLocked) return;
+    setSavingCategory(true);
+    try {
+      const entries = Object.entries(categoryChanges);
+      let changed = 0;
+      for (const [sid, cat] of entries) {
+        const orig = staffingList.find((s) => String(s.id) === sid);
+        if (orig && orig.category !== cat) {
+          await client.entities.staffing.update({ id: sid, category: cat });
+          changed++;
+        }
+      }
+      toast.success(`팀구분 ${changed}건 변경 완료`);
+      setShowCategoryDialog(false);
+      fetchAll();
+    } catch (e) {
+      console.error(e);
+      toast.error('팀구분 변경 중 오류가 발생했습니다.');
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
   const handleMdCellClick = (staffingId: number, currentMd: number | null) => {
     if (isLocked) return;
     setEditingMd({ staffingId, value: currentMd != null ? String(currentMd) : '' });
@@ -1983,9 +2023,21 @@ export default function ProjectDetail() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">투입공수 원장 (Staffing)</CardTitle>
-                <p className="text-[10px] text-muted-foreground">
-                  💡 공수(MD) 셀 클릭 → 수정 | 영업일 초과 불가 | 실제 투입일은 일정 탭에서 선택
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] text-muted-foreground">
+                    💡 공수(MD) 셀 클릭 → 수정 | 영업일 초과 불가 | 실제 투입일은 일정 탭에서 선택
+                  </p>
+                  {!isLocked && staffingList.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7 px-2 border-slate-300 text-slate-600 hover:bg-slate-50"
+                      onClick={openCategoryDialog}
+                    >
+                      🏷️ 팀구분 수정
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -2777,6 +2829,114 @@ export default function ProjectDetail() {
             </div>
           </div>
         )}
+
+      {/* 팀구분 일괄 변경 Dialog */}
+      <Dialog open={showCategoryDialog} onOpenChange={(o) => { if (!savingCategory) setShowCategoryDialog(o); }}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-base">🏷️ 팀구분 일괄 수정</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              각 인력의 팀구분(단계감리팀 / 전문가팀)을 개별 변경하거나, 상단 버튼으로 전체 일괄 변경하세요.
+            </p>
+          </DialogHeader>
+
+          {/* 일괄 변경 버튼 */}
+          <div className="flex gap-2 pb-2 border-b">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 border-blue-300 text-blue-700 hover:bg-blue-50"
+              onClick={() => {
+                const next = { ...categoryChanges };
+                Object.keys(next).forEach((k) => { next[k] = '단계감리팀'; });
+                setCategoryChanges(next);
+              }}
+            >
+              📋 전체 → 단계감리팀
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 border-green-300 text-green-700 hover:bg-green-50"
+              onClick={() => {
+                const next = { ...categoryChanges };
+                Object.keys(next).forEach((k) => { next[k] = '전문가팀'; });
+                setCategoryChanges(next);
+              }}
+            >
+              🔧 전체 → 전문가팀
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 border-slate-300 text-slate-600 hover:bg-slate-50"
+              onClick={() => {
+                const next = { ...categoryChanges };
+                staffingList.forEach((s) => {
+                  // field명 기준 자동 분류 (백엔드와 동일 규칙)
+                  const teamFields = ['사업관리', '응용시스템', '데이터베이스', '시스템구조', '시스템 구조'];
+                  const isTeam = teamFields.some((p) => (s.field || '').includes(p));
+                  next[String(s.id)] = isTeam ? '단계감리팀' : '전문가팀';
+                });
+                setCategoryChanges(next);
+              }}
+            >
+              ✨ 분야명 기준 자동 분류
+            </Button>
+          </div>
+
+          {/* 인력별 목록 */}
+          <div className="overflow-y-auto flex-1 space-y-1 pr-1">
+            {staffingList.map((s) => {
+              const current = categoryChanges[String(s.id)] || s.category || '단계감리팀';
+              const phase = sortedPhases.find((p) => {
+                const entry = Object.entries(staffingRows.find(r => Object.values(r.phaseMds).some(v => v.staffingId === s.id))?.phaseMds || {});
+                return entry.some(([pid]) => Number(pid) === p.id);
+              });
+              const phaseName = phases.find((p) =>
+                staffingRows.some((r) => Object.values(r.phaseMds).some((v) => v.staffingId === s.id) && r.phaseMds[p.id])
+              )?.phase_name ?? '';
+              return (
+                <div key={s.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-slate-50">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-medium text-slate-800">{s.person_name_text}</span>
+                    <span className="text-[10px] text-slate-500 ml-1.5">{s.field}</span>
+                  </div>
+                  <Select
+                    value={current}
+                    onValueChange={(val) => setCategoryChanges((prev) => ({ ...prev, [String(s.id)]: val }))}
+                  >
+                    <SelectTrigger className={`h-6 text-[11px] w-[120px] ${
+                      current === '단계감리팀'
+                        ? 'border-blue-300 text-blue-700 bg-blue-50'
+                        : 'border-green-300 text-green-700 bg-green-50'
+                    }`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="단계감리팀" className="text-xs">📋 단계감리팀</SelectItem>
+                      <SelectItem value="전문가팀" className="text-xs">🔧 전문가팀</SelectItem>
+                      <SelectItem value="핵심기술" className="text-xs">핵심기술</SelectItem>
+                      <SelectItem value="필수기술" className="text-xs">필수기술</SelectItem>
+                      <SelectItem value="보안진단" className="text-xs">보안진단</SelectItem>
+                      <SelectItem value="테스트" className="text-xs">테스트</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={() => setShowCategoryDialog(false)} disabled={savingCategory}>
+              취소
+            </Button>
+            <Button size="sm" onClick={saveCategoryChanges} disabled={savingCategory} className="bg-blue-600 hover:bg-blue-700 text-white">
+              {savingCategory ? '저장 중...' : '✅ 저장'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       </div>
     </TooltipProvider>
