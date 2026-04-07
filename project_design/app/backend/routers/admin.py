@@ -23,7 +23,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import desc, func, or_, select, and_
+from sqlalchemy import delete, desc, func, or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from slowapi import Limiter
@@ -1647,3 +1647,49 @@ async def delete_pending_user(
     await db.delete(pending)
     await db.commit()
     return {"ok": True, "deleted": user_id}
+
+
+# ══════════════════════════════════════════════════════════════
+# ── 고아 calendar_entries 정리 API ───────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+@router.post("/cleanup-orphan-calendar-entries")
+async def cleanup_orphan_calendar_entries(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin_only),
+):
+    """
+    soft-delete된 staffing에 연결된 고아 calendar_entries를 hard-delete합니다.
+    admin 전용 1회성 정리 작업.
+    """
+    from models.calendar_entries import Calendar_entries
+    from models.staffing import Staffing
+    from sqlalchemy import text
+
+    # 고아 수 먼저 집계
+    count_result = await db.execute(
+        select(func.count()).select_from(Calendar_entries).where(
+            Calendar_entries.staffing_id.not_in(
+                select(Staffing.id).where(Staffing.deleted_at.is_(None))
+            )
+        )
+    )
+    orphan_count = count_result.scalar() or 0
+
+    if orphan_count == 0:
+        return {"ok": True, "deleted": 0, "message": "고아 데이터가 없습니다."}
+
+    # hard-delete
+    del_result = await db.execute(
+        delete(Calendar_entries).where(
+            Calendar_entries.staffing_id.not_in(
+                select(Staffing.id).where(Staffing.deleted_at.is_(None))
+            )
+        )
+    )
+    await db.commit()
+    deleted = del_result.rowcount
+
+    logger.info(f"[ADMIN] 고아 calendar_entries {deleted}건 hard-delete 완료")
+    return {"ok": True, "deleted": deleted, "message": f"고아 calendar_entries {deleted}건 삭제 완료"}

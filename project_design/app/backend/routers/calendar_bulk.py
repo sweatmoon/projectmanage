@@ -256,7 +256,9 @@ async def cleanup_holiday_entries(
         await db.flush()
 
         # 2단계: 각 staffing별로 현재 엔트리 수와 MD를 비교하여 부족한 날짜 채우기
-        staffing_result = await db.execute(select(Staffing))
+        staffing_result = await db.execute(
+            select(Staffing).where(Staffing.deleted_at.is_(None))
+        )
         all_staffings = staffing_result.scalars().all()
 
         regenerated_count = 0
@@ -329,7 +331,9 @@ async def rebuild_all_calendars(
     기존 엔트리를 모두 삭제하고 MD 기준으로 다시 만듭니다.
     """
     try:
-        staffing_result = await db.execute(select(Staffing))
+        staffing_result = await db.execute(
+            select(Staffing).where(Staffing.deleted_at.is_(None))
+        )
         all_staffings = staffing_result.scalars().all()
 
         total_deleted = 0
@@ -411,10 +415,15 @@ async def get_month_entries(
         start = date(request.year, request.month, 1)
         end = date(request.year, request.month, last_day)
 
-        stmt = select(Calendar_entries).where(
-            and_(
-                Calendar_entries.entry_date >= start,
-                Calendar_entries.entry_date <= end,
+        stmt = (
+            select(Calendar_entries)
+            .join(Staffing, Calendar_entries.staffing_id == Staffing.id)
+            .where(
+                and_(
+                    Calendar_entries.entry_date >= start,
+                    Calendar_entries.entry_date <= end,
+                    Staffing.deleted_at.is_(None),
+                )
             )
         )
         if request.staffing_ids:
@@ -464,10 +473,15 @@ async def get_range_entries(
         start = date.fromisoformat(request.start_date)
         end = date.fromisoformat(request.end_date)
 
-        stmt = select(Calendar_entries).where(
-            and_(
-                Calendar_entries.entry_date >= start,
-                Calendar_entries.entry_date <= end,
+        stmt = (
+            select(Calendar_entries)
+            .join(Staffing, Calendar_entries.staffing_id == Staffing.id)
+            .where(
+                and_(
+                    Calendar_entries.entry_date >= start,
+                    Calendar_entries.entry_date <= end,
+                    Staffing.deleted_at.is_(None),
+                )
             )
         )
         if request.staffing_ids:
@@ -576,7 +590,10 @@ async def get_entries_by_person_ids(
             return PersonEntriesResponse(person_dates={})
 
         # 1. person_id → staffing_ids 매핑 구축 (exclude_project_id 소속 제외)
-        staffing_stmt = select(Staffing).where(Staffing.person_id.in_(request.person_ids))
+        staffing_stmt = select(Staffing).where(
+            Staffing.person_id.in_(request.person_ids),
+            Staffing.deleted_at.is_(None),
+        )
         staffing_result = await db.execute(staffing_stmt)
         all_staffings = staffing_result.scalars().all()
 

@@ -12,9 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import timezone
-from sqlalchemy import select, and_
+from sqlalchemy import select, delete, and_
 from core.database import get_db
 from models.staffing import Staffing
+from models.calendar_entries import Calendar_entries
 from services.phases import PhasesService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
@@ -166,7 +167,7 @@ async def update_phases(
 
 
 async def _cascade_soft_delete_phase(db: AsyncSession, phase_id: int) -> dict:
-    """phase 삭제 시 하위 staffing을 cascade soft-delete하고 건수를 반환"""
+    """phase 삭제 시 하위 staffing을 cascade soft-delete하고 calendar_entries를 hard-delete"""
     now = __import__('datetime').datetime.now(timezone.utc)
     result = await db.execute(
         select(Staffing).where(
@@ -174,9 +175,17 @@ async def _cascade_soft_delete_phase(db: AsyncSession, phase_id: int) -> dict:
         )
     )
     staffing_list = result.scalars().all()
+    staffing_ids = [s.id for s in staffing_list]
     for s in staffing_list:
         s.deleted_at = now
-    return {"staffing": len(staffing_list)}
+    # calendar_entries hard-delete (deleted_at 컬럼 없음)
+    cal_deleted = 0
+    if staffing_ids:
+        cal_result = await db.execute(
+            delete(Calendar_entries).where(Calendar_entries.staffing_id.in_(staffing_ids))
+        )
+        cal_deleted = cal_result.rowcount
+    return {"staffing": len(staffing_list), "calendar": cal_deleted}
 
 
 @router.delete("/batch")
@@ -185,12 +194,13 @@ async def delete_phasess_batch(
 ):
     service = PhasesService(db)
     deleted_count = 0
-    total_cascade = {"staffing": 0}
+    total_cascade = {"staffing": 0, "calendar": 0}
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
             cascade_stats = await _cascade_soft_delete_phase(db, item_id)
             total_cascade["staffing"] += cascade_stats["staffing"]
+            total_cascade["calendar"] += cascade_stats["calendar"]
             soft_delete(obj)
             deleted_count += 1
             ctx = await get_audit_context(db, project_id=obj.project_id)
@@ -199,7 +209,7 @@ async def delete_phasess_batch(
                 entity_id=item_id, project_id=obj.project_id, before_obj=obj, request=request,
                 project_name=ctx["project_name"], phase_name=obj.phase_name,
             )
-            logger.info(f"[CASCADE] Phase {item_id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete")
+            logger.info(f"[CASCADE] Phase {item_id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete, calendar {cascade_stats['calendar']}건 hard-delete")
     await db.commit()
     return {
         "message": f"Deleted {deleted_count} phases",
@@ -223,7 +233,7 @@ async def delete_phases(id: int, request: Request, db: AsyncSession = Depends(ge
         project_name=ctx["project_name"], phase_name=obj.phase_name,
     )
     await db.commit()
-    logger.info(f"[CASCADE] Phase {id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete")
+    logger.info(f"[CASCADE] Phase {id} 삭제 → staffing {cascade_stats['staffing']}건 soft-delete, calendar {cascade_stats['calendar']}건 hard-delete")
     return {
         "message": "Phases deleted",
         "id": id,
