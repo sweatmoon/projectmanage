@@ -1290,7 +1290,7 @@ export default function ProjectDetail() {
       for (const [sid, cat] of entries) {
         const orig = staffingList.find((s) => String(s.id) === sid);
         if (orig && orig.category !== cat) {
-          await client.entities.staffing.update({ id: sid, category: cat });
+          await client.entities.staffing.update({ id: sid, data: { category: cat } });
           changed++;
         }
       }
