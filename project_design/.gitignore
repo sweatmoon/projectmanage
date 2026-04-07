@@ -5,3 +5,7 @@ build/
 __pycache__
 dist
 vite.config.ts.timestamp-*
+.env
+.env.live
+.env.staging
+.env.local
