@@ -1,0 +1,51 @@
+name: 고아 calendar_entries 확인
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: 고아 calendar_entries 수 조회
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: PostgreSQL 클라이언트 설치
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y postgresql-client
+
+      - name: staging DB 확인
+        env:
+          PGPASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          echo "=== [staging] 고아 calendar_entries ==="
+          psql \
+            -h autorack.proxy.rlwy.net \
+            -p 16524 \
+            -U postgres \
+            -d railway \
+            -c "
+              SELECT COUNT(*) AS orphan_count
+              FROM calendar_entries
+              WHERE staffing_id NOT IN (
+                SELECT id FROM staffing WHERE deleted_at IS NULL
+              );
+            "
+
+      - name: live DB 확인
+        env:
+          PGPASSWORD: ${{ secrets.LIVE_DB_PASSWORD }}
+        run: |
+          echo "=== [live] 고아 calendar_entries ==="
+          psql \
+            -h maglev.proxy.rlwy.net \
+            -p 24651 \
+            -U postgres \
+            -d railway \
+            -c "
+              SELECT COUNT(*) AS orphan_count
+              FROM calendar_entries
+              WHERE staffing_id NOT IN (
+                SELECT id FROM staffing WHERE deleted_at IS NULL
+              );
+            "
