@@ -821,12 +821,13 @@ function EditModal({
   };
 
   const groupedStaffing = useMemo(() => {
-    const groups: { label: string; items: StaffingRow[] }[] = [
-      { label: '📋 단계감리팀', items: [] },
-      { label: '🔧 전문가팀', items: [] },
-    ];
-    for (const s of phaseStaffing) {
-      // DB category를 우선 사용; 없으면 field 기준 fallback
+    // ProjectDetail과 동일한 정렬 기준 적용
+    // sortGroup: 0=단계감리팀, 1=전문가팀
+    // sortOrder: 단계감리팀 → TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀 → 첫 등장 순서
+    type SortedRow = { s: StaffingRow; sortGroup: number; sortOrder: number };
+    const expertAppearOrder = new Map<string, number>();
+
+    const sorted: SortedRow[] = phaseStaffing.map((s, idx) => {
       const dbCat = s.category || '';
       let sortGroup: number;
       if (dbCat === '단계감리팀' || dbCat === '감리팀') {
@@ -836,6 +837,29 @@ function EditModal({
       } else {
         sortGroup = getTeamInfo(s.field).sortGroup;
       }
+
+      let sortOrder: number;
+      if (sortGroup === 0) {
+        sortOrder = getTeamInfo(s.field).sortOrder;
+      } else {
+        // 전문가팀: 인물+분야 기준 첫 등장 순서 유지
+        const key = `${s.person_name_text || s.person_id}||${s.field}`;
+        if (!expertAppearOrder.has(key)) expertAppearOrder.set(key, expertAppearOrder.size);
+        sortOrder = expertAppearOrder.get(key)!;
+      }
+      return { s, sortGroup, sortOrder };
+    });
+
+    sorted.sort((a, b) => {
+      if (a.sortGroup !== b.sortGroup) return a.sortGroup - b.sortGroup;
+      return a.sortOrder - b.sortOrder;
+    });
+
+    const groups: { label: string; items: StaffingRow[] }[] = [
+      { label: '📋 단계감리팀', items: [] },
+      { label: '🔧 전문가팀', items: [] },
+    ];
+    for (const { s, sortGroup } of sorted) {
       if (sortGroup === 0) groups[0].items.push(s);
       else groups[1].items.push(s);
     }
