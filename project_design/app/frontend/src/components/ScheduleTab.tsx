@@ -279,6 +279,24 @@ function getTeamInfo(field: string): { group: string; sortGroup: number; sortOrd
   return { group: '전문가팀', sortGroup: 1, sortOrder: 999 };
 }
 
+/** DB category값 우선, 없으면 field명으로 폴백 */
+function resolveTeamInfo(
+  field: string,
+  dbCategory?: string
+): { group: string; sortGroup: number; sortOrder: number } {
+  if (dbCategory) {
+    const isTeam = dbCategory === '단계감리팀' || dbCategory === '감리팀';
+    const isExpert = dbCategory === '전문가팀' || dbCategory === '핵심기술' ||
+                     dbCategory === '필수기술' || dbCategory === '보안진단' || dbCategory === '테스트';
+    if (isTeam) {
+      const order = TEAM_FIELD_ORDER.find((t) => t.pattern.test(field))?.order ?? 4;
+      return { group: '단계감리팀', sortGroup: 0, sortOrder: order };
+    }
+    if (isExpert) return { group: '전문가팀', sortGroup: 1, sortOrder: 999 };
+  }
+  return getTeamInfo(field);
+}
+
 /* ───────── Helpers ───────── */
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
@@ -1094,7 +1112,7 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       { label: '🔧 전문가팀', items: [] },
     ];
     for (const s of phaseStaffing) {
-      const info = getTeamInfo(s.field);
+      const info = resolveTeamInfo(s.field, s.category);
       if (info.sortGroup === 0) groups[0].items.push(s);
       else groups[1].items.push(s);
     }
@@ -2353,7 +2371,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (!checkedProjectIds.has(s.project_id)) continue;
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph) continue;
-      const teamInfo = getTeamInfo(s.field);
+      const teamInfo = resolveTeamInfo(s.field, s.category);
       const key = teamInfo.sortGroup * 1000 + teamInfo.sortOrder * 100 + ph.sort_order;
       const personKey = s.person_id ? s.person_id : `ext_${(s.person_name_text || '').trim()}`;
       const existing = personSortKey.get(personKey);
@@ -2577,7 +2595,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const ph = phaseMapLocal.get(s.phase_id);
       const projName = proj?.project_name || '미정';
       const phaseName = ph?.phase_name || '미정';
-      const teamInfo = getTeamInfo(s.field);
+      const teamInfo = resolveTeamInfo(s.field, s.category);
       map.set(s.id, {
         label: `${projName}_${phaseName}`,
         team: teamInfo.group,

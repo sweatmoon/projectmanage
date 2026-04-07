@@ -827,8 +827,17 @@ function EditModal({
       { label: '🔧 전문가팀', items: [] },
     ];
     for (const s of phaseStaffing) {
-      const info = getTeamInfo(s.field);
-      if (info.sortGroup === 0) groups[0].items.push(s);
+      // DB category를 우선 사용; 없으면 field 기준 fallback
+      const dbCat = s.category || '';
+      let sortGroup: number;
+      if (dbCat === '단계감리팀' || dbCat === '감리팀') {
+        sortGroup = 0;
+      } else if (dbCat === '전문가팀' || dbCat === '핵심기술' || dbCat === '필수기술' || dbCat === '보안진단' || dbCat === '테스트') {
+        sortGroup = 1;
+      } else {
+        sortGroup = getTeamInfo(s.field).sortGroup;
+      }
+      if (sortGroup === 0) groups[0].items.push(s);
       else groups[1].items.push(s);
     }
     return groups.filter((g) => g.items.length > 0);
