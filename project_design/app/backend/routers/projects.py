@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -20,6 +20,7 @@ from core.database import get_db
 from models.projects import Projects
 from models.phases import Phases
 from models.staffing import Staffing
+from models.calendar_entries import Calendar_entries
 from services.projects import ProjectsService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 from utils.sanitize import sanitize_project_data
@@ -54,14 +55,24 @@ async def _cascade_soft_delete_project(db: AsyncSession, project_id: int, now: d
         )
     )
     staffings = staffing_result.scalars().all()
+    staffing_ids = [st.id for st in staffings]
     for st in staffings:
         st.deleted_at = now
 
+    # calendar_entries hard-delete (deleted_at 컬럼 없음)
+    cal_deleted = 0
+    if staffing_ids:
+        cal_result = await db.execute(
+            delete(Calendar_entries).where(Calendar_entries.staffing_id.in_(staffing_ids))
+        )
+        cal_deleted = cal_result.rowcount
+
     logger.info(
         f"[CASCADE] project_id={project_id} → "
-        f"phases {len(phases)}개, staffing {len(staffings)}개 cascade soft-delete"
+        f"phases {len(phases)}개, staffing {len(staffings)}개 cascade soft-delete, "
+        f"calendar {cal_deleted}건 hard-delete"
     )
-    return {"phases": len(phases), "staffing": len(staffings)}
+    return {"phases": len(phases), "staffing": len(staffings), "calendar": cal_deleted}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/projects", tags=["projects"])

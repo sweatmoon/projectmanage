@@ -10,10 +10,11 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from models.calendar_entries import Calendar_entries
 from services.staffing import StaffingService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 
@@ -251,10 +252,12 @@ async def delete_staffings_batch(
 ):
     service = StaffingService(db)
     deleted_count = 0
+    deleted_ids = []
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
             soft_delete(obj)
+            deleted_ids.append(item_id)
             deleted_count += 1
             ctx = await get_audit_context(
                 db, project_id=obj.project_id, phase_id=obj.phase_id, person_id=obj.person_id,
@@ -269,6 +272,11 @@ async def delete_staffings_batch(
                 person_name=person_name,
                 field_name=obj.field,
             )
+    # calendar_entries hard-delete
+    if deleted_ids:
+        await db.execute(
+            delete(Calendar_entries).where(Calendar_entries.staffing_id.in_(deleted_ids))
+        )
     await db.commit()
     return {"message": f"Deleted {deleted_count} staffings", "deleted_count": deleted_count}
 
@@ -294,6 +302,10 @@ async def delete_staffing(
         phase_name=ctx["phase_name"],
         person_name=person_name,
         field_name=obj.field,
+    )
+    # calendar_entries hard-delete
+    await db.execute(
+        delete(Calendar_entries).where(Calendar_entries.staffing_id == id)
     )
     await db.commit()
     return {"message": "Staffing deleted", "id": id}
