@@ -31,7 +31,6 @@ const wonGanttStyle = `
     #fd79a8, #ff6b6b) !important;
   background-size: 300% 300% !important;
   animation: ganttRainbow 3s ease infinite !important;
-  position: relative;
   overflow: hidden;
 }
 .won-gantt-bar::after {
