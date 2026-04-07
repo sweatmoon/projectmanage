@@ -1,11 +1,12 @@
 """
 Projects 라우터 — Audit Log 통합
 CREATE/UPDATE/DELETE(soft) 이벤트 자동 기록
+프로젝트 삭제 시 하위 단계(phases) · 스태핑(staffing) cascade soft-delete 포함
 """
 import json
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,11 +18,50 @@ from slowapi.util import get_remote_address
 
 from core.database import get_db
 from models.projects import Projects
+from models.phases import Phases
+from models.staffing import Staffing
 from services.projects import ProjectsService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
 from utils.sanitize import sanitize_project_data
 
 limiter = Limiter(key_func=get_remote_address)
+
+
+async def _cascade_soft_delete_project(db: AsyncSession, project_id: int, now: datetime) -> dict:
+    """프로젝트 삭제 시 하위 단계 · 스태핑을 함께 soft-delete.
+
+    Returns:
+        {"phases": int, "staffing": int}  — 처리된 건수
+    """
+    # 활성 단계 조회
+    phase_result = await db.execute(
+        select(Phases).where(
+            Phases.project_id == project_id,
+            Phases.deleted_at.is_(None),
+        )
+    )
+    phases = phase_result.scalars().all()
+
+    phase_ids = [ph.id for ph in phases]
+    for ph in phases:
+        ph.deleted_at = now
+
+    # 활성 스태핑 조회 (project_id 기준 — phase가 이미 삭제됐어도 포함)
+    staffing_result = await db.execute(
+        select(Staffing).where(
+            Staffing.project_id == project_id,
+            Staffing.deleted_at.is_(None),
+        )
+    )
+    staffings = staffing_result.scalars().all()
+    for st in staffings:
+        st.deleted_at = now
+
+    logger.info(
+        f"[CASCADE] project_id={project_id} → "
+        f"phases {len(phases)}개, staffing {len(staffings)}개 cascade soft-delete"
+    )
+    return {"phases": len(phases), "staffing": len(staffings)}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/projects", tags=["projects"])
@@ -233,17 +273,27 @@ async def delete_projectss_batch(
 ):
     service = ProjectsService(db)
     deleted_count = 0
+    now = datetime.now(timezone.utc)
+    cascade_summary = {"phases": 0, "staffing": 0}
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
             soft_delete(obj)
             deleted_count += 1
+            # ── cascade: 하위 단계·스태핑 soft-delete ──────────
+            result = await _cascade_soft_delete_project(db, item_id, now)
+            cascade_summary["phases"]   += result["phases"]
+            cascade_summary["staffing"] += result["staffing"]
             await write_audit_log(
                 db, event_type=EventType.DELETE, entity_type=EntityType.PROJECT,
                 entity_id=item_id, before_obj=obj, request=request,
             )
     await db.commit()
-    return {"message": f"Deleted {deleted_count} projects", "deleted_count": deleted_count}
+    return {
+        "message": f"Deleted {deleted_count} projects",
+        "deleted_count": deleted_count,
+        "cascade": cascade_summary,
+    }
 
 
 @router.delete("/{id}")
@@ -252,14 +302,18 @@ async def delete_projects(id: int, request: Request, db: AsyncSession = Depends(
     obj = await service.get_by_id(id)
     if not obj:
         raise HTTPException(status_code=404, detail="Projects not found")
+    now = datetime.now(timezone.utc)
     soft_delete(obj)
+    # ── cascade: 하위 단계·스태핑 soft-delete ──────────────────
+    cascade = await _cascade_soft_delete_project(db, id, now)
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PROJECT,
         entity_id=id, before_obj=obj, request=request,
         project_name=obj.project_name,
     )
     await db.commit()
-    return {"message": "Projects deleted", "id": id}
+    logger.info(f"[DELETE] project_id={id} cascade → {cascade}")
+    return {"message": "Projects deleted", "id": id, "cascade": cascade}
 
 
 # ── Restore (soft-delete 복원) ────────────────────────────────
