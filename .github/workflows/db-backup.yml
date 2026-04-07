@@ -1,0 +1,75 @@
+name: DB 자동 백업 (staging + live)
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 매일 새벽 5시 (KST = UTC+9, 20:00 UTC)
+  workflow_dispatch:       # 수동 실행 가능
+
+jobs:
+  backup:
+    name: PostgreSQL 백업
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: PostgreSQL 클라이언트 설치
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y postgresql-client
+
+      - name: staging DB 백업
+        env:
+          PGPASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          DATE=$(date +%Y%m%d_%H%M%S)
+          pg_dump \
+            -h autorack.proxy.rlwy.net \
+            -p 16524 \
+            -U postgres \
+            -d railway \
+            --no-owner --no-acl \
+            | gzip > staging_backup_${DATE}.sql.gz
+          echo "STAGING_BACKUP_FILE=staging_backup_${DATE}.sql.gz" >> $GITHUB_ENV
+          echo "✅ staging 백업 완료: staging_backup_${DATE}.sql.gz"
+          ls -lh staging_backup_${DATE}.sql.gz
+
+      - name: live DB 백업
+        env:
+          PGPASSWORD: ${{ secrets.LIVE_DB_PASSWORD }}
+        run: |
+          DATE=$(date +%Y%m%d_%H%M%S)
+          pg_dump \
+            -h maglev.proxy.rlwy.net \
+            -p 24651 \
+            -U postgres \
+            -d railway \
+            --no-owner --no-acl \
+            | gzip > live_backup_${DATE}.sql.gz
+          echo "LIVE_BACKUP_FILE=live_backup_${DATE}.sql.gz" >> $GITHUB_ENV
+          echo "✅ live 백업 완료: live_backup_${DATE}.sql.gz"
+          ls -lh live_backup_${DATE}.sql.gz
+
+      - name: 백업 파일 업로드 (GitHub Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            staging_backup_*.sql.gz
+            live_backup_*.sql.gz
+          retention-days: 30  # 30일 보관
+
+      - name: 백업 완료 요약
+        run: |
+          echo "## 🗄️ DB 백업 완료" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 환경 | 파일 | 크기 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|------|" >> $GITHUB_STEP_SUMMARY
+          for f in staging_backup_*.sql.gz; do
+            SIZE=$(ls -lh $f | awk '{print $5}')
+            echo "| staging | $f | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
+          for f in live_backup_*.sql.gz; do
+            SIZE=$(ls -lh $f | awk '{print $5}')
+            echo "| live | $f | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "보관 기간: 30일" >> $GITHUB_STEP_SUMMARY
