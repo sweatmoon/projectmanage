@@ -1270,28 +1270,38 @@ export default function ProjectDetail() {
     }
   };
 
-  // 팀구분 일괄 변경 열기 — 현재 staffing의 category 값으로 초기화
+  // 팀구분 dialog: 인물+분야 그룹키 생성
+  const makeCatGroupKey = (s: { person_name_text?: string; field?: string }) =>
+    `${s.person_name_text || ''}||${s.field || ''}`;
+
+  // 팀구분 일괄 변경 열기 — 인물+분야 단위로 그룹화해서 초기화
   const openCategoryDialog = () => {
     const init: Record<string, string> = {};
     staffingList.forEach((s) => {
-      init[String(s.id)] = s.category || '단계감리팀';
+      const key = makeCatGroupKey(s);
+      // 같은 그룹이면 첫 번째 값 사용 (모두 같아야 하므로)
+      if (!(key in init)) {
+        init[key] = s.category || '단계감리팀';
+      }
     });
     setCategoryChanges(init);
     setShowCategoryDialog(true);
   };
 
-  // 팀구분 일괄 저장
+  // 팀구분 일괄 저장 — 그룹키에 속하는 모든 staffingId에 적용
   const saveCategoryChanges = async () => {
     if (isLocked) return;
     setSavingCategory(true);
     try {
-      const entries = Object.entries(categoryChanges);
       let changed = 0;
-      for (const [sid, cat] of entries) {
-        const orig = staffingList.find((s) => String(s.id) === sid);
-        if (orig && orig.category !== cat) {
-          await client.entities.staffing.update({ id: sid, data: { category: cat } });
-          changed++;
+      for (const [groupKey, cat] of Object.entries(categoryChanges)) {
+        // 해당 그룹의 모든 staffing
+        const targets = staffingList.filter((s) => makeCatGroupKey(s) === groupKey);
+        for (const s of targets) {
+          if (s.category !== cat) {
+            await client.entities.staffing.update({ id: String(s.id), data: { category: cat } });
+            changed++;
+          }
         }
       }
       toast.success(`팀구분 ${changed}건 변경 완료`);
@@ -2872,11 +2882,11 @@ export default function ProjectDetail() {
               className="text-xs h-7 border-slate-300 text-slate-600 hover:bg-slate-50"
               onClick={() => {
                 const next = { ...categoryChanges };
-                staffingList.forEach((s) => {
-                  // field명 기준 자동 분류 (백엔드와 동일 규칙)
+                // 그룹키(인물||분야) 기준으로 자동 분류
+                Object.keys(next).forEach((groupKey) => {
+                  const field = groupKey.split('||')[1] || '';
                   const teamFields = ['사업관리', '응용시스템', '데이터베이스', '시스템구조', '시스템 구조'];
-                  const isTeam = teamFields.some((p) => (s.field || '').includes(p));
-                  next[String(s.id)] = isTeam ? '단계감리팀' : '전문가팀';
+                  next[groupKey] = teamFields.some((p) => field.includes(p)) ? '단계감리팀' : '전문가팀';
                 });
                 setCategoryChanges(next);
               }}
@@ -2885,46 +2895,56 @@ export default function ProjectDetail() {
             </Button>
           </div>
 
-          {/* 인력별 목록 */}
+          {/* 인물+분야 그룹 단위 목록 (중복 제거) */}
           <div className="overflow-y-auto flex-1 space-y-1 pr-1">
-            {staffingList.map((s) => {
-              const current = categoryChanges[String(s.id)] || s.category || '단계감리팀';
-              const phase = sortedPhases.find((p) => {
-                const entry = Object.entries(staffingRows.find(r => Object.values(r.phaseMds).some(v => v.staffingId === s.id))?.phaseMds || {});
-                return entry.some(([pid]) => Number(pid) === p.id);
-              });
-              const phaseName = phases.find((p) =>
-                staffingRows.some((r) => Object.values(r.phaseMds).some((v) => v.staffingId === s.id) && r.phaseMds[p.id])
-              )?.phase_name ?? '';
-              return (
-                <div key={s.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-slate-50">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-medium text-slate-800">{s.person_name_text}</span>
-                    <span className="text-[10px] text-slate-500 ml-1.5">{s.field}</span>
-                  </div>
-                  <Select
-                    value={current}
-                    onValueChange={(val) => setCategoryChanges((prev) => ({ ...prev, [String(s.id)]: val }))}
-                  >
-                    <SelectTrigger className={`h-6 text-[11px] w-[120px] ${
-                      current === '단계감리팀'
-                        ? 'border-blue-300 text-blue-700 bg-blue-50'
-                        : 'border-green-300 text-green-700 bg-green-50'
-                    }`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="단계감리팀" className="text-xs">📋 단계감리팀</SelectItem>
-                      <SelectItem value="전문가팀" className="text-xs">🔧 전문가팀</SelectItem>
-                      <SelectItem value="핵심기술" className="text-xs">핵심기술</SelectItem>
-                      <SelectItem value="필수기술" className="text-xs">필수기술</SelectItem>
-                      <SelectItem value="보안진단" className="text-xs">보안진단</SelectItem>
-                      <SelectItem value="테스트" className="text-xs">테스트</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              );
-            })}
+            {(() => {
+              // 이미 처리한 그룹키 추적해서 중복 제거
+              const seen = new Set<string>();
+              return staffingList
+                .filter((s) => {
+                  const key = makeCatGroupKey(s);
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                })
+                .map((s) => {
+                  const groupKey = makeCatGroupKey(s);
+                  const current = categoryChanges[groupKey] || s.category || '단계감리팀';
+                  // 이 그룹에 속하는 단계 수
+                  const phaseCount = staffingList.filter((x) => makeCatGroupKey(x) === groupKey).length;
+                  return (
+                    <div key={groupKey} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-slate-50">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-slate-800">{s.person_name_text}</span>
+                        <span className="text-[10px] text-slate-500 ml-1.5">{s.field}</span>
+                        {phaseCount > 1 && (
+                          <span className="text-[9px] text-slate-400 ml-1">({phaseCount}개 단계)</span>
+                        )}
+                      </div>
+                      <Select
+                        value={current}
+                        onValueChange={(val) => setCategoryChanges((prev) => ({ ...prev, [groupKey]: val }))}
+                      >
+                        <SelectTrigger className={`h-6 text-[11px] w-[120px] ${
+                          current === '단계감리팀'
+                            ? 'border-blue-300 text-blue-700 bg-blue-50'
+                            : 'border-green-300 text-green-700 bg-green-50'
+                        }`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="단계감리팀" className="text-xs">📋 단계감리팀</SelectItem>
+                          <SelectItem value="전문가팀" className="text-xs">🔧 전문가팀</SelectItem>
+                          <SelectItem value="핵심기술" className="text-xs">핵심기술</SelectItem>
+                          <SelectItem value="필수기술" className="text-xs">필수기술</SelectItem>
+                          <SelectItem value="보안진단" className="text-xs">보안진단</SelectItem>
+                          <SelectItem value="테스트" className="text-xs">테스트</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                });
+            })()}
           </div>
 
           <DialogFooter className="pt-2 border-t">
