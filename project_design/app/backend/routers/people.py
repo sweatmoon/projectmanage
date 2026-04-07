@@ -11,10 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from core.database import get_db
 from services.people import PeopleService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
+from utils.sanitize import sanitize_person_data
+
+limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/people", tags=["people"])
@@ -106,11 +111,12 @@ async def get_people(id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=PeopleResponse, status_code=201)
+@limiter.limit("60/minute")  # 생성 엔드포인트 Rate Limit: 60회/분
 async def create_people(
     data: PeopleData, request: Request, db: AsyncSession = Depends(get_db)
 ):
     service = PeopleService(db)
-    result = await service.create(data.model_dump())
+    result = await service.create(sanitize_person_data(data.model_dump()))  # XSS 방어 sanitize
     if not result:
         raise HTTPException(status_code=400, detail="Failed to create people")
     await write_audit_log(
@@ -151,6 +157,7 @@ async def update_peoples_batch(
     for item in req.items:
         before = await service.get_by_id(item.id)
         update_dict = {k: v for k, v in item.updates.model_dump().items() if v is not None}
+        update_dict = sanitize_person_data(update_dict)  # XSS 방어 sanitize
         r = await service.update(item.id, update_dict)
         if r:
             results.append(r)
@@ -172,6 +179,7 @@ async def update_people(
     if not before:
         raise HTTPException(status_code=404, detail="People not found")
     update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
+    update_dict = sanitize_person_data(update_dict)  # XSS 방어 sanitize
     result = await service.update(id, update_dict)
     await write_audit_log(
         db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,

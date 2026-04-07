@@ -12,11 +12,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from core.database import get_db
 from models.projects import Projects
 from services.projects import ProjectsService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType, get_audit_context
+from utils.sanitize import sanitize_project_data
+
+limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/entities/projects", tags=["projects"])
@@ -132,11 +137,12 @@ async def get_projects(id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=ProjectsResponse, status_code=201)
+@limiter.limit("60/minute")  # 생성 엔드포인트 Rate Limit: 60회/분
 async def create_projects(
     data: ProjectsData, request: Request, db: AsyncSession = Depends(get_db)
 ):
     service = ProjectsService(db)
-    project_data = data.model_dump()
+    project_data = sanitize_project_data(data.model_dump())  # XSS 방어 sanitize
     project_data['color_hue'] = await assign_color_hue(db)
     result = await service.create(project_data)
     if not result:
@@ -152,13 +158,14 @@ async def create_projects(
 
 
 @router.post("/batch", response_model=List[ProjectsResponse], status_code=201)
+@limiter.limit("20/minute")  # 맹대 생성 Rate Limit: 20회/분
 async def create_projectss_batch(
     req: ProjectsBatchCreateRequest, request: Request, db: AsyncSession = Depends(get_db)
 ):
     service = ProjectsService(db)
     results = []
     for item_data in req.items:
-        project_data = item_data.model_dump()
+        project_data = sanitize_project_data(item_data.model_dump())  # XSS 방어 sanitize
         project_data['color_hue'] = await assign_color_hue(db)
         r = await service.create(project_data)
         if r:
@@ -183,6 +190,7 @@ async def update_projectss_batch(
         # is_won은 False도 유효한 값이므로 별도 처리
         if item.updates.is_won is not None:
             update_dict['is_won'] = item.updates.is_won
+        update_dict = sanitize_project_data(update_dict)  # XSS 방어 sanitize
         r = await service.update(item.id, update_dict)
         if r:
             results.append(r)
@@ -207,6 +215,7 @@ async def update_projects(
     # is_won은 False도 유효한 값이므로 별도 처리
     if data.is_won is not None:
         update_dict['is_won'] = data.is_won
+    update_dict = sanitize_project_data(update_dict)  # XSS 방어 sanitize
     result = await service.update(id, update_dict)
     event_type = EventType.STATUS_CHANGE if "status" in update_dict else EventType.UPDATE
     await write_audit_log(
