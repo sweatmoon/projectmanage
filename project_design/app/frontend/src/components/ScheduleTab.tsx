@@ -1105,15 +1105,36 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
     onSave(pendingProjectUpdates, pendingPhaseUpdates, pendingStaffingChanges.length > 0 ? pendingStaffingChanges : undefined);
   };
 
-  // Group staffing by team (excluding deleted)
+  // Group staffing by team with sort (ProjectGanttTab/ProjectDetail과 동일 기준)
   const groupedStaffing = useMemo(() => {
+    type SortedRow = { s: StaffingRow; sortGroup: number; sortOrder: number };
+    const expertAppearOrder = new Map<string, number>();
+
+    const sorted: SortedRow[] = phaseStaffing.map((s) => {
+      const info = resolveTeamInfo(s.field, s.category);
+      const { sortGroup } = info;
+      let sortOrder: number;
+      if (sortGroup === 0) {
+        sortOrder = info.sortOrder;
+      } else {
+        const key = `${s.person_name_text || s.person_id}||${s.field}`;
+        if (!expertAppearOrder.has(key)) expertAppearOrder.set(key, expertAppearOrder.size);
+        sortOrder = expertAppearOrder.get(key)!;
+      }
+      return { s, sortGroup, sortOrder };
+    });
+
+    sorted.sort((a, b) => {
+      if (a.sortGroup !== b.sortGroup) return a.sortGroup - b.sortGroup;
+      return a.sortOrder - b.sortOrder;
+    });
+
     const groups: { label: string; items: StaffingRow[] }[] = [
       { label: '📋 단계감리팀', items: [] },
       { label: '🔧 전문가팀', items: [] },
     ];
-    for (const s of phaseStaffing) {
-      const info = resolveTeamInfo(s.field, s.category);
-      if (info.sortGroup === 0) groups[0].items.push(s);
+    for (const { s, sortGroup } of sorted) {
+      if (sortGroup === 0) groups[0].items.push(s);
       else groups[1].items.push(s);
     }
     return groups.filter((g) => g.items.length > 0);
