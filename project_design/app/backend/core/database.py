@@ -210,8 +210,9 @@ class DatabaseManager:
         """people 테이블에 누락된 컬럼을 안전하게 추가 (데이터 보존)"""
         try:
             async with self.engine.begin() as conn:
-                # PostgreSQL / SQLite 모두 지원하는 방식으로 컬럼 존재 여부 확인
                 db_url = str(self.engine.url)
+
+                # ── position 컬럼 ──────────────────────────────────
                 if "postgresql" in db_url:
                     result = await conn.execute(
                         text(
@@ -219,17 +220,38 @@ class DatabaseManager:
                             "WHERE table_name='people' AND column_name='position'"
                         )
                     )
-                    exists = result.fetchone() is not None
+                    position_exists = result.fetchone() is not None
                 else:
                     result = await conn.execute(text("PRAGMA table_info(people)"))
                     cols = [row[1] for row in result.fetchall()]
-                    exists = "position" in cols
+                    position_exists = "position" in cols
 
-                if not exists:
+                if not position_exists:
                     await conn.execute(text("ALTER TABLE people ADD COLUMN position VARCHAR"))
                     logger.info("Migration: people.position 컬럼 추가 완료")
                 else:
                     logger.debug("Migration: people.position 컬럼 이미 존재")
+
+                # ── company 컬럼 ───────────────────────────────────
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='people' AND column_name='company'"
+                        )
+                    )
+                    company_exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(people)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    company_exists = "company" in cols
+
+                if not company_exists:
+                    await conn.execute(text("ALTER TABLE people ADD COLUMN company VARCHAR"))
+                    logger.info("Migration: people.company 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: people.company 컬럼 이미 존재")
+
         except Exception as e:
             logger.warning(f"Migration _migrate_people_table 중 오류 (무시): {e}")
 
