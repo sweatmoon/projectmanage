@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -120,6 +120,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
   const [search, setSearch] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<string>('전체');
   const [uploading, setUploading] = useState(false);
+  const [remapping, setRemapping] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -297,6 +298,29 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
     }
   };
 
+  const handleRemapAll = async () => {
+    const confirmed = window.confirm(
+      '전체 인력 재매핑을 실행합니다.\n\n' +
+      '모든 프로젝트의 투입 인력을 현재 인력DB 기준으로 재연결합니다.\n' +
+      '계속하시겠습니까?'
+    );
+    if (!confirmed) return;
+
+    setRemapping(true);
+    try {
+      const result = await client.people.remapAll();
+      toast.success(
+        `재매핑 완료: ${result.remapped}건 연결 (전체 인력 ${result.total_people}명 기준)`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Remap failed:', err);
+      toast.error('재매핑 중 오류가 발생했습니다.');
+    } finally {
+      setRemapping(false);
+    }
+  };
+
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     const confirmed = window.confirm(`선택한 ${selectedIds.size}명의 인력을 삭제하시겠습니까?`);
@@ -345,6 +369,21 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
           <Download className="h-4 w-4 mr-1" />
           양식 다운로드
         </Button>
+        {canWrite && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRemapAll}
+            disabled={remapping}
+            title="전체 인력을 기준으로 모든 프로젝트 투입 인력을 재연결합니다"
+            className="text-orange-600 border-orange-200 hover:bg-orange-50 hover:border-orange-400"
+          >
+            {remapping
+              ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              : <RefreshCw className="h-4 w-4 mr-1" />}
+            전체 재매핑
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"

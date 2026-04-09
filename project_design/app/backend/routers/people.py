@@ -115,37 +115,64 @@ async def get_people(id: int, db: AsyncSession = Depends(get_db)):
 
 
 async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
-    """주어진 이름 목록과 일치하는 미매핑 staffing(person_id=None)에 person_id를 자동 연결"""
+    """주어진 이름 목록과 일치하는 staffing / staffing_hat의 person_id를 자동 연결/재매핑.
+    - person_id=None 인 미매핑 staffing → person_id 연결
+    - person_id가 있어도 person_name_text 기준 올바른 People를 가리키지 않으면 재매핑
+    - StaffingHat(actual_person_id)도 동일하게 처리
+    """
     if not names:
         return 0
-    # 대상 staffing 조회: person_id 없고 person_name_text가 names 중 하나인 것
+
+    from models.people import People
+    try:
+        from models.staffing_hat import StaffingHat
+        has_hat = True
+    except ImportError:
+        has_hat = False
+
+    # 1) People 테이블에서 해당 이름들 일괄 조회
+    people_stmt = select(People).where(
+        and_(People.person_name.in_(names), People.deleted_at.is_(None))
+    )
+    people_result = await db.execute(people_stmt)
+    people_by_name: dict[str, People] = {
+        p.person_name.strip(): p for p in people_result.scalars().all()
+    }
+    if not people_by_name:
+        return 0
+
+    remapped = 0
+
+    # 2) Staffing 재매핑: person_name_text가 names 중 하나인 모든 행 (삭제되지 않은 것)
     stmt = select(Staffing).where(
         and_(
-            Staffing.person_id.is_(None),
             Staffing.person_name_text.in_(names),
             Staffing.deleted_at.is_(None),
         )
     )
     result = await db.execute(stmt)
-    unmapped = result.scalars().all()
-    if not unmapped:
-        return 0
-
-    # People 테이블에서 해당 이름들 조회
-    from models.people import People
-    people_stmt = select(People).where(
-        and_(People.person_name.in_(names), People.deleted_at.is_(None))
-    )
-    people_result = await db.execute(people_stmt)
-    people_by_name = {p.person_name.strip(): p for p in people_result.scalars().all()}
-
-    remapped = 0
-    for s in unmapped:
+    staffings = result.scalars().all()
+    for s in staffings:
         name = (s.person_name_text or '').strip()
         matched = people_by_name.get(name)
-        if matched:
+        if matched and s.person_id != matched.id:
             s.person_id = matched.id
             remapped += 1
+
+    # 3) StaffingHat 재매핑: actual_person_name이 names 중 하나인 모든 행
+    if has_hat:
+        hat_stmt = select(StaffingHat).where(
+            StaffingHat.actual_person_name.in_(names),
+        )
+        hat_result = await db.execute(hat_stmt)
+        hats = hat_result.scalars().all()
+        for h in hats:
+            name = (h.actual_person_name or '').strip()
+            matched = people_by_name.get(name)
+            if matched and h.actual_person_id != matched.id:
+                h.actual_person_id = matched.id
+                remapped += 1
+
     logger.info(f"[REMAP] staffing auto-remap: {remapped}건 (names={names})")
     return remapped
 
@@ -259,10 +286,10 @@ async def upsert_peoples_batch(
             logger.error(f"[UPSERT] failed for '{name}': {e}")
             skipped_list.append(name)
 
-    # 신규 생성된 인력 이름으로 미매핑 staffing 자동 연결
-    new_names = [r.person_name for r in created_list]
-    if new_names:
-        await _remap_staffing_by_names(db, new_names)
+    # 신규 생성 + 업데이트된 인력 이름 모두 remap 대상에 포함
+    all_upserted_names = [r.person_name for r in created_list] + [r.person_name for r in updated_list]
+    if all_upserted_names:
+        await _remap_staffing_by_names(db, all_upserted_names)
     await db.commit()
 
     logger.info(f"[UPSERT] created={len(created_list)}, updated={len(updated_list)}, skipped={len(skipped_list)}")
@@ -351,6 +378,35 @@ async def delete_people(
     )
     await db.commit()
     return {"message": "People deleted", "id": id}
+
+
+class RemapAllResponse(BaseModel):
+    remapped: int
+    total_people: int
+
+
+@router.post("/remap-all", response_model=RemapAllResponse)
+async def remap_all_staffing(
+    request: Request, db: AsyncSession = Depends(get_db)
+):
+    """전체 인력 이름 기준으로 모든 staffing / staffing_hat의 person_id를 재매핑.
+    인력 일괄 업데이트 후 프로젝트에 연결된 인력이 올바르게 표시되지 않을 때 사용."""
+    from models.people import People
+
+    # 모든 활성 인력 이름 수집
+    all_people_stmt = select(People).where(People.deleted_at.is_(None))
+    all_people_result = await db.execute(all_people_stmt)
+    all_people = all_people_result.scalars().all()
+    all_names = [p.person_name for p in all_people if p.person_name]
+
+    if not all_names:
+        return RemapAllResponse(remapped=0, total_people=0)
+
+    remapped = await _remap_staffing_by_names(db, all_names)
+    await db.commit()
+
+    logger.info(f"[REMAP-ALL] total_people={len(all_names)}, remapped={remapped}")
+    return RemapAllResponse(remapped=remapped, total_people=len(all_names))
 
 
 @router.post("/{id}/restore")
