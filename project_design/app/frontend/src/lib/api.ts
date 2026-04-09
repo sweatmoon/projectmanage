@@ -250,6 +250,11 @@ export const client = {
       const res = await http.post('/api/v1/entities/people/batch-upsert', { items });
       return res.data;
     },
+
+    async remapAll(): Promise<{ remapped: number; total_people: number }> {
+      const res = await http.post('/api/v1/entities/people/remap-all', {});
+      return res.data;
+    },
   },
 
   apiCall: {
