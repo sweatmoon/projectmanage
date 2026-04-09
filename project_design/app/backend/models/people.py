@@ -12,4 +12,5 @@ class People(Base):
     team              = Column(String,  nullable=True)   # 팀 (레거시, UI에서 숨김)
     grade             = Column(String,  nullable=True)   # 감리원 등급 (특급/고급/중급/초급)
     employment_status = Column(String,  nullable=True)   # 구분 (재직/외부/퇴사)
+    company           = Column(String,  nullable=True)   # 소속 회사
     deleted_at        = Column(DateTime(timezone=True), nullable=True, index=True)  # soft-delete

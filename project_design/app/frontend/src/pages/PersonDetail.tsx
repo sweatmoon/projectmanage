@@ -13,6 +13,7 @@ interface Person {
   team?: string;
   grade?: string;
   employment_status?: string;
+  company?: string;
 }
 
 interface Project {
@@ -276,8 +277,13 @@ export default function PersonDetail() {
             </div>
           </div>
 
-          {/* 하단: 3개 필드 — 클릭하면 인라인 편집 */}
-          <div className="px-6 py-4 grid grid-cols-3 gap-6">
+          {/* 하단: 4개 필드 — 클릭하면 인라인 편집 */}
+          <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-6">
+            <InlineField
+              label="회사"
+              value={person.company || ''}
+              onSave={(val) => saveField('company', val)}
+            />
             <InlineField
               label="직급"
               value={person.position || ''}

@@ -32,6 +32,7 @@ class PeopleData(BaseModel):
     team: Optional[str] = None              # 팀 (레거시)
     grade: Optional[str] = None             # 감리원 등급
     employment_status: Optional[str] = None  # 구분
+    company: Optional[str] = None           # 소속 회사
 
 
 class PeopleUpdateData(BaseModel):
@@ -40,6 +41,7 @@ class PeopleUpdateData(BaseModel):
     team: Optional[str] = None
     grade: Optional[str] = None
     employment_status: Optional[str] = None
+    company: Optional[str] = None
 
 
 class PeopleResponse(BaseModel):
@@ -49,6 +51,7 @@ class PeopleResponse(BaseModel):
     team: Optional[str] = None
     grade: Optional[str] = None
     employment_status: Optional[str] = None
+    company: Optional[str] = None
 
     class Config:
         from_attributes = True
