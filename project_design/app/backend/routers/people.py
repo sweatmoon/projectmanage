@@ -9,12 +9,13 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from core.database import get_db
+from models.staffing import Staffing
 from services.people import PeopleService
 from services.audit_service import write_audit_log, soft_delete, EventType, EntityType
 from utils.sanitize import sanitize_person_data
@@ -113,6 +114,42 @@ async def get_people(id: int, db: AsyncSession = Depends(get_db)):
     return result
 
 
+async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
+    """주어진 이름 목록과 일치하는 미매핑 staffing(person_id=None)에 person_id를 자동 연결"""
+    if not names:
+        return 0
+    # 대상 staffing 조회: person_id 없고 person_name_text가 names 중 하나인 것
+    stmt = select(Staffing).where(
+        and_(
+            Staffing.person_id.is_(None),
+            Staffing.person_name_text.in_(names),
+            Staffing.deleted_at.is_(None),
+        )
+    )
+    result = await db.execute(stmt)
+    unmapped = result.scalars().all()
+    if not unmapped:
+        return 0
+
+    # People 테이블에서 해당 이름들 조회
+    from models.people import People
+    people_stmt = select(People).where(
+        and_(People.person_name.in_(names), People.deleted_at.is_(None))
+    )
+    people_result = await db.execute(people_stmt)
+    people_by_name = {p.person_name.strip(): p for p in people_result.scalars().all()}
+
+    remapped = 0
+    for s in unmapped:
+        name = (s.person_name_text or '').strip()
+        matched = people_by_name.get(name)
+        if matched:
+            s.person_id = matched.id
+            remapped += 1
+    logger.info(f"[REMAP] staffing auto-remap: {remapped}건 (names={names})")
+    return remapped
+
+
 @router.post("", response_model=PeopleResponse, status_code=201)
 @limiter.limit("60/minute")  # 생성 엔드포인트 Rate Limit: 60회/분
 async def create_people(
@@ -127,6 +164,8 @@ async def create_people(
         entity_id=result.id, after_obj=result, request=request,
         person_name=result.person_name,
     )
+    # 동일 이름의 미매핑 staffing 자동 연결
+    await _remap_staffing_by_names(db, [result.person_name])
     await db.commit()
     logger.info(f"[AUDIT] People {result.id} created")
     return result
@@ -147,8 +186,91 @@ async def create_peoples_batch(
                 entity_id=r.id, after_obj=r, request=request,
                 person_name=r.person_name,
             )
+    # 생성된 인력 이름으로 미매핑 staffing 자동 연결
+    created_names = [r.person_name for r in results]
+    await _remap_staffing_by_names(db, created_names)
     await db.commit()
     return results
+
+
+class BatchUpsertResponse(BaseModel):
+    created: List[PeopleResponse]
+    updated: List[PeopleResponse]
+    skipped: List[str]  # 처리 실패한 이름 목록
+
+
+@router.post("/batch-upsert", response_model=BatchUpsertResponse, status_code=200)
+async def upsert_peoples_batch(
+    req: PeopleBatchCreateRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """이름 기준 upsert: 동일 이름 존재 시 UPDATE, 없으면 CREATE.
+    프론트엔드 중복 체크에 의존하지 않고 서버 단에서 안전하게 처리."""
+    from models.people import People
+    service = PeopleService(db)
+
+    # 1) 요청된 이름 목록으로 기존 인력 일괄 조회
+    names = [item.person_name.strip() for item in req.items if item.person_name.strip()]
+    existing_stmt = select(People).where(
+        and_(People.person_name.in_(names), People.deleted_at.is_(None))
+    )
+    existing_result = await db.execute(existing_stmt)
+    existing_by_name: dict[str, People] = {
+        p.person_name.strip(): p for p in existing_result.scalars().all()
+    }
+
+    created_list: List[PeopleResponse] = []
+    updated_list: List[PeopleResponse] = []
+    skipped_list: List[str] = []
+
+    for item_data in req.items:
+        name = item_data.person_name.strip()
+        if not name:
+            continue
+        data_dict = sanitize_person_data(item_data.model_dump())
+
+        existing = existing_by_name.get(name)
+        try:
+            if existing:
+                # UPDATE: 변경된 필드만 반영 (None이 아닌 값만)
+                update_dict = {k: v for k, v in data_dict.items()
+                               if k != 'person_name' and v is not None and v != ''}
+                if update_dict:
+                    r = await service.update(existing.id, update_dict)
+                else:
+                    r = existing
+                if r:
+                    updated_list.append(r)
+                    await write_audit_log(
+                        db, event_type=EventType.UPDATE, entity_type=EntityType.PEOPLE,
+                        entity_id=r.id, before_obj=existing, after_obj=r, request=request,
+                        person_name=r.person_name,
+                    )
+            else:
+                # CREATE
+                r = await service.create(data_dict)
+                if r:
+                    created_list.append(r)
+                    await write_audit_log(
+                        db, event_type=EventType.CREATE, entity_type=EntityType.PEOPLE,
+                        entity_id=r.id, after_obj=r, request=request,
+                        person_name=r.person_name,
+                    )
+        except Exception as e:
+            logger.error(f"[UPSERT] failed for '{name}': {e}")
+            skipped_list.append(name)
+
+    # 신규 생성된 인력 이름으로 미매핑 staffing 자동 연결
+    new_names = [r.person_name for r in created_list]
+    if new_names:
+        await _remap_staffing_by_names(db, new_names)
+    await db.commit()
+
+    logger.info(f"[UPSERT] created={len(created_list)}, updated={len(updated_list)}, skipped={len(skipped_list)}")
+    return BatchUpsertResponse(
+        created=created_list,
+        updated=updated_list,
+        skipped=skipped_list,
+    )
 
 
 @router.put("/batch", response_model=List[PeopleResponse])

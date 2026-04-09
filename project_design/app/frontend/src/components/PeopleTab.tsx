@@ -195,6 +195,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         rows = parseCSV(text);
       }
 
+      // 헤더 행 찾기
       const headerIdx = rows.findIndex((r) =>
         r.some((c) => c.includes('이름') || c.includes('인력명') || c.toLowerCase().includes('name'))
       );
@@ -206,49 +207,52 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         return;
       }
 
-      let created = 0;
-      let skipped = 0;
-
-      // 헤더 컬럼 자동 감지 (회사 컬럼 포함)
+      // 헤더 컬럼 자동 감지
       const header = headerIdx >= 0 ? rows[headerIdx].map(c => c.trim()) : [];
       const colIdx = {
-        name: Math.max(0, header.findIndex(c => c.includes('이름') || c.toLowerCase().includes('name'))),
-        company: header.findIndex(c => c.includes('회사')),
-        position: header.findIndex(c => c.includes('직급')),
-        grade: header.findIndex(c => c.includes('등급') || c.includes('감리원')),
-        empStatus: header.findIndex(c => c.includes('구분') || c.includes('재직')),
+        name:      Math.max(0, header.findIndex(c => c.includes('이름') || c.toLowerCase().includes('name'))),
+        company:   header.findIndex(c => c.includes('회사')),
+        position:  header.findIndex(c => c.includes('직급')),
+        grade:     header.findIndex(c => c.includes('등급') || c.includes('감리원')),
+        empStatus: header.findIndex(c => c.includes('구분') || c.includes('재직') || c.includes('상태')),
       };
 
-      for (const row of dataRows) {
-        const name = row[colIdx.name >= 0 ? colIdx.name : 0]?.trim();
-        if (!name) { skipped++; continue; }
+      // 유효한 행만 items로 변환 (이름 없는 행 제외)
+      const items = dataRows
+        .map((row) => ({
+          person_name:       row[colIdx.name >= 0 ? colIdx.name : 0]?.trim() || '',
+          company:           colIdx.company >= 0 ? (row[colIdx.company]?.trim() || '') : '',
+          position:          colIdx.position >= 0 ? (row[colIdx.position]?.trim() || '') : (row[1]?.trim() || ''),
+          grade:             colIdx.grade >= 0 ? (row[colIdx.grade]?.trim() || '') : (row[2]?.trim() || ''),
+          employment_status: colIdx.empStatus >= 0 ? (row[colIdx.empStatus]?.trim() || '') : (row[3]?.trim() || ''),
+        }))
+        .filter((item) => item.person_name.length > 0);
 
-        const exists = people.some((p) => p.person_name === name);
-        if (exists) { skipped++; continue; }
-
-        const company   = colIdx.company >= 0 ? (row[colIdx.company]?.trim() || '') : '';
-        const position  = colIdx.position >= 0 ? (row[colIdx.position]?.trim() || '') : (row[1]?.trim() || '');
-        const grade     = colIdx.grade >= 0 ? (row[colIdx.grade]?.trim() || '') : (row[2]?.trim() || '');
-        const empStatus = colIdx.empStatus >= 0 ? (row[colIdx.empStatus]?.trim() || '재직') : (row[3]?.trim() || '재직');
-
-        try {
-          await client.entities.people.create({
-            data: {
-              person_name: name,
-              company,
-              position,
-              grade,
-              employment_status: empStatus,
-            },
-          });
-          created++;
-        } catch (err) {
-          console.error(`Failed to create person ${name}:`, err);
-          skipped++;
-        }
+      if (items.length === 0) {
+        toast.error('유효한 데이터가 없습니다. 이름 컬럼을 확인해주세요.');
+        return;
       }
 
-      toast.success(`${created}명 등록 완료${skipped > 0 ? ` (${skipped}건 건너뜀)` : ''}`);
+      // 서버 단에서 upsert (중복 체크 서버에서 처리)
+      const result = await client.people.batchUpsert(items);
+
+      const createdCount = result.created.length;
+      const updatedCount = result.updated.length;
+      const skippedCount = result.skipped.length;
+
+      let msg = '';
+      if (createdCount > 0) msg += `신규 ${createdCount}명 등록`;
+      if (updatedCount > 0) msg += (msg ? ', ' : '') + `기존 ${updatedCount}명 정보 업데이트`;
+      if (skippedCount > 0) msg += (msg ? ', ' : '') + `${skippedCount}건 오류`;
+
+      if (createdCount > 0 || updatedCount > 0) {
+        toast.success(msg || '처리 완료');
+      } else if (skippedCount > 0) {
+        toast.error(`처리 실패: ${skippedCount}건`);
+      } else {
+        toast.info('업로드할 데이터가 없습니다.');
+      }
+
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('File upload error:', err);

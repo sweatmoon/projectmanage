@@ -235,6 +235,23 @@ export const client = {
     calendar_entries:createEntityClient('calendar_entries'),
   },
 
+  people: {
+    async batchUpsert(items: Array<{
+      person_name: string;
+      company?: string;
+      position?: string;
+      grade?: string;
+      employment_status?: string;
+    }>): Promise<{
+      created: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string }>;
+      updated: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string }>;
+      skipped: string[];
+    }> {
+      const res = await http.post('/api/v1/entities/people/batch-upsert', { items });
+      return res.data;
+    },
+  },
+
   apiCall: {
     async invoke({ url, method, data, params }: ApiCallOptions) {
       const res = await http.request({ url, method, data, params });
@@ -311,6 +328,10 @@ export const client = {
     async triggerArchive(months = 6) {
       const res = await http.post('/admin/audit/archive', null, { params: { months } });
       return res.data;
+    },
+    async remapStaffingPersonIds() {
+      const res = await http.post('/admin/remap-staffing-person-ids');
+      return res.data as { ok: boolean; remapped: number; skipped: number; message: string };
     },
     // ── 접속 허용 사용자 관리 ──────────────────────────────────
     async getAllowedUsers() {
