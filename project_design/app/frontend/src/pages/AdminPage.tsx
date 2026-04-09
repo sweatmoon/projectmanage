@@ -322,6 +322,8 @@ function RoleDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   // 외부 클릭 시 닫기
   useEffect(() => {
@@ -333,11 +335,30 @@ function RoleDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // 드롭다운 위치 계산 (viewport 고려)
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const dropdownHeight = 300; // 드롭다운 예상 높이
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      
+      // 아래 공간이 부족하고 위쪽 공간이 충분하면 위로 표시
+      const showAbove = spaceBelow < dropdownHeight && spaceAbove > dropdownHeight;
+      
+      setDropdownStyle({
+        top: showAbove ? rect.top - dropdownHeight - 4 : rect.bottom + 4,
+        left: rect.left,
+      });
+    }
+  }, [open]);
+
   const cfg = ROLE_CONFIG[currentRole] ?? ROLE_CONFIG.user;
 
   return (
     <div ref={ref} className="relative">
       <button
+        ref={buttonRef}
         onClick={() => !disabled && setOpen(v => !v)}
         disabled={disabled}
         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all
@@ -348,7 +369,10 @@ function RoleDropdown({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+        <div 
+          className="fixed z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
+          style={{ top: `${dropdownStyle.top}px`, left: `${dropdownStyle.left}px` }}
+        >
           <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">역할 선택</p>
           </div>
@@ -394,6 +418,8 @@ function ApproveDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const APPROVE_ROLES = ['user', 'leader', 'admin'];
 
   useEffect(() => {
@@ -405,9 +431,26 @@ function ApproveDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // 드롭다운 위치 계산 (viewport 고려)
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const dropdownHeight = 250;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const showAbove = spaceBelow < dropdownHeight && spaceAbove > dropdownHeight;
+      
+      setDropdownStyle({
+        top: showAbove ? rect.top - dropdownHeight - 4 : rect.bottom + 4,
+        left: rect.left,
+      });
+    }
+  }, [open]);
+
   return (
     <div ref={ref} className="relative">
       <button
+        ref={buttonRef}
         onClick={() => !disabled && setOpen(v => !v)}
         disabled={disabled}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -418,7 +461,10 @@ function ApproveDropdown({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+        <div 
+          className="fixed z-50 w-52 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
+          style={{ top: `${dropdownStyle.top}px`, left: `${dropdownStyle.left}px` }}
+        >
           <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">승인 역할 선택</p>
           </div>
