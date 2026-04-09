@@ -114,6 +114,7 @@ interface Person {
   team?: string;            // 팀 (레거시)
   grade?: string;           // 감리원 등급
   employment_status?: string; // 구분
+  company?: string;         // 소속 회사
 }
 
 interface Phase {
@@ -212,7 +213,7 @@ export default function IndexPage() {
 
   // New person dialog
   const [showNewPerson, setShowNewPerson] = useState(false);
-  const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '' });
+  const [newPerson, setNewPerson] = useState({ person_name: '', position: '', grade: '', employment_status: '', company: '' });
   const [creatingPerson, setCreatingPerson] = useState(false);
 
   const fetchProjects = useCallback(async () => {
@@ -478,7 +479,7 @@ export default function IndexPage() {
       });
       toast.success('인력이 등록되었습니다.');
       setShowNewPerson(false);
-      setNewPerson({ person_name: '', position: '', grade: '', employment_status: '' });
+      setNewPerson({ person_name: '', position: '', grade: '', employment_status: '', company: '' });
       fetchPeople();
     } catch (err) {
       console.error(err);
@@ -836,11 +837,18 @@ export default function IndexPage() {
               />
             </div>
             <div>
+              <Label>회사</Label>
+              <Input
+                placeholder="소속 회사명"
+                value={newPerson.company}
+                onChange={(e) => setNewPerson({ ...newPerson, company: e.target.value })}
+              />
+            </div>
+            <div>
               <Label>직급</Label>
               <Input
                 value={newPerson.position}
                 onChange={(e) => setNewPerson({ ...newPerson, position: e.target.value })}
-
               />
             </div>
             <div>

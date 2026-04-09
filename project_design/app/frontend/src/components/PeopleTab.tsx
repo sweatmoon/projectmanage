@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,6 +16,7 @@ interface Person {
   team?: string;            // 팀 (레거시)
   grade?: string;           // 감리원 등급
   employment_status?: string; // 구분
+  company?: string;         // 소속 회사
 }
 
 interface PeopleTabProps {
@@ -37,11 +38,11 @@ const DEFAULT_BADGE = 'bg-gray-100 text-gray-600 hover:bg-gray-100';
 // ── 엑셀(CSV) 양식 다운로드 ─────────────────────────────────
 function downloadImportTemplate() {
   const BOM = '\uFEFF';
-  const headers = ['이름', '직급', '감리원등급', '구분'];
+  const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
   const exampleRows = [
-    ['홍길동', '수석', '수석감리원', '재직'],
-    ['김철수', '책임', '감리원', '재직'],
-    ['이영희', '선임', '', '외부'],
+    ['홍길동', 'ABC주식회사', '수석', '수석감리원', '재직'],
+    ['김철수', 'DEF컴퍼니', '책임', '감리원', '재직'],
+    ['이영희', '', '선임', '', '외부'],
   ];
   const csvContent = BOM + [headers.join(','), ...exampleRows.map((r) => r.join(','))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -56,12 +57,17 @@ function downloadImportTemplate() {
 // ── 전체 인력 현황 엑셀 다운로드 ────────────────────────────
 function downloadPeopleExcel(people: Person[]) {
   const BOM = '\uFEFF';
-  const headers = ['이름', '직급', '감리원등급', '구분'];
-  const sorted = [...people].sort((a, b) =>
-    (a.person_name || '').localeCompare(b.person_name || '', 'ko')
-  );
+  const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
+  const sorted = [...people].sort((a, b) => {
+    const ca = a.company?.trim() || '\uFFFF';
+    const cb = b.company?.trim() || '\uFFFF';
+    const cd = ca.localeCompare(cb, 'ko');
+    if (cd !== 0) return cd;
+    return (a.person_name || '').localeCompare(b.person_name || '', 'ko');
+  });
   const rows = sorted.map((p) => [
     p.person_name || '',
+    p.company || '',
     p.position || '',
     p.grade || '',
     p.employment_status || '',
@@ -95,6 +101,7 @@ function parseCSV(text: string): string[][] {
 
 export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }: PeopleTabProps) {
   const [search, setSearch] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState<string>('전체');
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -103,18 +110,42 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { canWrite, isViewer } = useUserRole();
 
-  // 필터: 이름·직급·등급으로 검색
+  // 동적 회사 목록
+  const companyList = useMemo(() => {
+    const companies = Array.from(
+      new Set(people.map(p => p.company?.trim()).filter(Boolean) as string[])
+    ).sort((a, b) => a.localeCompare(b, 'ko'));
+    return ['전체', ...companies, '미지정'];
+  }, [people]);
+
+  // 필터: 이름·직급·등급·회사로 검색 + 회사 탭 필터 + 회사별 소팅
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const result = people.filter((p) =>
-      (p.person_name || '').toLowerCase().includes(q) ||
-      (p.position || '').toLowerCase().includes(q) ||
-      (p.grade || '').toLowerCase().includes(q) ||
-      (p.employment_status || '').toLowerCase().includes(q)
-    );
-    result.sort((a, b) => (a.person_name || '').localeCompare(b.person_name || '', 'ko'));
+    const result = people.filter((p) => {
+      const matchSearch =
+        (p.person_name || '').toLowerCase().includes(q) ||
+        (p.position || '').toLowerCase().includes(q) ||
+        (p.grade || '').toLowerCase().includes(q) ||
+        (p.employment_status || '').toLowerCase().includes(q) ||
+        (p.company || '').toLowerCase().includes(q);
+      const personCompany = p.company?.trim() || '';
+      const matchCompany =
+        selectedCompany === '전체' ||
+        (selectedCompany === '미지정' ? !personCompany : personCompany === selectedCompany);
+      return matchSearch && matchCompany;
+    });
+    result.sort((a, b) => {
+      const ca = a.company?.trim() || '\uFFFF';
+      const cb = b.company?.trim() || '\uFFFF';
+      const cd = ca.localeCompare(cb, 'ko');
+      if (cd !== 0) return cd;
+      return (a.person_name || '').localeCompare(b.person_name || '', 'ko');
+    });
     return result;
-  }, [people, search]);
+  }, [people, search, selectedCompany]);
+
+  // 회사 선택 시 페이지 리셋
+  useEffect(() => { setCurrentPage(1); }, [selectedCompany]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -126,7 +157,12 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
     setCurrentPage(1);
   };
 
-  // ── CSV 업로드: 이름, 직급, 감리원등급, 구분 ──────────────
+  const handleCompanyChange = (company: string) => {
+    setSelectedCompany(company);
+    setCurrentPage(1);
+  };
+
+  // ── CSV 업로드: 이름, 회사, 직급, 감리원등급, 구분 ──────────────
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -150,21 +186,33 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
       let created = 0;
       let skipped = 0;
 
+      // 헤더 컬럼 자동 감지 (회사 컬럼 포함)
+      const header = headerIdx >= 0 ? rows[headerIdx].map(c => c.trim()) : [];
+      const colIdx = {
+        name: Math.max(0, header.findIndex(c => c.includes('이름') || c.toLowerCase().includes('name'))),
+        company: header.findIndex(c => c.includes('회사')),
+        position: header.findIndex(c => c.includes('직급')),
+        grade: header.findIndex(c => c.includes('등급') || c.includes('감리원')),
+        empStatus: header.findIndex(c => c.includes('구분') || c.includes('재직')),
+      };
+
       for (const row of dataRows) {
-        const name = row[0]?.trim();
+        const name = row[colIdx.name >= 0 ? colIdx.name : 0]?.trim();
         if (!name) { skipped++; continue; }
 
         const exists = people.some((p) => p.person_name === name);
         if (exists) { skipped++; continue; }
 
-        const position = row[1]?.trim() || '';
-        const grade    = row[2]?.trim() || '';
-        const empStatus = row[3]?.trim() || '재직';
+        const company   = colIdx.company >= 0 ? (row[colIdx.company]?.trim() || '') : '';
+        const position  = colIdx.position >= 0 ? (row[colIdx.position]?.trim() || '') : (row[1]?.trim() || '');
+        const grade     = colIdx.grade >= 0 ? (row[colIdx.grade]?.trim() || '') : (row[2]?.trim() || '');
+        const empStatus = colIdx.empStatus >= 0 ? (row[colIdx.empStatus]?.trim() || '재직') : (row[3]?.trim() || '재직');
 
         try {
           await client.entities.people.create({
             data: {
               person_name: name,
+              company,
               position,
               grade,
               employment_status: empStatus,
@@ -250,7 +298,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="이름/직급/등급/구분으로 검색..."
+            placeholder="이름/회사/직급/등급/구분으로 검색..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10"
@@ -299,6 +347,30 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
             선택 삭제 ({selectedIds.size})
           </Button>
         )}
+      </div>
+
+      {/* 회사 필터 탭 */}
+      <div className="flex gap-1.5 flex-wrap">
+        {companyList.map(company => (
+          <button
+            key={company}
+            onClick={() => handleCompanyChange(company)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+              selectedCompany === company
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+            }`}
+          >
+            {company}
+            {company !== '전체' && (
+              <span className="ml-1 opacity-70">
+                ({company === '미지정'
+                  ? people.filter(p => !p.company?.trim()).length
+                  : people.filter(p => p.company?.trim() === company).length})
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* Select all */}
@@ -354,7 +426,8 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                          {person.position && <span>{person.position}</span>}
+                          {person.company && <span className="text-blue-600 font-medium truncate max-w-[80px]">{person.company}</span>}
+                          {person.position && <span>{person.company ? ' · ' : ''}{person.position}</span>}
                           {person.grade && <span className="text-blue-500">· {person.grade}</span>}
                         </div>
                       </div>
