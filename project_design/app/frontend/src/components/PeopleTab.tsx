@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -35,28 +36,24 @@ const empStatusConfig: Record<string, { className: string }> = {
 };
 const DEFAULT_BADGE = 'bg-gray-100 text-gray-600 hover:bg-gray-100';
 
-// ── 엑셀(CSV) 양식 다운로드 ─────────────────────────────────
+// ── 엑셀(xlsx) 양식 다운로드 ─────────────────────────────────
 function downloadImportTemplate() {
-  const BOM = '\uFEFF';
   const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
   const exampleRows = [
     ['홍길동', 'ABC주식회사', '수석', '수석감리원', '재직'],
     ['김철수', 'DEF컴퍼니', '책임', '감리원', '재직'],
     ['이영희', '', '선임', '', '외부'],
   ];
-  const csvContent = BOM + [headers.join(','), ...exampleRows.map((r) => r.join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '인력_일괄등록_양식.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  const wsData = [headers, ...exampleRows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '인력등록');
+  XLSX.writeFile(wb, '인력_일괄등록_양식.xlsx');
 }
 
 // ── 전체 인력 현황 엑셀 다운로드 ────────────────────────────
 function downloadPeopleExcel(people: Person[]) {
-  const BOM = '\uFEFF';
   const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
   const sorted = [...people].sort((a, b) => {
     const ca = a.company?.trim() || '\uFFFF';
@@ -72,15 +69,13 @@ function downloadPeopleExcel(people: Person[]) {
     p.grade || '',
     p.employment_status || '',
   ]);
-  const csvContent = BOM + [headers.join(','), ...rows.map((r) => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '인력현황');
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  a.download = `인력현황_${today}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  XLSX.writeFile(wb, `인력현황_${today}.xlsx`);
 }
 
 function parseCSV(text: string): string[][] {
@@ -96,6 +91,28 @@ function parseCSV(text: string): string[][] {
     }
     cells.push(current.trim());
     return cells;
+  });
+}
+
+// xlsx/xls 파일을 string[][] 로 변환
+async function parseExcel(file: File): Promise<string[][]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as string[][];
+        // 셀 값을 모두 string으로 변환
+        resolve(rows.map(row => row.map(cell => String(cell ?? '').trim())));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsBinaryString(file);
   });
 }
 
@@ -162,15 +179,21 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
     setCurrentPage(1);
   };
 
-  // ── CSV 업로드: 이름, 회사, 직급, 감리원등급, 구분 ──────────────
+  // ── CSV/Excel 업로드: 이름, 회사, 직급, 감리원등급, 구분 ──────────────
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading(true);
     try {
-      const text = await file.text();
-      const rows = parseCSV(text);
+      let rows: string[][];
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      if (isExcel) {
+        rows = await parseExcel(file);
+      } else {
+        const text = await file.text();
+        rows = parseCSV(text);
+      }
 
       const headerIdx = rows.findIndex((r) =>
         r.some((c) => c.includes('이름') || c.includes('인력명') || c.toLowerCase().includes('name'))
@@ -331,7 +354,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv,.txt"
+          accept=".csv,.txt,.xlsx,.xls"
           className="hidden"
           onChange={handleFileUpload}
         />
