@@ -32,6 +32,7 @@ export interface Person {
   team?: string
   grade?: string
   employment_status?: string
+  company?: string
 }
 
 export interface Phase {
