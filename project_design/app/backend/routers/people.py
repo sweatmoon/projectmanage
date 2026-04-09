@@ -114,6 +114,45 @@ async def get_people(id: int, db: AsyncSession = Depends(get_db)):
     return result
 
 
+async def _unlink_deleted_person(db: AsyncSession, person_id: int, person_name: str) -> int:
+    """삭제된 인력의 staffing/staffing_hat에서 person_id를 NULL로 끊고 person_name_text를 유지.
+    → 프론트엔드에서 person_id=None + person_name_text 있으면 자동으로 외부 인력으로 표시됨.
+    """
+    from models.people import People
+    try:
+        from models.staffing_hat import StaffingHat
+        has_hat = True
+    except ImportError:
+        has_hat = False
+
+    unlinked = 0
+
+    # Staffing: person_id가 삭제된 인력을 가리키는 행 → person_id=NULL, person_name_text 유지/보정
+    stmt = select(Staffing).where(
+        and_(Staffing.person_id == person_id, Staffing.deleted_at.is_(None))
+    )
+    result = await db.execute(stmt)
+    for s in result.scalars().all():
+        # person_name_text가 없거나 다르면 이름 보정
+        if not s.person_name_text:
+            s.person_name_text = person_name
+        s.person_id = None
+        unlinked += 1
+
+    # StaffingHat: actual_person_id가 삭제된 인력을 가리키는 행 → actual_person_id=NULL
+    if has_hat:
+        hat_stmt = select(StaffingHat).where(StaffingHat.actual_person_id == person_id)
+        hat_result = await db.execute(hat_stmt)
+        for h in hat_result.scalars().all():
+            if not h.actual_person_name:
+                h.actual_person_name = person_name
+            h.actual_person_id = None
+            unlinked += 1
+
+    logger.info(f"[UNLINK] person_id={person_id} ({person_name}) → {unlinked}건 staffing 연결 해제")
+    return unlinked
+
+
 async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
     """주어진 이름 목록과 일치하는 staffing / staffing_hat의 person_id를 자동 연결/재매핑.
     - person_id=None 인 미매핑 staffing → person_id 연결
@@ -351,6 +390,8 @@ async def delete_peoples_batch(
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
+            # staffing person_id 연결 해제 (삭제 전 이름 보존)
+            await _unlink_deleted_person(db, obj.id, obj.person_name)
             soft_delete(obj)
             deleted_count += 1
             await write_audit_log(
@@ -370,6 +411,8 @@ async def delete_people(
     obj = await service.get_by_id(id)
     if not obj:
         raise HTTPException(status_code=404, detail="People not found")
+    # staffing person_id 연결 해제 (삭제 전 이름 보존)
+    await _unlink_deleted_person(db, obj.id, obj.person_name)
     soft_delete(obj)
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
@@ -383,6 +426,7 @@ async def delete_people(
 class RemapAllResponse(BaseModel):
     remapped: int
     total_people: int
+    unlinked: int  # 삭제된 인력 staffing 연결 해제 수
 
 
 @router.post("/remap-all", response_model=RemapAllResponse)
@@ -390,23 +434,37 @@ async def remap_all_staffing(
     request: Request, db: AsyncSession = Depends(get_db)
 ):
     """전체 인력 이름 기준으로 모든 staffing / staffing_hat의 person_id를 재매핑.
-    인력 일괄 업데이트 후 프로젝트에 연결된 인력이 올바르게 표시되지 않을 때 사용."""
+    - 활성 인력: person_id 올바르게 연결
+    - 삭제된 인력: person_id=NULL로 해제 → 프론트에서 외부 인력으로 자동 표시
+    """
     from models.people import People
 
-    # 모든 활성 인력 이름 수집
+    # 1) 모든 활성 인력 수집 → person_id 연결/교정
     all_people_stmt = select(People).where(People.deleted_at.is_(None))
     all_people_result = await db.execute(all_people_stmt)
-    all_people = all_people_result.scalars().all()
-    all_names = [p.person_name for p in all_people if p.person_name]
+    all_people_list = all_people_result.scalars().all()
+    all_names = [p.person_name for p in all_people_list if p.person_name]
+    active_ids = {p.id for p in all_people_list}
 
-    if not all_names:
-        return RemapAllResponse(remapped=0, total_people=0)
+    remapped = 0
+    if all_names:
+        remapped = await _remap_staffing_by_names(db, all_names)
 
-    remapped = await _remap_staffing_by_names(db, all_names)
+    # 2) 삭제된 인력을 가리키는 staffing 탐색 → person_id NULL 처리
+    deleted_stmt = select(People).where(People.deleted_at.is_not(None))
+    deleted_result = await db.execute(deleted_stmt)
+    deleted_people = deleted_result.scalars().all()
+
+    unlinked = 0
+    for dp in deleted_people:
+        # 아직 이 삭제된 인력을 가리키는 staffing이 있으면 해제
+        n = await _unlink_deleted_person(db, dp.id, dp.person_name)
+        unlinked += n
+
     await db.commit()
 
-    logger.info(f"[REMAP-ALL] total_people={len(all_names)}, remapped={remapped}")
-    return RemapAllResponse(remapped=remapped, total_people=len(all_names))
+    logger.info(f"[REMAP-ALL] total_people={len(all_names)}, remapped={remapped}, unlinked={unlinked}")
+    return RemapAllResponse(remapped=remapped, total_people=len(all_names), unlinked=unlinked)
 
 
 @router.post("/{id}/restore")

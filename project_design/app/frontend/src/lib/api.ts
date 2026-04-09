@@ -251,7 +251,7 @@ export const client = {
       return res.data;
     },
 
-    async remapAll(): Promise<{ remapped: number; total_people: number }> {
+    async remapAll(): Promise<{ remapped: number; total_people: number; unlinked: number }> {
       const res = await http.post('/api/v1/entities/people/remap-all', {});
       return res.data;
     },
