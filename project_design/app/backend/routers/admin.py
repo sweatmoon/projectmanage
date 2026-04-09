@@ -1693,3 +1693,56 @@ async def cleanup_orphan_calendar_entries(
 
     logger.info(f"[ADMIN] 고아 calendar_entries {deleted}건 hard-delete 완료")
     return {"ok": True, "deleted": deleted, "message": f"고아 calendar_entries {deleted}건 삭제 완료"}
+
+
+@router.post("/remap-staffing-person-ids")
+async def remap_staffing_person_ids(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    staffing 테이블에서 person_id=None이고 person_name_text가 있는 행을
+    People 테이블의 이름과 매칭하여 person_id를 자동으로 채워줍니다.
+    인력 일괄 업로드 후 기존 프로젝트 배정 인력을 재매핑할 때 사용합니다.
+    """
+    from models.staffing import Staffing
+    from models.people import People
+
+    # 미매핑 staffing 전체 조회
+    stmt = select(Staffing).where(
+        and_(
+            Staffing.person_id.is_(None),
+            Staffing.person_name_text.isnot(None),
+            Staffing.deleted_at.is_(None),
+        )
+    )
+    result = await db.execute(stmt)
+    unmapped = result.scalars().all()
+
+    if not unmapped:
+        return {"ok": True, "remapped": 0, "message": "재매핑할 staffing이 없습니다."}
+
+    # People 테이블 전체 로드 (이름 → People 객체)
+    people_stmt = select(People).where(People.deleted_at.is_(None))
+    people_result = await db.execute(people_stmt)
+    people_by_name = {p.person_name.strip(): p for p in people_result.scalars().all()}
+
+    remapped = 0
+    skipped = 0
+    for s in unmapped:
+        name = (s.person_name_text or '').strip()
+        matched = people_by_name.get(name)
+        if matched:
+            s.person_id = matched.id
+            remapped += 1
+        else:
+            skipped += 1
+
+    await db.commit()
+    logger.info(f"[ADMIN] staffing remap 완료: {remapped}건 매핑, {skipped}건 미매핑(People 미등록)")
+    return {
+        "ok": True,
+        "remapped": remapped,
+        "skipped": skipped,
+        "message": f"{remapped}건 재매핑 완료 (People 미등록으로 {skipped}건 건너뜀)",
+    }
