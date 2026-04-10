@@ -54,6 +54,7 @@ interface PersonSchedule {
   position: string;
   my_field: string;       // 본사업에서의 분야
   my_sub_field: string;
+  my_category: string;    // 본사업에서의 구분 (단계감리팀/전문가팀 등)
   total_overlap_days: number;
   total_overlap_md: number;
   has_conflict: boolean;
@@ -178,6 +179,21 @@ function FieldBadge({ field, highlight }: { field: string; highlight: boolean })
   );
 }
 
+// ── 본사업 분야 셀 (field + sub_field 중복 방지) ──────────────────────────────
+function MyFieldCell({ field, subField }: { field: string; subField: string }) {
+  if (!field) return <span className="text-[10px] text-gray-300">-</span>;
+  // field와 sub_field가 동일하면 한 번만 표시
+  const showSub = subField && subField !== field;
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <FieldBadge field={field} highlight={false} />
+      {showSub && (
+        <span className="text-[10px] text-gray-400">{subField}</span>
+      )}
+    </div>
+  );
+}
+
 // ── 인력 1명의 충돌 행 ────────────────────────────────────────────────────────
 function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirst: boolean }) {
   const [expanded, setExpanded] = useState(false);
@@ -198,10 +214,7 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
           {person.grade && <div className="text-[10px] text-gray-400 mt-0.5 pl-4">{person.grade}</div>}
         </td>
         <td className="px-3 py-2">
-          <FieldBadge field={person.my_field} highlight={false} />
-          {person.my_sub_field && (
-            <span className="text-[10px] text-gray-400 ml-1">{person.my_sub_field}</span>
-          )}
+          <MyFieldCell field={person.my_field} subField={person.my_sub_field} />
         </td>
         <td className="px-3 py-2 text-center" colSpan={4}>
           <span className="text-xs text-emerald-500 flex items-center justify-center gap-1">
@@ -234,10 +247,7 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
           {person.grade && <div className="text-[10px] text-gray-400 mt-0.5 pl-4">{person.grade}</div>}
         </td>
         <td className="px-3 py-2">
-          <FieldBadge field={person.my_field} highlight={false} />
-          {person.my_sub_field && (
-            <span className="text-[10px] text-gray-400 ml-1">{person.my_sub_field}</span>
-          )}
+          <MyFieldCell field={person.my_field} subField={person.my_sub_field} />
         </td>
         <td className="px-3 py-2 text-center">
           <span className="text-xs font-bold text-red-600">{person.total_overlap_days}일</span>
