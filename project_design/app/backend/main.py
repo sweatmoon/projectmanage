@@ -25,7 +25,43 @@ from slowapi.middleware import SlowAPIMiddleware
 from services.database import initialize_database, close_database
 from services.auth import initialize_admin_user
 from middlewares.auth_middleware import AuthMiddleware
+import models.holiday  # noqa: F401 – Holiday 테이블을 Base.metadata에 등록
 # MODULE_IMPORTS_END
+
+
+async def _holiday_sync_scheduler():
+    """매주 월요일 새벽 2시(KST)에 공휴일 동기화"""
+    logger = logging.getLogger(__name__)
+    logger.info("[SCHEDULER] 공휴일 자동 동기화 스케줄러 시작")
+    while True:
+        try:
+            from datetime import timedelta
+            now = datetime.now(timezone.utc)
+            # 다음 월요일 새벽 2시(KST = UTC+9 → UTC 17:00) 계산
+            target_weekday = 0   # Monday
+            target_hour_utc = 17  # KST 02:00 = UTC 17:00
+            days_ahead = (target_weekday - now.weekday()) % 7
+            if days_ahead == 0 and now.hour >= target_hour_utc:
+                days_ahead = 7
+            next_run = (now + timedelta(days=days_ahead)).replace(
+                hour=target_hour_utc, minute=0, second=0, microsecond=0
+            )
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(f"[SCHEDULER] 다음 공휴일 동기화: {next_run.isoformat()} (대기 {int(wait_seconds)}초)")
+            await asyncio.sleep(wait_seconds)
+
+            from core.database import db_manager
+            from services.holidays_sync import sync_holidays
+            if db_manager.async_session_maker:
+                async with db_manager.async_session_maker() as session:
+                    result = await sync_holidays(session)
+                    logger.info(f"[SCHEDULER] 공휴일 동기화 완료: {result}")
+        except asyncio.CancelledError:
+            logger.info("[SCHEDULER] 공휴일 동기화 스케줄러 종료")
+            break
+        except Exception as e:
+            logger.error(f"[SCHEDULER] 공휴일 동기화 실패: {e}")
+            await asyncio.sleep(3600)
 
 
 async def _auto_archive_scheduler():
@@ -107,13 +143,20 @@ async def lifespan(app: FastAPI):
 
     # 감사 로그 자동 아카이브 스케줄러 시작
     archive_task = asyncio.create_task(_auto_archive_scheduler())
+    # 공휴일 자동 동기화 스케줄러 시작
+    holiday_task = asyncio.create_task(_holiday_sync_scheduler())
 
     logger.info("=== Application startup completed successfully ===")
     yield
     # MODULE_SHUTDOWN_START
     archive_task.cancel()
+    holiday_task.cancel()
     try:
         await archive_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await holiday_task
     except asyncio.CancelledError:
         pass
     await close_database()

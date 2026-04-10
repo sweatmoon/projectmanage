@@ -340,3 +340,57 @@ export const HOLIDAY_NAMES: Record<string, string> = {
 export function getHolidayName(dateStr: string): string | null {
   return HOLIDAY_NAMES[dateStr] ?? null;
 }
+
+
+// ── DB 기반 동적 공휴일 캐시 ──────────────────────────────────────────────────
+// 앱 시작 시 fetchAndCacheHolidays() 를 호출하면 DB 값으로 캐시를 채운다.
+// 이후 isHoliday() / isNonWorkday() 등은 캐시(DB 우선, 폴백: 하드코딩) 를 사용한다.
+
+let _dynamicCache: ReadonlySet<string> | null = null;
+let _dynamicNames: Record<string, string> = {};
+
+/** DB API에서 공휴일을 가져와 캐시에 저장. 앱 초기화 시 1회 호출 */
+export async function fetchAndCacheHolidays(): Promise<void> {
+  try {
+    // api.ts 의 client.holidays.list() 를 직접 호출하면 순환 참조 위험 → axios 직접 호출
+    const res = await fetch('/api/v1/holidays');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const list: { date: string; name: string }[] = data?.holidays ?? [];
+    if (list.length > 0) {
+      _dynamicCache = new Set(list.map((h) => h.date));
+      _dynamicNames = Object.fromEntries(list.map((h) => [h.date, h.name]));
+      console.info(`[holidays] DB 캐시 로드: ${list.length}건`);
+    }
+  } catch (e) {
+    console.warn('[holidays] DB 로드 실패, 하드코딩 폴백 사용:', e);
+  }
+}
+
+/** 현재 활성 공휴일 Set (DB 캐시 우선, 없으면 하드코딩) */
+export function getActiveHolidaySet(): ReadonlySet<string> {
+  return _dynamicCache ?? KOREAN_HOLIDAYS;
+}
+
+/** 현재 활성 공휴일 이름 맵 (DB 캐시 우선, 없으면 하드코딩) */
+export function getActiveHolidayNames(): Record<string, string> {
+  return Object.keys(_dynamicNames).length > 0 ? _dynamicNames : HOLIDAY_NAMES;
+}
+
+/** 동적 캐시 기반 공휴일 여부 */
+export function isHolidayDynamic(dateStr: string): boolean {
+  return getActiveHolidaySet().has(dateStr);
+}
+
+/** 동적 캐시 기반 주말/공휴일 여부 */
+export function isNonWorkdayDynamic(year: number, month: number, day: number): boolean {
+  const d = new Date(year, month - 1, day);
+  if (d.getDay() === 0 || d.getDay() === 6) return true;
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return getActiveHolidaySet().has(dateStr);
+}
+
+/** 동적 캐시 기반 공휴일 이름 반환 */
+export function getHolidayNameDynamic(dateStr: string): string | null {
+  return getActiveHolidayNames()[dateStr] ?? null;
+}

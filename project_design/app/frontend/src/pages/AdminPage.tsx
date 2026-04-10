@@ -721,6 +721,35 @@ export default function AdminPage() {
     }
   };
 
+  // ── 공휴일 동기화 ──────────────────────────────────────────
+  const [holidaySyncing, setHolidaySyncing] = useState(false);
+  const [holidayStatus, setHolidayStatus] = useState<{total:number;last_sync:string|null;by_year:Record<string,number>;db_active:boolean}|null>(null);
+
+  const fetchHolidayStatus = async () => {
+    try {
+      const res = await client.holidays.status();
+      setHolidayStatus(res);
+    } catch { /* 무시 */ }
+  };
+
+  const handleHolidaySync = async () => {
+    if (!confirm('공공데이터포털에서 공휴일 정보를 동기화합니다.\n(올해 기준 -1년 ~ +3년, 약 12~24초 소요)')) return;
+    setHolidaySyncing(true);
+    try {
+      const res = await client.holidays.sync();
+      if (res.ok) {
+        toast.success(`공휴일 동기화 완료: 신규 ${res.inserted}건, 수정 ${res.updated}건 (총 ${res.total_holidays}건)`);
+        await fetchHolidayStatus();
+      } else {
+        toast.error(`동기화 실패: ${res.error}`);
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '공휴일 동기화 실패');
+    } finally {
+      setHolidaySyncing(false);
+    }
+  };
+
   // ── 단건 롤백 ────────────────────────────────────────────
   // ── 체크박스 토글 ────────────────────────────────────────
   const toggleSelectLog = (eventId: string) => {
@@ -918,6 +947,53 @@ export default function AdminPage() {
           ) : (
             <div className="text-center text-gray-400 py-12">로딩 중...</div>
           )}
+
+          {/* ── 공휴일 동기화 섹션 ── */}
+          <div className="mt-8 p-5 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-blue-800">🗓️ 공휴일 정보 동기화</h3>
+                <p className="text-xs text-blue-600 mt-0.5">
+                  공공데이터포털 한국천문연구원 API 기반 · 매주 월요일 새벽 2시 자동 실행
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={fetchHolidayStatus}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-xs font-medium hover:bg-blue-200"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> 상태 확인
+                </button>
+                <button
+                  onClick={handleHolidaySync}
+                  disabled={holidaySyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {holidaySyncing ? '동기화 중...' : '🔄 지금 동기화'}
+                </button>
+              </div>
+            </div>
+            {holidayStatus && (
+              <div className="flex flex-wrap gap-3 text-xs text-blue-700">
+                <span className={`px-2 py-1 rounded-full font-medium ${holidayStatus.db_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {holidayStatus.db_active ? `✅ DB 활성 (${holidayStatus.total}건)` : '❌ DB 미동기화'}
+                </span>
+                {holidayStatus.last_sync && (
+                  <span className="px-2 py-1 bg-blue-100 rounded-full">
+                    마지막 동기화: {new Date(holidayStatus.last_sync).toLocaleString('ko-KR')}
+                  </span>
+                )}
+                {Object.entries(holidayStatus.by_year).map(([yr, cnt]) => (
+                  <span key={yr} className="px-2 py-1 bg-white rounded-full border border-blue-200">
+                    {yr}년 {String(cnt)}건
+                  </span>
+                ))}
+              </div>
+            )}
+            {!holidayStatus && (
+              <p className="text-xs text-blue-500">'상태 확인' 버튼을 눌러 현재 DB 동기화 상태를 확인하세요.</p>
+            )}
+          </div>
         </div>
       )}
 
