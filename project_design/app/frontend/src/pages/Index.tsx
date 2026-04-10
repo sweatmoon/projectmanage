@@ -45,9 +45,10 @@ import PeopleTab from '@/components/PeopleTab';
 import ReportTab from '@/components/ReportTab';
 import ScheduleTab from '@/components/ScheduleTab';
 import ProjectGanttTab from '@/components/ProjectGanttTab';
+import ProposalRiskTab from '@/components/ProposalRiskTab';
 import LandingPage from '@/components/LandingPage';
 import Header from '@/components/Header';
-import { FolderOpen, Users, BarChart3, CalendarDays, GanttChart, Plus, Home, Maximize2, Minimize2 } from 'lucide-react';
+import { FolderOpen, Users, BarChart3, CalendarDays, GanttChart, Plus, Home, Maximize2, Minimize2, ShieldAlert } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -577,6 +578,10 @@ export default function IndexPage() {
                 <BarChart3 className="h-4 w-4" />
                 리포트
               </TabsTrigger>
+              <TabsTrigger value="proposal-risk" className="flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4" />
+                제안 리스크
+              </TabsTrigger>
             </TabsList>
 
             <div className="flex gap-2 items-center">
@@ -666,6 +671,12 @@ export default function IndexPage() {
               staffing={staffing}
               people={people}
             />
+            </TabErrorBoundary>
+          </TabsContent>
+
+          <TabsContent value="proposal-risk">
+            <TabErrorBoundary tabName="제안 리스크">
+              <ProposalRiskTab />
             </TabErrorBoundary>
           </TabsContent>
         </Tabs>
