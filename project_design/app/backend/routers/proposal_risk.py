@@ -458,6 +458,53 @@ def _analyze_risks(
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
+@router.get("/debug")
+async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
+    """디버그: DB 실제 데이터 현황 확인"""
+    all_projects, phases, staffings, peoples = await _load_all(db)
+
+    status_counts: Dict[str, int] = {}
+    for p in all_projects:
+        status_counts[p.status] = status_counts.get(p.status, 0) + 1
+
+    proposal_projects = [p for p in all_projects if p.status == "제안"]
+
+    proposal_detail = []
+    for proj in proposal_projects:
+        proj_phases = [ph for ph in phases if ph.project_id == proj.id]
+        phases_with_dates = [ph for ph in proj_phases if ph.start_date and ph.end_date]
+        proj_staffings = [s for s in staffings if s.project_id == proj.id]
+        staffings_with_person = [s for s in proj_staffings if s.person_id or s.person_name_text]
+
+        proposal_detail.append({
+            "id": proj.id,
+            "project_name": proj.project_name,
+            "status": proj.status,
+            "total_phases": len(proj_phases),
+            "phases_with_dates": len(phases_with_dates),
+            "total_staffings": len(proj_staffings),
+            "staffings_with_person": len(staffings_with_person),
+            "phase_list": [
+                {
+                    "phase_name": ph.phase_name,
+                    "start_date": str(ph.start_date) if ph.start_date else None,
+                    "end_date": str(ph.end_date) if ph.end_date else None,
+                }
+                for ph in proj_phases[:5]
+            ],
+        })
+
+    return {
+        "total_projects": len(all_projects),
+        "status_breakdown": status_counts,
+        "proposal_count": len(proposal_projects),
+        "total_phases": len(phases),
+        "total_staffings": len(staffings),
+        "total_people": len(peoples),
+        "proposals": proposal_detail,
+    }
+
+
 @router.get("/list")
 async def get_proposal_risk_list(db: AsyncSession = Depends(get_db)):
     """제안사업 목록 + 각 사업의 리스크 요약 (건수/심각도)"""
