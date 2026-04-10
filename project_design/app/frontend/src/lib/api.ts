@@ -280,6 +280,28 @@ export const client = {
     },
   },
 
+  holidays: {
+    /** DB 저장 공휴일 목록 반환. 빈 배열이면 프론트엔드 하드코딩 폴백 사용 */
+    async list(): Promise<{ date: string; name: string }[]> {
+      try {
+        const res = await http.get('/api/v1/holidays');
+        return (res.data?.holidays ?? []) as { date: string; name: string }[];
+      } catch {
+        return [];
+      }
+    },
+    /** 동기화 상태 조회 (어드민용) */
+    async status() {
+      const res = await http.get('/api/v1/holidays/status');
+      return res.data;
+    },
+    /** 수동 동기화 트리거 (어드민 전용) */
+    async sync() {
+      const res = await http.post('/api/v1/holidays/sync');
+      return res.data;
+    },
+  },
+
   auth: authClient,
 
   admin: {

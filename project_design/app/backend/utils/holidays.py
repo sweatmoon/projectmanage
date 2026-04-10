@@ -1,9 +1,16 @@
 """
 한국 공휴일 유틸리티 (2024~2035, 대체공휴일 포함)
 출처: publicholidays.co.kr / 나무위키 대체휴일제도
+
+DB 우선 조회 방식:
+  - is_business_day_async() : DB에서 조회, 없으면 KOREAN_HOLIDAYS 폴백
+  - is_business_day()       : 동기 버전 (하드코딩 전용, 하위호환)
 """
+import logging
 from datetime import date, timedelta
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 # ── 한국 공휴일 SET ──────────────────────────────────────────────────────────
 KOREAN_HOLIDAYS: frozenset = frozenset({
@@ -253,3 +260,56 @@ HOLIDAY_NAMES: dict = {
 def get_holiday_name(d: date) -> str | None:
     """날짜의 공휴일 이름 반환 (없으면 None)"""
     return HOLIDAY_NAMES.get(d.strftime("%Y-%m-%d"))
+
+
+# ── DB 기반 비동기 함수 (DB 우선, 하드코딩 폴백) ─────────────────────────────
+
+async def get_db_holidays(db) -> frozenset:
+    """
+    DB에서 공휴일 날짜 set 반환.
+    DB가 비어있으면 하드코딩 KOREAN_HOLIDAYS 반환.
+    """
+    try:
+        from services.holidays_sync import get_all_holidays_from_db
+        rows = await get_all_holidays_from_db(db)
+        if rows:
+            return frozenset(r["date"] for r in rows)
+    except Exception as e:
+        logger.warning(f"[holidays] DB 조회 실패, 하드코딩 폴백: {e}")
+    return KOREAN_HOLIDAYS
+
+
+async def is_business_day_async(d: date, db) -> bool:
+    """DB 공휴일 기준 영업일 여부 (주말 + 공휴일 제외)"""
+    if d.weekday() >= 5:
+        return False
+    holidays = await get_db_holidays(db)
+    return d.strftime("%Y-%m-%d") not in holidays
+
+
+async def count_business_days_async(start: date, end: date, db) -> int:
+    """DB 공휴일 기준 두 날짜 사이 영업일 수 (양 끝 포함)"""
+    if not start or not end or start > end:
+        return 0
+    holidays = await get_db_holidays(db)
+    count = 0
+    cur = start
+    while cur <= end:
+        if cur.weekday() < 5 and cur.strftime("%Y-%m-%d") not in holidays:
+            count += 1
+        cur += timedelta(days=1)
+    return count
+
+
+async def get_consecutive_business_days_async(
+    start: date, end: date, num_days: int, db
+) -> List[date]:
+    """DB 공휴일 기준 start~end 내 연속 영업일 num_days개 반환"""
+    holidays = await get_db_holidays(db)
+    result: List[date] = []
+    cur = start
+    while len(result) < num_days and cur <= end:
+        if cur.weekday() < 5 and cur.strftime("%Y-%m-%d") not in holidays:
+            result.append(cur)
+        cur += timedelta(days=1)
+    return result

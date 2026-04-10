@@ -15,6 +15,7 @@ import AdminPage from './pages/AdminPage';
 import LoggedOut from './pages/LoggedOut';
 import AccessRequest from './pages/AccessRequest';
 import { client, authStore } from './lib/api';
+import { fetchAndCacheHolidays } from './lib/holidays';
 
 const queryClient = new QueryClient();
 
@@ -131,7 +132,13 @@ function AuthGuard({ children, requireAdmin = false }: { children: React.ReactNo
   return <>{children}</>;
 }
 
-const App = () => (
+const App = () => {
+  // 앱 초기화 시 공휴일 DB 캐시 1회 로드
+  useEffect(() => {
+    fetchAndCacheHolidays();
+  }, []);
+
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -156,6 +163,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;
