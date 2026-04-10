@@ -252,6 +252,72 @@ class DatabaseManager:
                 else:
                     logger.debug("Migration: people.company 컬럼 이미 존재")
 
+                # ── is_chief 컬럼 ──────────────────────────────────
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='people' AND column_name='is_chief'"
+                        )
+                    )
+                    is_chief_exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(people)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    is_chief_exists = "is_chief" in cols
+
+                if not is_chief_exists:
+                    if "postgresql" in db_url:
+                        await conn.execute(text("ALTER TABLE people ADD COLUMN is_chief BOOLEAN DEFAULT FALSE"))
+                    else:
+                        await conn.execute(text("ALTER TABLE people ADD COLUMN is_chief BOOLEAN DEFAULT 0"))
+                    logger.info("Migration: people.is_chief 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: people.is_chief 컬럼 이미 존재")
+
+                # ── region 컬럼 ────────────────────────────────────
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='people' AND column_name='region'"
+                        )
+                    )
+                    region_exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(people)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    region_exists = "region" in cols
+
+                if not region_exists:
+                    await conn.execute(text("ALTER TABLE people ADD COLUMN region VARCHAR"))
+                    logger.info("Migration: people.region 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: people.region 컬럼 이미 존재")
+
+                # ── can_travel 컬럼 ────────────────────────────────
+                if "postgresql" in db_url:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='people' AND column_name='can_travel'"
+                        )
+                    )
+                    can_travel_exists = result.fetchone() is not None
+                else:
+                    result = await conn.execute(text("PRAGMA table_info(people)"))
+                    cols = [row[1] for row in result.fetchall()]
+                    can_travel_exists = "can_travel" in cols
+
+                if not can_travel_exists:
+                    if "postgresql" in db_url:
+                        await conn.execute(text("ALTER TABLE people ADD COLUMN can_travel BOOLEAN DEFAULT TRUE"))
+                    else:
+                        await conn.execute(text("ALTER TABLE people ADD COLUMN can_travel BOOLEAN DEFAULT 1"))
+                    logger.info("Migration: people.can_travel 컬럼 추가 완료")
+                else:
+                    logger.debug("Migration: people.can_travel 컬럼 이미 존재")
+
         except Exception as e:
             logger.warning(f"Migration _migrate_people_table 중 오류 (무시): {e}")
 

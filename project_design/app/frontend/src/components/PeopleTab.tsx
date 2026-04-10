@@ -18,6 +18,9 @@ interface Person {
   grade?: string;           // 감리원 등급
   employment_status?: string; // 구분
   company?: string;         // 소속 회사
+  is_chief?: boolean;       // 총괄감리원 여부
+  region?: string;          // 거주지역
+  can_travel?: boolean;     // 지방 출장 가능 여부
 }
 
 interface PeopleTabProps {
@@ -38,15 +41,15 @@ const DEFAULT_BADGE = 'bg-gray-100 text-gray-600 hover:bg-gray-100';
 
 // ── 엑셀(xlsx) 양식 다운로드 ─────────────────────────────────
 function downloadImportTemplate() {
-  const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
+  const headers = ['이름', '회사', '직급', '감리원등급', '구분', '총괄감리원', '거주지역', '지방가능'];
   const exampleRows = [
-    ['홍길동', 'ABC주식회사', '수석', '수석감리원', '재직'],
-    ['김철수', 'DEF컴퍼니', '책임', '감리원', '재직'],
-    ['이영희', '', '선임', '', '외부'],
+    ['홍길동', 'ABC주식회사', '수석', '수석감리원', '재직', 'Y', '서울', 'Y'],
+    ['김철수', 'DEF컴퍼니', '책임', '감리원', '재직', 'N', '경기', 'Y'],
+    ['이영희', '', '선임', '', '외부', 'N', '부산', 'N'],
   ];
   const wsData = [headers, ...exampleRows];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '인력등록');
   XLSX.writeFile(wb, '인력_일괄등록_양식.xlsx');
@@ -54,7 +57,7 @@ function downloadImportTemplate() {
 
 // ── 전체 인력 현황 엑셀 다운로드 ────────────────────────────
 function downloadPeopleExcel(people: Person[]) {
-  const headers = ['이름', '회사', '직급', '감리원등급', '구분'];
+  const headers = ['이름', '회사', '직급', '감리원등급', '구분', '총괄감리원', '거주지역', '지방가능'];
   const sorted = [...people].sort((a, b) => {
     const ca = a.company?.trim() || '\uFFFF';
     const cb = b.company?.trim() || '\uFFFF';
@@ -68,10 +71,13 @@ function downloadPeopleExcel(people: Person[]) {
     p.position || '',
     p.grade || '',
     p.employment_status || '',
+    p.is_chief ? 'Y' : 'N',
+    p.region || '',
+    p.can_travel === false ? 'N' : 'Y',
   ]);
   const wsData = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '인력현황');
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -145,7 +151,8 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         (p.position || '').toLowerCase().includes(q) ||
         (p.grade || '').toLowerCase().includes(q) ||
         (p.employment_status || '').toLowerCase().includes(q) ||
-        (p.company || '').toLowerCase().includes(q);
+        (p.company || '').toLowerCase().includes(q) ||
+        (p.region || '').toLowerCase().includes(q);
       const personCompany = p.company?.trim() || '';
       const matchCompany =
         selectedCompany === '전체' ||
@@ -216,17 +223,31 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         position:  header.findIndex(c => c.includes('직급')),
         grade:     header.findIndex(c => c.includes('등급') || c.includes('감리원')),
         empStatus: header.findIndex(c => c.includes('구분') || c.includes('재직') || c.includes('상태')),
+        isChief:   header.findIndex(c => c.includes('총괄')),
+        region:    header.findIndex(c => c.includes('거주') || c.includes('지역')),
+        canTravel: header.findIndex(c => c.includes('지방') || c.includes('출장')),
       };
 
       // 유효한 행만 items로 변환 (이름 없는 행 제외)
       const items = dataRows
-        .map((row) => ({
-          person_name:       row[colIdx.name >= 0 ? colIdx.name : 0]?.trim() || '',
-          company:           colIdx.company >= 0 ? (row[colIdx.company]?.trim() || '') : '',
-          position:          colIdx.position >= 0 ? (row[colIdx.position]?.trim() || '') : (row[1]?.trim() || ''),
-          grade:             colIdx.grade >= 0 ? (row[colIdx.grade]?.trim() || '') : (row[2]?.trim() || ''),
-          employment_status: colIdx.empStatus >= 0 ? (row[colIdx.empStatus]?.trim() || '') : (row[3]?.trim() || ''),
-        }))
+        .map((row) => {
+          const isChiefRaw = colIdx.isChief >= 0 ? row[colIdx.isChief]?.trim().toUpperCase() : '';
+          const canTravelRaw = colIdx.canTravel >= 0 ? row[colIdx.canTravel]?.trim().toUpperCase() : '';
+          return {
+            person_name:       row[colIdx.name >= 0 ? colIdx.name : 0]?.trim() || '',
+            company:           colIdx.company >= 0 ? (row[colIdx.company]?.trim() || '') : '',
+            position:          colIdx.position >= 0 ? (row[colIdx.position]?.trim() || '') : (row[1]?.trim() || ''),
+            grade:             colIdx.grade >= 0 ? (row[colIdx.grade]?.trim() || '') : (row[2]?.trim() || ''),
+            employment_status: colIdx.empStatus >= 0 ? (row[colIdx.empStatus]?.trim() || '') : (row[3]?.trim() || ''),
+            is_chief:          isChiefRaw === 'Y' || isChiefRaw === 'TRUE' || isChiefRaw === '1' ? true
+                               : isChiefRaw === 'N' || isChiefRaw === 'FALSE' || isChiefRaw === '0' ? false
+                               : undefined,
+            region:            colIdx.region >= 0 ? (row[colIdx.region]?.trim() || '') : '',
+            can_travel:        canTravelRaw === 'N' || canTravelRaw === 'FALSE' || canTravelRaw === '0' ? false
+                               : canTravelRaw === 'Y' || canTravelRaw === 'TRUE' || canTravelRaw === '1' ? true
+                               : undefined,
+          };
+        })
         .filter((item) => item.person_name.length > 0);
 
       if (items.length === 0) {
@@ -349,7 +370,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="이름/회사/직급/등급/구분으로 검색..."
+            placeholder="이름/회사/직급/등급/구분/지역으로 검색..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10"
@@ -484,19 +505,26 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                       >
                         <User className="h-4 w-4 text-blue-600" />
                       </div>
-                      <div className="flex-1 min-w-0" onClick={() => onSelectPerson(person.id)}>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-sm truncate">{person.person_name}</span>
-                          {person.employment_status && (
-                            <Badge className={`text-[10px] px-1.5 py-0 ${escClass}`}>{person.employment_status}</Badge>
-                          )}
+                        <div className="flex-1 min-w-0" onClick={() => onSelectPerson(person.id)}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-sm truncate">{person.person_name}</span>
+                            {person.is_chief && (
+                              <span className="px-1.5 py-0 rounded-full text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-200 flex-shrink-0">총괄</span>
+                            )}
+                            {person.employment_status && (
+                              <Badge className={`text-[10px] px-1.5 py-0 ${escClass}`}>{person.employment_status}</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
+                            {person.company && <span className="text-blue-600 font-medium truncate max-w-[80px]">{person.company}</span>}
+                            {person.position && <span>{person.company ? ' · ' : ''}{person.position}</span>}
+                            {person.grade && <span className="text-blue-500">· {person.grade}</span>}
+                            {person.region && <span className="text-gray-400">· {person.region}</span>}
+                            {person.can_travel === false && (
+                              <span className="text-red-400 text-[10px]">· 지방불가</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                          {person.company && <span className="text-blue-600 font-medium truncate max-w-[80px]">{person.company}</span>}
-                          {person.position && <span>{person.company ? ' · ' : ''}{person.position}</span>}
-                          {person.grade && <span className="text-blue-500">· {person.grade}</span>}
-                        </div>
-                      </div>
                       {/* Delete button */}
                       {canWrite && (
                       <button

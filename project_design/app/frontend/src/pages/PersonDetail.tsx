@@ -14,6 +14,9 @@ interface Person {
   grade?: string;
   employment_status?: string;
   company?: string;
+  is_chief?: boolean;       // 총괄감리원 여부
+  region?: string;          // 거주지역
+  can_travel?: boolean;     // 지방 출장 가능 여부
 }
 
 interface Project {
@@ -197,8 +200,8 @@ export default function PersonDetail() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // 단일 필드 저장 헬퍼
-  const saveField = useCallback(async (field: keyof Person, val: string) => {
+  // 단일 필드 저장 헬퍼 (string 및 boolean 모두 지원)
+  const saveField = useCallback(async (field: keyof Person, val: string | boolean) => {
     if (!person) return;
     try {
       const res = await client.entities.people.update({
@@ -277,7 +280,7 @@ export default function PersonDetail() {
             </div>
           </div>
 
-          {/* 하단: 4개 필드 — 클릭하면 인라인 편집 */}
+          {/* 하단: 기본 필드 4개 */}
           <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-6">
             <InlineField
               label="회사"
@@ -299,6 +302,43 @@ export default function PersonDetail() {
               value={person.employment_status || ''}
               onSave={(val) => saveField('employment_status', val)}
             />
+          </div>
+
+          {/* 추가 필드: 거주지역, 총괄감리원, 지방가능 */}
+          <div className="px-6 pb-4 border-t border-slate-100 pt-4 grid grid-cols-2 sm:grid-cols-3 gap-6">
+            <InlineField
+              label="거주지역"
+              value={person.region || ''}
+              onSave={(val) => saveField('region', val)}
+            />
+            {/* 총괄감리원 토글 */}
+            <div>
+              <p className="text-xs text-slate-400 mb-1">총괄감리원</p>
+              <button
+                onClick={() => saveField('is_chief', !person.is_chief)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  person.is_chief
+                    ? 'bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200'
+                    : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                }`}
+              >
+                <span>{person.is_chief ? '✓ 총괄감리원' : '일반'}</span>
+              </button>
+            </div>
+            {/* 지방 출장 가능 토글 */}
+            <div>
+              <p className="text-xs text-slate-400 mb-1">지방 출장</p>
+              <button
+                onClick={() => saveField('can_travel', !(person.can_travel !== false))}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  person.can_travel !== false
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-200'
+                    : 'bg-red-100 text-red-600 border-red-200 hover:bg-red-200'
+                }`}
+              >
+                <span>{person.can_travel !== false ? '✓ 가능' : '✗ 불가'}</span>
+              </button>
+            </div>
           </div>
         </div>
 

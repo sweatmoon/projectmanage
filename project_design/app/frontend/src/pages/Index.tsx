@@ -150,6 +150,9 @@ interface Person {
   grade?: string;           // 감리원 등급
   employment_status?: string; // 구분
   company?: string;         // 소속 회사
+  is_chief?: boolean;       // 총괄감리원 여부
+  region?: string;          // 거주지역
+  can_travel?: boolean;     // 지방 출장 가능 여부
 }
 
 interface Phase {

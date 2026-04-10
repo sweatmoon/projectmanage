@@ -34,6 +34,9 @@ class PeopleData(BaseModel):
     grade: Optional[str] = None             # 감리원 등급
     employment_status: Optional[str] = None  # 구분
     company: Optional[str] = None           # 소속 회사
+    is_chief: Optional[bool] = None         # 총괄감리원 여부
+    region: Optional[str] = None            # 거주지역
+    can_travel: Optional[bool] = None       # 지방 출장 가능 여부
 
 
 class PeopleUpdateData(BaseModel):
@@ -43,6 +46,9 @@ class PeopleUpdateData(BaseModel):
     grade: Optional[str] = None
     employment_status: Optional[str] = None
     company: Optional[str] = None
+    is_chief: Optional[bool] = None         # 총괄감리원 여부
+    region: Optional[str] = None            # 거주지역
+    can_travel: Optional[bool] = None       # 지방 출장 가능 여부
 
 
 class PeopleResponse(BaseModel):
@@ -53,6 +59,9 @@ class PeopleResponse(BaseModel):
     grade: Optional[str] = None
     employment_status: Optional[str] = None
     company: Optional[str] = None
+    is_chief: Optional[bool] = None         # 총괄감리원 여부
+    region: Optional[str] = None            # 거주지역
+    can_travel: Optional[bool] = None       # 지방 출장 가능 여부
 
     class Config:
         from_attributes = True
