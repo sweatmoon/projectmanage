@@ -19,7 +19,6 @@ PUBLIC_PATHS = {
     "/health",
     "/api/config",
     "/api/v1/proposal-risk/debug",
-    "/api/v1/proposal-risk/list",   # 임시 공개 - 디버그용
     "/auth/login",
     "/auth/callback",
     "/auth/logout",
