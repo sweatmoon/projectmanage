@@ -30,9 +30,13 @@ export interface Person {
   id: number
   person_name: string
   team?: string
+  position?: string
   grade?: string
   employment_status?: string
   company?: string
+  is_chief?: boolean       // 총괄감리원 여부
+  region?: string          // 거주지역
+  can_travel?: boolean     // 지방 출장 가능 여부
 }
 
 export interface Phase {

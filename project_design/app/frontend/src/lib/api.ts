@@ -242,9 +242,12 @@ export const client = {
       position?: string;
       grade?: string;
       employment_status?: string;
+      is_chief?: boolean;
+      region?: string;
+      can_travel?: boolean;
     }>): Promise<{
-      created: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string }>;
-      updated: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string }>;
+      created: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string; is_chief?: boolean; region?: string; can_travel?: boolean }>;
+      updated: Array<{ id: number; person_name: string; company?: string; position?: string; grade?: string; employment_status?: string; is_chief?: boolean; region?: string; can_travel?: boolean }>;
       skipped: string[];
     }> {
       const res = await http.post('/api/v1/entities/people/batch-upsert', { items });
