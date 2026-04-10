@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { client } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   AlertTriangle, AlertCircle, CheckCircle2, ChevronRight,
-  ArrowLeft, RefreshCw, Loader2, Users, Calendar, Building2, Crown
+  ArrowLeft, RefreshCw, Loader2, Users, Calendar, Building2, Crown,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
@@ -23,6 +23,24 @@ interface ProposalItem {
   risk_types: string[];
 }
 
+// phase 단위 충돌 상세 항목
+interface ConflictItem {
+  person_name: string;
+  is_chief: boolean;
+  my_phase_name: string;
+  my_phase_start: string;
+  my_phase_end: string;
+  other_project_id: number;
+  other_project_name: string;
+  other_project_status: string;
+  other_phase_name: string;
+  other_phase_start: string;
+  other_phase_end: string;
+  overlap_start: string;
+  overlap_end: string;
+  overlap_days: number;
+}
+
 interface RiskDetail {
   type: string;
   severity: 'danger' | 'warning' | 'info';
@@ -30,7 +48,7 @@ interface RiskDetail {
   count: number;
   reasons: string[];
   suggestions: string[];
-  items: Record<string, any>[];
+  items: ConflictItem[] | Record<string, any>[];
 }
 
 interface ProjectDetail {
@@ -54,16 +72,16 @@ interface ProjectDetail {
 
 // ── 리스크 설정 ────────────────────────────────────────────────────────────────
 const RISK_CONFIG: Record<string, { icon: typeof AlertTriangle; label: string; color: string }> = {
-  schedule_conflict:  { icon: Calendar,       label: '인력 일정 중복',       color: 'text-orange-500' },
-  chief_overload:     { icon: Users,          label: '총괄감리원 과다 투입',  color: 'text-yellow-600' },
-  chief_role_conflict:{ icon: Crown,          label: '총괄감리원 역할 중복',  color: 'text-red-500'    },
-  org_duplicate:      { icon: Building2,      label: '동일 기관 일정 중복',   color: 'text-purple-500' },
+  schedule_conflict:   { icon: Calendar,  label: '인력 일정 중복',      color: 'text-orange-500' },
+  chief_overload:      { icon: Users,     label: '총괄감리원 과다 투입', color: 'text-yellow-600' },
+  chief_role_conflict: { icon: Crown,     label: '총괄감리원 역할 중복', color: 'text-red-500'    },
+  org_duplicate:       { icon: Building2, label: '동일 기관 일정 중복',  color: 'text-purple-500' },
 };
 
 const SEVERITY_CONFIG = {
-  danger:  { bg: 'bg-red-50',    border: 'border-red-200',    badge: 'bg-red-100 text-red-700',    dot: 'bg-red-500',    label: '위험' },
-  warning: { bg: 'bg-amber-50',  border: 'border-amber-200',  badge: 'bg-amber-100 text-amber-700',dot: 'bg-amber-400',  label: '주의' },
-  info:    { bg: 'bg-blue-50',   border: 'border-blue-200',   badge: 'bg-blue-100 text-blue-700',  dot: 'bg-blue-400',   label: '참고' },
+  danger:  { bg: 'bg-red-50',   border: 'border-red-200',   badge: 'bg-red-100 text-red-700',   dot: 'bg-red-500',   label: '위험' },
+  warning: { bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700',dot: 'bg-amber-400', label: '주의' },
+  info:    { bg: 'bg-blue-50',  border: 'border-blue-200',  badge: 'bg-blue-100 text-blue-700',  dot: 'bg-blue-400',  label: '참고' },
 };
 
 // ── 요약 뱃지 ─────────────────────────────────────────────────────────────────
@@ -86,12 +104,92 @@ function RiskBadges({ summary }: { summary: RiskSummary }) {
   );
 }
 
+// ── 인력 일정 중복 상세 테이블 ─────────────────────────────────────────────────
+function ConflictTable({ items }: { items: ConflictItem[] }) {
+  const [showAll, setShowAll] = useState(false);
+  // 인력별로 그룹핑
+  const byPerson: Record<string, ConflictItem[]> = {};
+  for (const it of items) {
+    (byPerson[it.person_name] = byPerson[it.person_name] || []).push(it);
+  }
+  const persons = Object.entries(byPerson);
+  const visiblePersons = showAll ? persons : persons.slice(0, 5);
+
+  return (
+    <div className="mt-3 space-y-3">
+      {visiblePersons.map(([pname, pItems]) => {
+        const isChief = pItems[0].is_chief;
+        return (
+          <div key={pname} className="rounded-lg border border-gray-100 overflow-hidden">
+            {/* 인력 헤더 */}
+            <div className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold ${isChief ? 'bg-purple-50 text-purple-700' : 'bg-gray-50 text-gray-700'}`}>
+              {isChief && <Crown className="h-3 w-3" />}
+              <span>{pname}</span>
+              {isChief && <span className="text-[10px] px-1.5 py-0 rounded-full bg-purple-100">총괄</span>}
+              <span className="ml-auto text-gray-400 font-normal">{pItems.length}건 겹침</span>
+            </div>
+            {/* 충돌 목록 */}
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500 border-b border-gray-100">
+                  <th className="text-left px-3 py-1.5 font-medium">본 사업 단계</th>
+                  <th className="text-left px-3 py-1.5 font-medium">충돌 사업</th>
+                  <th className="text-left px-3 py-1.5 font-medium">충돌 단계</th>
+                  <th className="text-right px-3 py-1.5 font-medium">겹치는 기간</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pItems.map((it, idx) => (
+                  <tr key={idx} className={`border-b border-gray-50 ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-slate-700">{it.my_phase_name}</div>
+                      <div className="text-gray-400 mt-0.5">{it.my_phase_start} ~ {it.my_phase_end}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-slate-700 max-w-[140px] truncate" title={it.other_project_name}>
+                        {it.other_project_name}
+                      </div>
+                      <span className={`inline-block text-[10px] px-1.5 rounded mt-0.5 ${
+                        it.other_project_status === '감리' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                      }`}>{it.other_project_status}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="text-slate-600">{it.other_phase_name}</div>
+                      <div className="text-gray-400 mt-0.5">{it.other_phase_start} ~ {it.other_phase_end}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="font-semibold text-red-600">{it.overlap_days}일</div>
+                      <div className="text-gray-400 mt-0.5">{it.overlap_start}~{it.overlap_end}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+      {persons.length > 5 && (
+        <button
+          onClick={() => setShowAll(v => !v)}
+          className="w-full text-xs text-blue-600 hover:text-blue-700 flex items-center justify-center gap-1 py-1"
+        >
+          {showAll
+            ? <><ChevronUp className="h-3.5 w-3.5" />접기</>
+            : <><ChevronDown className="h-3.5 w-3.5" />나머지 {persons.length - 5}명 더 보기</>
+          }
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── 리스크 카드 (상세) ────────────────────────────────────────────────────────
 function RiskCard({ risk }: { risk: RiskDetail }) {
   const [expanded, setExpanded] = useState(false);
   const sev = SEVERITY_CONFIG[risk.severity] ?? SEVERITY_CONFIG.info;
   const cfg = RISK_CONFIG[risk.type];
   const Icon = cfg?.icon ?? AlertTriangle;
+  const isConflict = risk.type === 'schedule_conflict';
 
   return (
     <div className={`rounded-xl border ${sev.border} ${sev.bg} overflow-hidden`}>
@@ -103,16 +201,18 @@ function RiskCard({ risk }: { risk: RiskDetail }) {
         <Icon className={`h-4 w-4 flex-shrink-0 ${cfg?.color ?? 'text-gray-500'}`} />
         <span className="font-semibold text-sm flex-1">{risk.title}</span>
         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${sev.badge}`}>{sev.label}</span>
-        <span className="text-xs text-gray-400 ml-1">{risk.count}건</span>
+        <span className="text-xs text-gray-400 ml-1">
+          {isConflict ? `${risk.count}명` : `${risk.count}건`}
+        </span>
         <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />
       </button>
 
       {/* 상세 */}
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
-          {/* 이유 */}
+          {/* 원인 요약 */}
           <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1.5">🔍 원인</p>
+            <p className="text-xs font-semibold text-gray-500 mb-1.5">🔍 원인 요약</p>
             <ul className="space-y-1">
               {risk.reasons.map((r, i) => (
                 <li key={i} className="text-xs text-gray-700 flex gap-1.5">
@@ -122,7 +222,16 @@ function RiskCard({ risk }: { risk: RiskDetail }) {
               ))}
             </ul>
           </div>
-          {/* 제안 */}
+
+          {/* 인력 일정 중복이면 상세 테이블 표시 */}
+          {isConflict && risk.items.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">📋 phase별 중복 상세</p>
+              <ConflictTable items={risk.items as ConflictItem[]} />
+            </div>
+          )}
+
+          {/* 해결 제안 */}
           <div>
             <p className="text-xs font-semibold text-gray-500 mb-1.5">💡 해결 제안</p>
             <ul className="space-y-1">
@@ -140,13 +249,7 @@ function RiskCard({ risk }: { risk: RiskDetail }) {
 }
 
 // ── 상세 패널 ─────────────────────────────────────────────────────────────────
-function DetailPanel({
-  projectId,
-  onBack,
-}: {
-  projectId: number;
-  onBack: () => void;
-}) {
+function DetailPanel({ projectId, onBack }: { projectId: number; onBack: () => void }) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -219,9 +322,9 @@ function DetailPanel({
         <div>
           <p className="text-xs font-semibold text-gray-500 mb-2">배정 인력</p>
           <div className="flex flex-wrap gap-1.5">
-            {detail.assigned_people.map(p => (
+            {detail.assigned_people.map((p, i) => (
               <span
-                key={p.person_id}
+                key={p.person_id ?? i}
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${
                   p.is_chief
                     ? 'bg-purple-50 border-purple-200 text-purple-700'
@@ -243,6 +346,9 @@ function DetailPanel({
           <CheckCircle2 className="h-12 w-12" />
           <p className="font-semibold">리스크 없음</p>
           <p className="text-xs text-gray-400">현재 감지된 리스크가 없습니다.</p>
+          {detail.assigned_people.length === 0 && (
+            <p className="text-xs text-amber-500 mt-1">※ 배정된 인력이 없거나 감리 단계 일정이 미입력된 경우 탐지 불가</p>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
@@ -336,11 +442,14 @@ export default function ProposalRiskTab() {
         <div className="text-center py-16 text-gray-400">
           <CheckCircle2 className="h-10 w-10 mx-auto mb-2 text-emerald-400" />
           <p className="font-medium">해당하는 제안사업이 없습니다</p>
+          {proposals.length === 0 && (
+            <p className="text-xs mt-2 text-amber-500">※ 상태가 '제안'인 사업이 없거나,<br/>감리 단계 일정이 입력되지 않은 경우 분석 불가</p>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
           {filtered.map(proj => {
-            const hasDanger = proj.risk_summary.danger > 0;
+            const hasDanger  = proj.risk_summary.danger > 0;
             const hasWarning = proj.risk_summary.warning > 0;
             const borderColor = hasDanger
               ? 'border-l-red-500'
