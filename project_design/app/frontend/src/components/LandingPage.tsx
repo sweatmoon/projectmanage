@@ -1,4 +1,4 @@
-import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, Activity, Clock, FileText } from 'lucide-react';
+import { FolderOpen, Users, CalendarDays, GanttChart, BarChart3, ArrowRight, TrendingUp, Activity, Clock, FileText, ShieldAlert } from 'lucide-react';
 
 interface LandingPageProps {
   onNavigate: (tab: string) => void;
@@ -138,6 +138,28 @@ const menus = [
         <text x="65" y="65" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="bold">착수 ───── 중간 ── 종료</text>
         <line x1="60" y1="24" x2="60" y2="80" stroke="#FDE68A" strokeWidth="0.5" strokeDasharray="2,2" />
         <line x1="85" y1="24" x2="85" y2="80" stroke="#FDE68A" strokeWidth="0.5" strokeDasharray="2,2" />
+      </svg>
+    ),
+  },
+  {
+    key: 'proposal-risk',
+    label: '제안 리스크',
+    desc: '인력·일정 중복 리스크 자동 분석',
+    icon: ShieldAlert,
+    color: 'from-orange-500 to-red-500',
+    bg: 'bg-orange-50',
+    border: 'border-orange-200',
+    textColor: 'text-orange-600',
+    adminOnly: false,
+    illustration: (
+      <svg viewBox="0 0 120 90" className="w-full h-full" fill="none">
+        <rect x="8" y="8" width="104" height="74" rx="6" fill="#FFF7ED" />
+        <path d="M60 18 L90 65 L30 65 Z" fill="#FED7AA" stroke="#FB923C" strokeWidth="1.5" />
+        <line x1="60" y1="30" x2="60" y2="50" stroke="#EA580C" strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="60" cy="57" r="2.5" fill="#EA580C" />
+        <rect x="20" y="72" width="20" height="6" rx="2" fill="#FCA5A5" />
+        <rect x="44" y="72" width="32" height="6" rx="2" fill="#FDE68A" />
+        <rect x="80" y="72" width="16" height="6" rx="2" fill="#86EFAC" />
       </svg>
     ),
   },
