@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import { authStore } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -256,9 +258,11 @@ function DetailPanel({ projectId, onBack }: { projectId: number; onBack: () => v
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/proposal-risk/${projectId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setDetail(await res.json());
+      const token = authStore.getToken();
+      const res = await axios.get(`/api/v1/proposal-risk/${projectId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setDetail(res.data);
     } catch (e) {
       console.error(e);
     } finally {
@@ -372,10 +376,11 @@ export default function ProposalRiskTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/proposal-risk/list');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setProposals(data.proposals ?? []);
+      const token = authStore.getToken();
+      const res = await axios.get('/api/v1/proposal-risk/list', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setProposals(res.data.proposals ?? []);
     } catch (e) {
       console.error(e);
     } finally {
