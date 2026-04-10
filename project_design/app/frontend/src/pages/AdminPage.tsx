@@ -911,7 +911,7 @@ export default function AdminPage() {
                     <Icon className="w-5 h-5 opacity-70" />
                     <span className="text-sm font-medium opacity-80">{label}</span>
                   </div>
-                  <div className="text-3xl font-bold">{value.toLocaleString()}</div>
+                  <div className="text-3xl font-bold">{(value ?? 0).toLocaleString()}</div>
                 </div>
               ))}
             </div>
@@ -1051,7 +1051,7 @@ export default function AdminPage() {
           {/* 총 건수 */}
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-500">
-              총 <strong>{auditTotal.toLocaleString()}</strong>건
+              총 <strong>{(auditTotal ?? 0).toLocaleString()}</strong>건
               {auditTotal > 0 && (
                 <span className="ml-2 text-xs">
                   {auditCurrentPage} / {auditTotalPages} 페이지
