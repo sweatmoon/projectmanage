@@ -2,7 +2,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Component } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
 import { toast } from 'sonner';
 import Index from './pages/Index';
 import ProjectDetail from './pages/ProjectDetail';
@@ -16,6 +17,41 @@ import AccessRequest from './pages/AccessRequest';
 import { client, authStore } from './lib/api';
 
 const queryClient = new QueryClient();
+
+// ── 에러 바운더리 ────────────────────────────────────────────
+interface EBState { hasError: boolean; error: Error | null; }
+class ErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, EBState> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error): EBState {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[ErrorBoundary]', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-center p-8 max-w-md">
+            <div className="text-4xl mb-4">⚠️</div>
+            <h2 className="text-lg font-bold text-gray-800 mb-2">페이지 오류</h2>
+            <p className="text-sm text-gray-500 mb-4">{this.state.error?.message ?? '알 수 없는 오류가 발생했습니다.'}</p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+            >
+              새로고침
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── auth_error 파라미터 처리 (콜백 오류 시 백엔드에서 리다이렉트) ──
 if (typeof window !== 'undefined') {
@@ -113,7 +149,7 @@ const App = () => (
           <Route path="/person/:id" element={<AuthGuard><PersonDetail /></AuthGuard>} />
 
           {/* 관리자 전용 */}
-          <Route path="/admin" element={<AuthGuard requireAdmin><AdminPage /></AuthGuard>} />
+          <Route path="/admin" element={<AuthGuard requireAdmin><ErrorBoundary><AdminPage /></ErrorBoundary></AuthGuard>} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>
