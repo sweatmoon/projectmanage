@@ -460,8 +460,10 @@ def _analyze_risks(
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
 @router.get("/debug")
 async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
-    """디버그: DB 실제 데이터 현황 확인"""
+    """디버그: DB 실제 데이터 현황 + 중복 탐지 안 되는 원인까지 분석"""
     all_projects, phases, staffings, peoples = await _load_all(db)
+    people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
 
     status_counts: Dict[str, int] = {}
     for p in all_projects:
@@ -469,28 +471,63 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
 
     proposal_projects = [p for p in all_projects if p.status == "제안"]
 
+    # 전체 사업의 인력별 phase 인덱스 빌드
+    person_phase_index = _build_person_phase_index(staffings, phases, people_map, project_map)
+
     proposal_detail = []
     for proj in proposal_projects:
         proj_phases = [ph for ph in phases if ph.project_id == proj.id]
         phases_with_dates = [ph for ph in proj_phases if ph.start_date and ph.end_date]
         proj_staffings = [s for s in staffings if s.project_id == proj.id]
-        staffings_with_person = [s for s in proj_staffings if s.person_id or s.person_name_text]
+
+        # person_id vs name_text 분류
+        with_pid = [s for s in proj_staffings if s.person_id]
+        with_name_only = [s for s in proj_staffings if not s.person_id and s.person_name_text]
+        unassigned = [s for s in proj_staffings if not s.person_id and not s.person_name_text]
+
+        # 이 사업에 배정된 인력 key 목록
+        t_person_keys: Dict[str, str] = {}
+        for s in proj_staffings:
+            key, name, _ = _resolve_person_key(s, people_map)
+            if key:
+                t_person_keys[key] = name
+
+        # 각 인력이 다른 사업에도 있는지 확인
+        conflict_check = []
+        for key, name in list(t_person_keys.items())[:20]:  # 최대 20명
+            entries = person_phase_index.get(key, [])
+            other_projects = list({e["project_id"] for e in entries if e["project_id"] != proj.id})
+            other_proj_names = [project_map[pid].project_name for pid in other_projects if pid in project_map]
+            conflict_check.append({
+                "person_name": name,
+                "person_key": key,
+                "total_phase_entries": len(entries),
+                "in_other_projects": len(other_projects),
+                "other_project_names": other_proj_names[:5],
+            })
+
+        # 실제 리스크 분석 실행
+        risks = _analyze_risks(proj, all_projects, phases, staffings, people_map)
 
         proposal_detail.append({
             "id": proj.id,
             "project_name": proj.project_name,
             "status": proj.status,
-            "total_phases": len(proj_phases),
             "phases_with_dates": len(phases_with_dates),
-            "total_staffings": len(proj_staffings),
-            "staffings_with_person": len(staffings_with_person),
+            "staffings_with_person_id": len(with_pid),
+            "staffings_with_name_only": len(with_name_only),
+            "staffings_unassigned": len(unassigned),
+            "unique_person_keys": len(t_person_keys),
+            "conflict_check": conflict_check,
+            "risks_detected": len(risks),
+            "risk_types": [r["type"] for r in risks],
             "phase_list": [
                 {
                     "phase_name": ph.phase_name,
                     "start_date": str(ph.start_date) if ph.start_date else None,
                     "end_date": str(ph.end_date) if ph.end_date else None,
                 }
-                for ph in proj_phases[:5]
+                for ph in phases_with_dates[:5]
             ],
         })
 
@@ -501,6 +538,7 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
         "total_phases": len(phases),
         "total_staffings": len(staffings),
         "total_people": len(peoples),
+        "person_phase_index_size": len(person_phase_index),
         "proposals": proposal_detail,
     }
 
