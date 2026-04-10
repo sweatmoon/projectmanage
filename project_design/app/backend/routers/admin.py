@@ -1697,8 +1697,9 @@ async def cleanup_orphan_calendar_entries(
 
 @router.post("/remap-staffing-person-ids")
 async def remap_staffing_person_ids(
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: Request = Depends(require_admin),
 ):
     """
     staffing 테이블에서 person_id=None이고 person_name_text가 있는 행을
