@@ -33,6 +33,44 @@ CHIEF_OVERLOAD_THRESHOLD = 3  # 총괄 N명 이상이면 과다 투입
 # 강조 표시할 분야 키워드 (사업관리, 품질보증)
 HIGHLIGHT_FIELDS = ["사업관리", "품질보증"]
 
+# ScheduleTab의 TEAM_FIELD_ORDER와 동기화
+# 단계감리팀 내 field 정렬 순서
+_STAGE_FIELD_ORDER = [
+    (re.compile(r"사업관리"), 0),
+    (re.compile(r"응용시스템"), 1),
+    (re.compile(r"데이터베이스"), 2),
+    (re.compile(r"시스템\s*구조.*보안|시스템구조"), 3),
+]
+
+_STAGE_CATEGORIES = {"단계감리팀", "감리팀"}
+_EXPERT_CATEGORIES = {"전문가팀", "핵심기술", "필수기술", "보안진단", "테스트"}
+
+
+def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
+    """
+    ScheduleTab resolveTeamInfo 와 동일한 정렬 키 반환.
+    반환: (sortGroup, sortOrder)
+      단계감리팀 → sortGroup=0, sortOrder= field 순서(0~3, 나머지 4)
+      전문가팀   → sortGroup=1, sortOrder=999
+    """
+    cat = (category or "").strip()
+    fld = (field or "").strip()
+
+    if cat in _STAGE_CATEGORIES:
+        for pattern, order in _STAGE_FIELD_ORDER:
+            if pattern.search(fld):
+                return (0, order)
+        return (0, 4)
+
+    if cat in _EXPERT_CATEGORIES:
+        return (1, 999)
+
+    # category 미설정: field로 판단
+    for pattern, order in _STAGE_FIELD_ORDER:
+        if pattern.search(fld):
+            return (0, order)
+    return (1, 999)
+
 
 # ── 날짜 겹침 헬퍼 ────────────────────────────────────────────────────────────
 def _dates_overlap(s1: Optional[date], e1: Optional[date],
@@ -478,7 +516,7 @@ def _analyze_risks(
     return risks
 
 
-# ── 본사업 인력 배치 목록 (staffing.id 순) ────────────────────────────────────
+# ── 본사업 인력 배치 목록 (ScheduleTab 정렬 기준) ─────────────────────────────
 def _get_target_staffing_people(
     target_project_id: int,
     staffings: list,
@@ -486,29 +524,50 @@ def _get_target_staffing_people(
     people_map: Dict[int, Any],
 ) -> List[Dict]:
     """
-    본사업(제안) 인력을 staffing.id 순서로 반환.
-    (ScheduleTab의 인력배치 순서와 동기화됨)
-    각 인력에 대해: person_key, person_name, is_chief, grade, field, sub_field, category
+    본사업(제안) 인력을 ScheduleTab과 동일한 순서로 반환.
+    정렬: (sortGroup, sortOrder, phase.sort_order, staffing.id)
+      - sortGroup: 단계감리팀=0, 전문가팀=1
+      - sortOrder: 사업관리=0, 응용시스템=1, DB=2, 시스템구조=3, 기타=4/999
+      - phase.sort_order: 단계 순서
+      - staffing.id: 동일 단계/분야 내 순서
     """
     ph_map = {p.id: p for p in phases}
     t_staffings = [s for s in staffings if s.project_id == target_project_id]
-    # staffing.id 순서로 정렬 (= 인력 배치 순서)
-    t_staffings_sorted = sorted(t_staffings, key=lambda s: s.id)
 
-    seen_keys: set = set()
-    result = []
+    # 인력별 첫 번째 staffing 레코드 수집 (정렬 키 계산용)
+    # 동일 인력이 여러 phase에 있을 경우, 가장 우선순위 높은(sort_key 작은) 것 사용
+    person_best: Dict[str, Dict] = {}  # key → {sort_key, staffing, person_obj}
 
-    for s in t_staffings_sorted:
+    for s in t_staffings:
         key, name, is_chief, person_obj = _resolve_person_key(s, people_map)
-        if not key or key in seen_keys:
+        if not key:
             continue
-        seen_keys.add(key)
+        phase = ph_map.get(s.phase_id)
+        phase_sort = phase.sort_order if phase and hasattr(phase, 'sort_order') else 9999
+        sg, so = _get_sort_key(s.category or "", s.field or "")
+        sort_key = (sg, so, phase_sort, s.id)
 
+        if key not in person_best or sort_key < person_best[key]["sort_key"]:
+            person_best[key] = {
+                "sort_key":   sort_key,
+                "staffing":   s,
+                "person_obj": person_obj,
+                "person_name": name,
+                "is_chief":   is_chief,
+            }
+
+    # sort_key 기준으로 정렬
+    sorted_items = sorted(person_best.items(), key=lambda kv: kv[1]["sort_key"])
+
+    result = []
+    for key, info in sorted_items:
+        s = info["staffing"]
+        person_obj = info["person_obj"]
         result.append({
             "person_key":  key,
             "person_id":   s.person_id,
-            "person_name": name,
-            "is_chief":    is_chief,
+            "person_name": info["person_name"],
+            "is_chief":    info["is_chief"],
             "grade":       (person_obj.grade if person_obj else None) or "",
             "position":    (person_obj.position if person_obj else None) or "",
             "field":       s.field or "",
@@ -561,32 +620,52 @@ def _build_schedule_overlap(
         staffings, phases, people_map, project_map
     )
 
-    # 본사업 인력 (배치 순서)
+    # 본사업 인력 (ScheduleTab 정렬 기준)
     t_staffings = [s for s in staffings if s.project_id == target_project_id]
-    t_staffings_sorted = sorted(t_staffings, key=lambda s: s.id)
+    ph_map = {p.id: p for p in phases}
 
-    # 인력별로 본사업 분야 집계 (first occurrence)
-    person_field_map: Dict[str, Dict] = {}
-    for s in t_staffings_sorted:
+    # 인력별로 가장 우선순위 높은 staffing 레코드로 분야/정렬키 결정
+    person_best: Dict[str, Dict] = {}
+    for s in t_staffings:
         key, name, is_chief, person_obj = _resolve_person_key(s, people_map)
-        if not key or key in person_field_map:
+        if not key:
             continue
+        phase = ph_map.get(s.phase_id)
+        phase_sort = phase.sort_order if phase and hasattr(phase, 'sort_order') else 9999
+        sg, so = _get_sort_key(s.category or "", s.field or "")
+        sort_key = (sg, so, phase_sort, s.id)
+
+        if key not in person_best or sort_key < person_best[key]["sort_key"]:
+            person_best[key] = {
+                "sort_key":   sort_key,
+                "staffing":   s,
+                "person_obj": person_obj,
+                "person_name": name,
+                "is_chief":   is_chief,
+            }
+
+    # ScheduleTab과 동일한 정렬 순서 유지
+    sorted_people = sorted(person_best.items(), key=lambda kv: kv[1]["sort_key"])
+
+    person_field_map: Dict[str, Dict] = {}
+    for key, info in sorted_people:
+        s = info["staffing"]
+        person_obj = info["person_obj"]
         person_field_map[key] = {
             "person_key":  key,
             "person_id":   s.person_id,
-            "person_name": name,
-            "is_chief":    is_chief,
+            "person_name": info["person_name"],
+            "is_chief":    info["is_chief"],
             "grade":       (person_obj.grade if person_obj else None) or "",
             "position":    (person_obj.position if person_obj else None) or "",
             "my_field":    s.field or "",
             "my_sub_field":s.sub_field or "",
+            "my_category": s.category or "",
         }
 
-    # 각 인력의 충돌 수집
+    # 각 인력의 충돌 수집 (정렬 순서 유지)
     result = []
-    seen_order = []  # 배치 순서 유지
-    for key in person_field_map:
-        seen_order.append(key)
+    seen_order = list(person_field_map.keys())  # 이미 정렬된 순서
 
     for person_key in seen_order:
         pinfo = person_field_map[person_key]
