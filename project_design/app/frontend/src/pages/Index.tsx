@@ -420,14 +420,14 @@ export default function IndexPage() {
         // MD 파싱 규칙 (예비조사:감리:시정조치확인 형식 지원):
         //   이름          → MD 없음 (전체기간)
         //   이름:5        → 감리일수 5일
-        //   이름:2:5      → 감리일수 5일 (두번째값)
-        //   이름:2:5:3    → 감리일수 5일 (세번째값 중 두번째=감리)
+        //   이름:5:2      → 감리일수 5일 (첫번째값), 시정 2일 무시
+        //   이름:2:5:3    → 예비 2일 무시, 감리일수 5일 (두번째값), 시정 3일 무시
         const extractMd = (colonParts: string[]): string => {
           const nums = colonParts.slice(1).map(s => s.trim());
           if (nums.length === 0) return '';
-          if (nums.length === 1) return /^\d+$/.test(nums[0]) ? nums[0] : ''; // 이름:5
-          if (nums.length === 2) return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리
-          return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리:시정 → 감리(두번째)
+          if (nums.length === 1) return /^\d+$/.test(nums[0]) ? nums[0] : ''; // 이름:5 → 감리5
+          if (nums.length === 2) return /^\d+$/.test(nums[0]) ? nums[0] : ''; // 이름:5:2 → 감리5(첫번째)
+          return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:2:5:3 → 감리5(두번째)
         };
 
         const text = proposalScheduleText.trim().split('\n').map(line => {
