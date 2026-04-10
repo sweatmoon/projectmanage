@@ -1,15 +1,14 @@
 """
 제안일정 리스크 분석 API
-GET /api/v1/proposal-risk/list   → 제안사업 목록 + 리스크 요약
-GET /api/v1/proposal-risk/{id}   → 특정 제안사업 상세 리스크 분석
+GET /api/v1/proposal-risk/list          → 제안사업 목록 + 리스크 요약
+GET /api/v1/proposal-risk/{id}          → 특정 제안사업 상세 리스크 분석
+GET /api/v1/proposal-risk/{id}/schedule → 인력 일정 중복 상세 (본사업 인력 × 비교사업)
 
 리스크 유형:
-  1. schedule_conflict   - 인력 일정 중복 (전체, 감리/제안 구분 없이)
-                           * person_id 기반 + person_name_text 이름 매칭 둘 다 탐지
-                           * phase 단위 날짜로 상세 겹침 계산
-  2. chief_overload      - 총괄감리원(is_chief=True) 동일 제안사업에 3명 이상
-  3. chief_role_conflict - is_chief 인력이 다른 사업(감리/제안)에서도 총괄로 날짜 겹침
-  4. org_duplicate       - 동일 기관 사업과 날짜 겹침 (감리↔제안, 제안↔제안)
+  1. schedule_conflict   - 인력 일정 중복
+  2. chief_overload      - 총괄감리원 동일 제안사업에 N명 이상
+  3. chief_role_conflict - 총괄급 인력이 다른 사업에서도 총괄로 날짜 겹침
+  4. org_duplicate       - 동일 기관 사업과 날짜 겹침
 """
 import logging
 import re
@@ -30,6 +29,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/proposal-risk", tags=["proposal-risk"])
 
 CHIEF_OVERLOAD_THRESHOLD = 3  # 총괄 N명 이상이면 과다 투입
+
+# 강조 표시할 분야 키워드 (사업관리, 품질보증)
+HIGHLIGHT_FIELDS = ["사업관리", "품질보증"]
 
 
 # ── 날짜 겹침 헬퍼 ────────────────────────────────────────────────────────────
@@ -53,10 +55,20 @@ def _overlap_days(s1: date, e1: date, s2: date, e2: date) -> int:
 
 
 def _norm_name(name: Optional[str]) -> str:
-    """이름 정규화: 공백/특수문자 제거, 소문자"""
+    """이름 정규화: 공백/특수문자 제거"""
     if not name:
         return ""
     return re.sub(r"[\s\u200b\u00a0]", "", name).strip()
+
+
+def _is_highlight_field(field: Optional[str]) -> bool:
+    """사업관리 또는 품질보증 분야 여부"""
+    if not field:
+        return False
+    for kw in HIGHLIGHT_FIELDS:
+        if kw in field:
+            return True
+    return False
 
 
 # ── 공통 데이터 로드 ──────────────────────────────────────────────────────────
@@ -93,24 +105,19 @@ def _project_date_range(project_id: int, phases: list) -> Tuple[Optional[date], 
     return min(p.start_date for p in proj_phases), max(p.end_date for p in proj_phases)
 
 
-def _phase_map(phases: list) -> Dict[int, Any]:
-    """phase_id → phase 객체 맵"""
-    return {p.id: p for p in phases}
-
-
-def _resolve_person_key(s: Any, people_map: Dict[int, Any]) -> Tuple[Optional[str], str, bool]:
+def _resolve_person_key(s: Any, people_map: Dict[int, Any]) -> Tuple[Optional[str], str, bool, Optional[Any]]:
     """
-    staffing 레코드에서 (person_key, display_name, is_chief) 반환.
+    staffing 레코드에서 (person_key, display_name, is_chief, people_obj) 반환.
     person_key: person_id 기반이면 "id:123", 이름 기반이면 "name:홍길동"
     """
     if s.person_id and s.person_id in people_map:
         p = people_map[s.person_id]
-        return f"id:{s.person_id}", p.person_name, bool(p.is_chief)
+        return f"id:{s.person_id}", p.person_name, bool(p.is_chief), p
     name_text = (s.person_name_text or "").strip()
     if name_text:
         norm = _norm_name(name_text)
-        return f"name:{norm}", name_text, False
-    return None, "미배정", False
+        return f"name:{norm}", name_text, False, None
+    return None, "미배정", False, None
 
 
 # ── 인력별 phase 목록 수집 ────────────────────────────────────────────────────
@@ -126,7 +133,9 @@ def _build_person_phase_index(
         project_id, project_name, project_status,
         phase_id, phase_name,
         start_date, end_date,
-        is_chief, person_name
+        is_chief, person_name,
+        field, sub_field, category, md,
+        staffing_id,
       }, ...
     ]
     날짜가 있는 phase에 배정된 인력만 수집.
@@ -139,7 +148,7 @@ def _build_person_phase_index(
         if not phase or not phase.start_date or not phase.end_date:
             continue  # 날짜 없는 phase는 스킵
 
-        person_key, person_name, is_chief = _resolve_person_key(s, people_map)
+        person_key, person_name, is_chief, _ = _resolve_person_key(s, people_map)
         if not person_key:
             continue
 
@@ -148,6 +157,7 @@ def _build_person_phase_index(
             continue
 
         entry = {
+            "staffing_id":    s.id,
             "project_id":     proj.id,
             "project_name":   proj.project_name,
             "project_status": proj.status,
@@ -157,6 +167,10 @@ def _build_person_phase_index(
             "end_date":       phase.end_date,
             "is_chief":       is_chief,
             "person_name":    person_name,
+            "field":          s.field or "",
+            "sub_field":      s.sub_field or "",
+            "category":       s.category or "",
+            "md":             s.md,
         }
         index.setdefault(person_key, []).append(entry)
 
@@ -192,7 +206,7 @@ def _analyze_risks(
     t_person_keys: Dict[str, str] = {}   # key → display_name
     t_person_is_chief: Dict[str, bool] = {}
     for s in t_staffings:
-        key, name, is_chief = _resolve_person_key(s, people_map)
+        key, name, is_chief, _ = _resolve_person_key(s, people_map)
         if key:
             t_person_keys[key] = name
             t_person_is_chief[key] = is_chief
@@ -236,23 +250,31 @@ def _analyze_risks(
                 )
 
                 conflict_items.append({
-                    "person_name":          person_name,
-                    "is_chief":             is_chief,
-                    # 대상 사업 phase 정보
-                    "my_phase_name":        t_ph["phase_name"],
-                    "my_phase_start":       str(t_ph["start_date"]),
-                    "my_phase_end":         str(t_ph["end_date"]),
+                    "person_name":            person_name,
+                    "is_chief":               is_chief,
+                    # 본사업(제안) phase 정보
+                    "my_phase_name":          t_ph["phase_name"],
+                    "my_phase_start":         str(t_ph["start_date"]),
+                    "my_phase_end":           str(t_ph["end_date"]),
+                    "my_field":               t_ph["field"],
+                    "my_sub_field":           t_ph["sub_field"],
                     # 충돌 사업 정보
-                    "other_project_id":     o_ph["project_id"],
-                    "other_project_name":   o_ph["project_name"],
-                    "other_project_status": o_ph["project_status"],
-                    "other_phase_name":     o_ph["phase_name"],
-                    "other_phase_start":    str(o_ph["start_date"]),
-                    "other_phase_end":      str(o_ph["end_date"]),
+                    "other_project_id":       o_ph["project_id"],
+                    "other_project_name":     o_ph["project_name"],
+                    "other_project_status":   o_ph["project_status"],
+                    "other_phase_name":       o_ph["phase_name"],
+                    "other_phase_start":      str(o_ph["start_date"]),
+                    "other_phase_end":        str(o_ph["end_date"]),
+                    "other_field":            o_ph["field"],        # 비교사업에서의 분야
+                    "other_sub_field":        o_ph["sub_field"],
+                    "other_field_highlight":  _is_highlight_field(o_ph["field"]),  # 사업관리/품질보증 여부
                     # 겹치는 구간
-                    "overlap_start":        str(ov_s),
-                    "overlap_end":          str(ov_e),
-                    "overlap_days":         days,
+                    "overlap_start":          str(ov_s),
+                    "overlap_end":            str(ov_e),
+                    "overlap_days":           days,
+                    # 중복 공수 (md 기반)
+                    "my_md":                  t_ph["md"],
+                    "other_md":               o_ph["md"],
                 })
 
     if conflict_items:
@@ -267,7 +289,6 @@ def _analyze_risks(
         reasons = []
         for pname, items in list(by_person.items())[:5]:
             role_tag = " [총괄]" if items[0]["is_chief"] else ""
-            # 같은 인력의 충돌을 사업별로 요약
             by_other: Dict[str, List] = {}
             for it in items:
                 by_other.setdefault(it["other_project_name"], []).append(it)
@@ -295,10 +316,10 @@ def _analyze_risks(
             "type":        "schedule_conflict",
             "severity":    severity,
             "title":       "인력 일정 중복",
-            "count":       len(by_person),   # 중복 인원 수
+            "count":       len(by_person),
             "reasons":     reasons,
             "suggestions": suggestions,
-            "items":       conflict_items,   # phase 단위 상세 목록
+            "items":       conflict_items,
         })
 
     # ── 리스크 ② 총괄감리원 과다 투입 ───────────────────────────────────────
@@ -457,10 +478,195 @@ def _analyze_risks(
     return risks
 
 
+# ── 본사업 인력 배치 목록 (staffing.id 순) ────────────────────────────────────
+def _get_target_staffing_people(
+    target_project_id: int,
+    staffings: list,
+    phases: list,
+    people_map: Dict[int, Any],
+) -> List[Dict]:
+    """
+    본사업(제안) 인력을 staffing.id 순서로 반환.
+    (ScheduleTab의 인력배치 순서와 동기화됨)
+    각 인력에 대해: person_key, person_name, is_chief, grade, field, sub_field, category
+    """
+    ph_map = {p.id: p for p in phases}
+    t_staffings = [s for s in staffings if s.project_id == target_project_id]
+    # staffing.id 순서로 정렬 (= 인력 배치 순서)
+    t_staffings_sorted = sorted(t_staffings, key=lambda s: s.id)
+
+    seen_keys: set = set()
+    result = []
+
+    for s in t_staffings_sorted:
+        key, name, is_chief, person_obj = _resolve_person_key(s, people_map)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        result.append({
+            "person_key":  key,
+            "person_id":   s.person_id,
+            "person_name": name,
+            "is_chief":    is_chief,
+            "grade":       (person_obj.grade if person_obj else None) or "",
+            "position":    (person_obj.position if person_obj else None) or "",
+            "field":       s.field or "",
+            "sub_field":   s.sub_field or "",
+            "category":    s.category or "",
+        })
+
+    return result
+
+
+# ── 인력별 일정 중복 상세 ─────────────────────────────────────────────────────
+def _build_schedule_overlap(
+    target_project_id: int,
+    staffings: list,
+    phases: list,
+    people_map: Dict[int, Any],
+    project_map: Dict[int, Any],
+) -> List[Dict]:
+    """
+    본사업 인력을 배치 순서(staffing.id 순)로 나열하고,
+    각 인력에 대해 감리사업(A) / 타제안(P) 충돌 목록 반환.
+
+    반환값 (인력 1명 단위):
+    {
+      person_key, person_name, is_chief, grade,
+      my_field, my_sub_field,           ← 본사업에서의 분야
+      total_overlap_days,               ← 모든 충돌의 합산 중복일수
+      total_overlap_md,                 ← 합산 공수(md)
+      conflicts: [
+        {
+          other_project_id, other_project_name,
+          other_project_status,           ← '감리' or '제안'
+          type_label,                     ← 'A' (감리) or 'P' (제안)
+          other_phase_name,
+          other_phase_start, other_phase_end,
+          other_field, other_sub_field,
+          other_field_highlight,          ← 사업관리/품질보증 여부
+          my_phase_name, my_phase_start, my_phase_end,
+          overlap_start, overlap_end,
+          overlap_days,
+          overlap_md,                     ← 해당 충돌의 공수
+        }, ...
+      ]
+    }
+    """
+    ph_map = {p.id: p for p in phases}
+
+    # 인력별 phase 인덱스 빌드
+    person_phase_index = _build_person_phase_index(
+        staffings, phases, people_map, project_map
+    )
+
+    # 본사업 인력 (배치 순서)
+    t_staffings = [s for s in staffings if s.project_id == target_project_id]
+    t_staffings_sorted = sorted(t_staffings, key=lambda s: s.id)
+
+    # 인력별로 본사업 분야 집계 (first occurrence)
+    person_field_map: Dict[str, Dict] = {}
+    for s in t_staffings_sorted:
+        key, name, is_chief, person_obj = _resolve_person_key(s, people_map)
+        if not key or key in person_field_map:
+            continue
+        person_field_map[key] = {
+            "person_key":  key,
+            "person_id":   s.person_id,
+            "person_name": name,
+            "is_chief":    is_chief,
+            "grade":       (person_obj.grade if person_obj else None) or "",
+            "position":    (person_obj.position if person_obj else None) or "",
+            "my_field":    s.field or "",
+            "my_sub_field":s.sub_field or "",
+        }
+
+    # 각 인력의 충돌 수집
+    result = []
+    seen_order = []  # 배치 순서 유지
+    for key in person_field_map:
+        seen_order.append(key)
+
+    for person_key in seen_order:
+        pinfo = person_field_map[person_key]
+        all_entries = person_phase_index.get(person_key, [])
+
+        my_phases = [e for e in all_entries if e["project_id"] == target_project_id]
+        other_phases = [e for e in all_entries if e["project_id"] != target_project_id]
+
+        conflicts = []
+        seen_conf = set()
+
+        for t_ph in my_phases:
+            for o_ph in other_phases:
+                if not _dates_overlap(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                ):
+                    continue
+                dedup = (o_ph["project_id"], t_ph["phase_id"], o_ph["phase_id"])
+                if dedup in seen_conf:
+                    continue
+                seen_conf.add(dedup)
+
+                ov_s, ov_e = _overlap_range(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                )
+                days = _overlap_days(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                )
+
+                # 감리(A) / 제안(P) 구분
+                status = o_ph["project_status"]
+                type_label = "A" if status == "감리" else "P"
+
+                # 공수: md가 있으면 md, 없으면 overlap_days
+                overlap_md = o_ph["md"] if o_ph["md"] else days
+
+                conflicts.append({
+                    "other_project_id":      o_ph["project_id"],
+                    "other_project_name":    o_ph["project_name"],
+                    "other_project_status":  status,
+                    "type_label":            type_label,
+                    "other_phase_name":      o_ph["phase_name"],
+                    "other_phase_start":     str(o_ph["start_date"]),
+                    "other_phase_end":       str(o_ph["end_date"]),
+                    "other_field":           o_ph["field"],
+                    "other_sub_field":       o_ph["sub_field"],
+                    "other_field_highlight": _is_highlight_field(o_ph["field"]),
+                    "my_phase_name":         t_ph["phase_name"],
+                    "my_phase_start":        str(t_ph["start_date"]),
+                    "my_phase_end":          str(t_ph["end_date"]),
+                    "overlap_start":         str(ov_s),
+                    "overlap_end":           str(ov_e),
+                    "overlap_days":          days,
+                    "overlap_md":            overlap_md,
+                })
+
+        # 감리 먼저, 그 다음 제안 순으로 정렬
+        conflicts.sort(key=lambda c: (0 if c["type_label"] == "A" else 1, c["other_project_name"]))
+
+        total_days = sum(c["overlap_days"] for c in conflicts)
+        total_md = sum(c["overlap_md"] for c in conflicts)
+
+        result.append({
+            **pinfo,
+            "total_overlap_days": total_days,
+            "total_overlap_md":   total_md,
+            "has_conflict":       len(conflicts) > 0,
+            "conflicts":          conflicts,
+        })
+
+    return result
+
+
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
 @router.get("/debug")
 async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
-    """디버그: DB 실제 데이터 현황 + 중복 탐지 안 되는 원인까지 분석"""
+    """디버그: DB 실제 데이터 현황"""
     all_projects, phases, staffings, peoples = await _load_all(db)
     people_map = {p.id: p for p in peoples}
     project_map = {p.id: p for p in all_projects}
@@ -470,8 +676,6 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
         status_counts[p.status] = status_counts.get(p.status, 0) + 1
 
     proposal_projects = [p for p in all_projects if p.status == "제안"]
-
-    # 전체 사업의 인력별 phase 인덱스 빌드
     person_phase_index = _build_person_phase_index(staffings, phases, people_map, project_map)
 
     proposal_detail = []
@@ -480,21 +684,18 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
         phases_with_dates = [ph for ph in proj_phases if ph.start_date and ph.end_date]
         proj_staffings = [s for s in staffings if s.project_id == proj.id]
 
-        # person_id vs name_text 분류
         with_pid = [s for s in proj_staffings if s.person_id]
         with_name_only = [s for s in proj_staffings if not s.person_id and s.person_name_text]
         unassigned = [s for s in proj_staffings if not s.person_id and not s.person_name_text]
 
-        # 이 사업에 배정된 인력 key 목록
         t_person_keys: Dict[str, str] = {}
         for s in proj_staffings:
-            key, name, _ = _resolve_person_key(s, people_map)
+            key, name, _, _ = _resolve_person_key(s, people_map)
             if key:
                 t_person_keys[key] = name
 
-        # 각 인력이 다른 사업에도 있는지 확인
         conflict_check = []
-        for key, name in list(t_person_keys.items())[:20]:  # 최대 20명
+        for key, name in list(t_person_keys.items())[:20]:
             entries = person_phase_index.get(key, [])
             other_projects = list({e["project_id"] for e in entries if e["project_id"] != proj.id})
             other_proj_names = [project_map[pid].project_name for pid in other_projects if pid in project_map]
@@ -506,7 +707,6 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
                 "other_project_names": other_proj_names[:5],
             })
 
-        # 실제 리스크 분석 실행
         risks = _analyze_risks(proj, all_projects, phases, staffings, people_map)
 
         proposal_detail.append({
@@ -521,14 +721,6 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
             "conflict_check": conflict_check,
             "risks_detected": len(risks),
             "risk_types": [r["type"] for r in risks],
-            "phase_list": [
-                {
-                    "phase_name": ph.phase_name,
-                    "start_date": str(ph.start_date) if ph.start_date else None,
-                    "end_date": str(ph.end_date) if ph.end_date else None,
-                }
-                for ph in phases_with_dates[:5]
-            ],
         })
 
     return {
@@ -538,7 +730,6 @@ async def get_proposal_risk_debug(db: AsyncSession = Depends(get_db)):
         "total_phases": len(phases),
         "total_staffings": len(staffings),
         "total_people": len(peoples),
-        "person_phase_index_size": len(person_phase_index),
         "proposals": proposal_detail,
     }
 
@@ -583,6 +774,54 @@ async def get_proposal_risk_list(db: AsyncSession = Depends(get_db)):
     return {"proposals": result, "total": len(result)}
 
 
+@router.get("/{project_id}/schedule")
+async def get_proposal_schedule_overlap(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    본사업 인력별 일정 중복 상세
+    - 본사업 인력을 배치 순서(staffing.id 기준)로 나열
+    - 각 인력의 본사업 분야(field) 표시
+    - 감리사업(A) / 타제안(P) 충돌 항목 포함
+    - 충돌 사업의 분야가 사업관리/품질보증이면 highlight=true
+    """
+    all_projects, phases, staffings, peoples = await _load_all(db)
+    people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
+
+    target = next((p for p in all_projects if p.id == project_id), None)
+    if not target:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    p_start, p_end = _project_date_range(project_id, phases)
+    schedule_data = _build_schedule_overlap(
+        project_id, staffings, phases, people_map, project_map
+    )
+
+    # 전체 통계
+    total_people = len(schedule_data)
+    conflict_people = sum(1 for p in schedule_data if p["has_conflict"])
+    total_conflict_days = sum(p["total_overlap_days"] for p in schedule_data)
+    total_conflict_md = sum(p["total_overlap_md"] for p in schedule_data)
+
+    return {
+        "id":            target.id,
+        "project_name":  target.project_name,
+        "organization":  target.organization,
+        "start_date":    str(p_start) if p_start else None,
+        "end_date":      str(p_end) if p_end else None,
+        "summary": {
+            "total_people":       total_people,
+            "conflict_people":    conflict_people,
+            "total_overlap_days": total_conflict_days,
+            "total_overlap_md":   total_conflict_md,
+        },
+        "people": schedule_data,
+    }
+
+
 @router.get("/{project_id}")
 async def get_proposal_risk_detail(
     project_id: int,
@@ -591,6 +830,7 @@ async def get_proposal_risk_detail(
     """특정 제안사업의 상세 리스크 분석"""
     all_projects, phases, staffings, peoples = await _load_all(db)
     people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
 
     target = next((p for p in all_projects if p.id == project_id), None)
     if not target:
@@ -600,24 +840,10 @@ async def get_proposal_risk_detail(
     risks = _analyze_risks(target, all_projects, phases, staffings, people_map)
     p_start, p_end = _project_date_range(project_id, phases)
 
-    # 배정 인력 목록 (person_id + name_text 통합)
-    t_staffings = [s for s in staffings if s.project_id == project_id]
-    assigned_people = []
-    seen_keys: set = set()
-    for s in t_staffings:
-        key, name, is_chief = _resolve_person_key(s, people_map)
-        if not key or key in seen_keys:
-            continue
-        seen_keys.add(key)
-        person = people_map.get(s.person_id) if s.person_id else None
-        assigned_people.append({
-            "person_id":   s.person_id,
-            "person_name": name,
-            "is_chief":    is_chief,
-            "grade":       (person.grade  if person else None) or "",
-            "can_travel":  (person.can_travel if person else None),
-            "region":      (person.region if person else None) or "",
-        })
+    # 배정 인력 목록 (배치 순서 - staffing.id 기준)
+    assigned_people = _get_target_staffing_people(
+        project_id, staffings, phases, people_map
+    )
 
     return {
         "id":              target.id,
