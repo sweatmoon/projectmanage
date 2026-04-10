@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 # 인증 없이 접근 가능한 경로
 PUBLIC_PATHS = {
     "/health",
-    "/api/config",   # 프론트엔드 런타임 설정 (인증 전 필요)
-    "/api/v1/proposal-risk/debug",  # 디버그 엔드포인트 (임시 공개)
+    "/api/config",
+    "/api/v1/proposal-risk/debug",
+    "/api/v1/proposal-risk/list",   # 임시 공개 - 디버그용
     "/auth/login",
     "/auth/callback",
     "/auth/logout",
