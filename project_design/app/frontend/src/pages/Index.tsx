@@ -1,6 +1,41 @@
 // tab state managed via localStorage + URL param
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Component } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
+
+// ── 탭 에러 바운더리 (탭별 독립 에러 처리) ─────────────────────────────
+interface TabEBState { hasError: boolean; error: Error | null; }
+class TabErrorBoundary extends Component<{ children: ReactNode; tabName: string }, TabEBState> {
+  constructor(props: { children: ReactNode; tabName: string }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error): TabEBState {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[TabErrorBoundary:${this.props.tabName}]`, error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <div className="text-4xl mb-3">⚠️</div>
+          <h3 className="text-base font-bold text-gray-700 mb-1">{this.props.tabName} 탭 오류</h3>
+          <p className="text-sm text-gray-400 mb-4 max-w-sm">{this.state.error?.message ?? '예상치 못한 오류가 발생했습니다.'}</p>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          >
+            새로고침
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -575,24 +610,29 @@ export default function IndexPage() {
           </div>
 
           <TabsContent value="projects">
+            <TabErrorBoundary tabName="프로젝트">
             <ProjectTab
               projects={projects}
               loading={loadingProjects}
               onSelectProject={(id) => navigate(`/project/${id}`)}
               onRefresh={refreshAll}
             />
+            </TabErrorBoundary>
           </TabsContent>
 
           <TabsContent value="people">
+            <TabErrorBoundary tabName="인력">
             <PeopleTab
               people={people}
               loading={loadingPeople}
               onSelectPerson={(id) => navigate(`/person/${id}`)}
               onRefresh={fetchPeople}
             />
+            </TabErrorBoundary>
           </TabsContent>
 
           <TabsContent value="schedule">
+            <TabErrorBoundary tabName="인력별 일정">
             <ScheduleTab
               projects={projects}
               phases={phases}
@@ -600,9 +640,11 @@ export default function IndexPage() {
               people={people}
               onRefresh={refreshAll}
             />
+            </TabErrorBoundary>
           </TabsContent>
 
           <TabsContent value="gantt">
+            <TabErrorBoundary tabName="사업별 일정">
             <ProjectGanttTab
               projects={projects}
               phases={phases}
@@ -610,15 +652,18 @@ export default function IndexPage() {
               people={people}
               onRefresh={refreshAll}
             />
+            </TabErrorBoundary>
           </TabsContent>
 
           <TabsContent value="reports">
+            <TabErrorBoundary tabName="리포트">
             <ReportTab
               projects={projects}
               phases={phases}
               staffing={staffing}
               people={people}
             />
+            </TabErrorBoundary>
           </TabsContent>
         </Tabs>
       </main>

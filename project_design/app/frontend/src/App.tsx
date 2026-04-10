@@ -143,10 +143,10 @@ const App = () => (
           <Route path="/access-request" element={<AccessRequest />} />
 
           {/* 인증 필요 경로 */}
-          <Route path="/" element={<AuthGuard><Index /></AuthGuard>} />
-          <Route path="/project/:id" element={<AuthGuard><ProjectDetail /></AuthGuard>} />
-          <Route path="/project/:id/staffing" element={<AuthGuard><StaffingRowDetail /></AuthGuard>} />
-          <Route path="/person/:id" element={<AuthGuard><PersonDetail /></AuthGuard>} />
+          <Route path="/" element={<AuthGuard><ErrorBoundary><Index /></ErrorBoundary></AuthGuard>} />
+          <Route path="/project/:id" element={<AuthGuard><ErrorBoundary><ProjectDetail /></ErrorBoundary></AuthGuard>} />
+          <Route path="/project/:id/staffing" element={<AuthGuard><ErrorBoundary><StaffingRowDetail /></ErrorBoundary></AuthGuard>} />
+          <Route path="/person/:id" element={<AuthGuard><ErrorBoundary><PersonDetail /></ErrorBoundary></AuthGuard>} />
 
           {/* 관리자 전용 */}
           <Route path="/admin" element={<AuthGuard requireAdmin><ErrorBoundary><AdminPage /></ErrorBoundary></AuthGuard>} />

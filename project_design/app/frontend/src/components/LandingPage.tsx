@@ -265,7 +265,7 @@ export default function LandingPage({ onNavigate, stats }: LandingPageProps) {
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-slate-400 font-medium">감리원 가동률</p>
                 <p className="text-2xl font-extrabold text-slate-800 leading-tight">
-                  {(stats.utilizationRate * 100).toFixed(1)}<span className="text-sm font-normal text-slate-400 ml-0.5">%</span>
+                  {(stats.utilizationRate != null ? stats.utilizationRate * 100 : 0).toFixed(1)}<span className="text-sm font-normal text-slate-400 ml-0.5">%</span>
                 </p>
                 {stats.auditorCount > 0 && (
                   <p className="text-[10px] text-slate-400 mt-0.5">
