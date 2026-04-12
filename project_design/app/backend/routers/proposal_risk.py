@@ -862,8 +862,16 @@ async def get_proposal_risk_list(db: AsyncSession = Depends(get_db)):
 
 
 class TextOutputRequest(BaseModel):
-    """시뮬레이션 결과 → 이미지 속 텍스트 형식(감리 일정 / 감리원) 변환 요청"""
-    excluded_person_keys: List[str] = []   # 제외할 person_key 목록
+    """시뮬레이션 결과 → 이미지 속 텍스트 형식(감리 일정 / 감리원) 변환 요청
+    
+    세 가지 시뮬레이션 조합을 모두 반영하여 텍스트 출력:
+    1. excluded_person_keys : 제외만 (대체 없음)
+    2. person_replacements  : {old_person_key: new_person_id} 인력 교체
+    3. phase_shifts         : {phase_id: {start_date, end_date}} 일정 이동
+    """
+    excluded_person_keys: List[str] = []        # 제외할 person_key 목록 (대체 없음)
+    person_replacements: Dict[str, Optional[int]] = {}  # {old_key: new_person_id} 인력 교체
+    phase_shifts: Dict[int, Dict[str, str]] = {}        # {phase_id: {start_date, end_date}}
 
 
 @router.post("/{project_id}/text-output")
@@ -875,10 +883,11 @@ async def get_text_output(
     """
     [DB 격리 보장] 이 엔드포인트는 DB에 어떠한 쓰기도 수행하지 않습니다.
     - DB에서 데이터를 읽기(SELECT)만 수행한 후 메모리에서 가공합니다.
-    - excluded_person_keys 는 메모리 필터링에만 사용되며 DB에 반영되지 않습니다.
+    - excluded_person_keys, person_replacements, phase_shifts 모두
+      메모리 내 가상 조작에만 사용되며 원본 DB에 반영되지 않습니다.
 
     제안 사업의 인력 배치를 이미지 속 텍스트 형식으로 변환.
-    excluded_person_keys 에 포함된 인력은 제외됨 (DB 변경 없음, 시뮬레이션 전용).
+    시뮬레이션 조합(제외 / 인력교체 / 일정이동)을 반영하여 출력.
 
     출력 형식:
     [감리 일정]
@@ -892,6 +901,7 @@ async def get_text_output(
     ...
     """
     from fastapi import HTTPException
+    from types import SimpleNamespace
 
     all_projects, phases, staffings, peoples = await _load_all(db)
     people_map = {p.id: p for p in peoples}
@@ -901,13 +911,44 @@ async def get_text_output(
     if not target:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    excluded = set(body.excluded_person_keys)
-    ph_map = {p.id: p for p in phases}
+    # ── person_replacements 에서 excluded 도 함께 수집 ───────────────────
+    # excluded_person_keys 와 person_replacements 의 키(old_key) 모두 제거 대상
+    excluded = set(body.excluded_person_keys) | set(body.person_replacements.keys())
 
-    # ── 본사업 staffing 목록 (제외 인력 빼고) ────────────────────────────
+    # ── phase_shifts 적용: 가상 phase 객체 생성 ──────────────────────────
+    phase_shift_map: Dict[int, tuple] = {}
+    for phase_id_str, dates in body.phase_shifts.items():
+        try:
+            pid_int = int(phase_id_str)
+            ns = date.fromisoformat(dates["start_date"])
+            ne = date.fromisoformat(dates["end_date"])
+            phase_shift_map[pid_int] = (ns, ne)
+        except Exception:
+            continue
+
+    virtual_phases = []
+    for ph in phases:
+        if ph.id in phase_shift_map:
+            ns_date, ne_date = phase_shift_map[ph.id]
+            vph = SimpleNamespace(
+                id=ph.id,
+                project_id=ph.project_id,
+                phase_name=ph.phase_name,
+                start_date=ns_date,
+                end_date=ne_date,
+                sort_order=getattr(ph, "sort_order", 9999),
+                deleted_at=ph.deleted_at,
+            )
+        else:
+            vph = ph
+        virtual_phases.append(vph)
+
+    ph_map = {p.id: p for p in virtual_phases}
+
+    # ── 본사업 staffing 목록: old_key 제거 + 교체 인력 가상 추가 ────────
     t_staffings = [s for s in staffings if s.project_id == project_id]
 
-    # 제외할 person_key 필터 적용
+    # old_key 제거
     filtered_staffings = []
     for s in t_staffings:
         key, _, _, _ = _resolve_person_key(s, people_map)
@@ -915,6 +956,29 @@ async def get_text_output(
             filtered_staffings.append(s)
         elif not key:
             filtered_staffings.append(s)
+
+    # 교체 인력 가상 staffing 추가
+    for old_key, new_pid in body.person_replacements.items():
+        if not new_pid or new_pid not in people_map:
+            continue
+        # old_key 가 배정된 본사업 staffing 레코드를 찾아 new_pid 로 교체한 가상 레코드 생성
+        for s in t_staffings:
+            s_key, _, _, _ = _resolve_person_key(s, people_map)
+            if s_key != old_key:
+                continue
+            vs = SimpleNamespace(
+                id=-s.id,
+                project_id=s.project_id,
+                phase_id=s.phase_id,
+                person_id=new_pid,
+                person_name_text=None,
+                field=s.field,
+                sub_field=s.sub_field,
+                category=s.category,
+                md=s.md,
+                deleted_at=None,
+            )
+            filtered_staffings.append(vs)
 
     # ── 단계별로 그룹핑 ──────────────────────────────────────────────────
     # phase_id → 인력 목록 매핑
@@ -985,9 +1049,9 @@ async def get_text_output(
             )
 
     # ── 감리 일정 텍스트 생성 ────────────────────────────────────────────
-    # phase를 sort_order 순으로 정렬
+    # phase를 sort_order 순으로 정렬 (가상 phase 포함 — 일정 이동 반영)
     t_phases_sorted = sorted(
-        [ph for ph in phases if ph.project_id == project_id and ph.start_date and ph.end_date],
+        [ph for ph in virtual_phases if ph.project_id == project_id and ph.start_date and ph.end_date],
         key=lambda p: getattr(p, 'sort_order', 9999)
     )
 
@@ -1034,12 +1098,20 @@ async def get_text_output(
             "content": "\n".join(f"{m['name']}, {m['field']}" for m in members),
         })
 
+    # 시뮬레이션 적용 요약 (프론트 안내용)
+    replacements_applied = {
+        k: v for k, v in body.person_replacements.items() if v is not None
+    }
+    excluded_only = set(body.excluded_person_keys) - set(body.person_replacements.keys())
+
     return {
         "project_id":   project_id,
         "project_name": target.project_name,
         "organization": target.organization,
         "excluded_keys": list(excluded),
         "excluded_count": len(excluded),
+        "replacements_count": len(replacements_applied),
+        "phase_shifts_count": len(phase_shift_map),
         "sections":     sections,
     }
 
