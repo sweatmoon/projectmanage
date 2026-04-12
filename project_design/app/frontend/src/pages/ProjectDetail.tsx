@@ -1033,6 +1033,10 @@ export default function ProjectDetail() {
   }, [staffingList, people]);
 
   const staffingRows = useMemo(() => {
+    // 정렬 기준:
+    //   제안사업 → 단계감리팀: 텍스트 입력 순서(staffing.id 오름차순), 전문가팀: 첫 등장 순서
+    //   감리사업 → 단계감리팀: TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀: 첫 등장 순서
+    const isProposal = project?.status === '제안';
     const rowMap = new Map<string, StaffingRowData>();
     staffingList.forEach((s) => {
       const personName = s.person_id
@@ -1051,6 +1055,8 @@ export default function ProjectDetail() {
 
       if (!rowMap.has(rowKey)) {
         const expertOrder = expertFirstMention.get(`${personName}||${s.field}`) ?? 999;
+        // 제안사업 단계감리팀: id 오름차순(입력 순서), 감리사업: field 패턴 순서
+        const stageOrder = isProposal ? s.id : teamInfo.sortOrder;
         rowMap.set(rowKey, {
           rowKey,
           category,
@@ -1061,7 +1067,7 @@ export default function ProjectDetail() {
           phaseMds: {},
           totalMd: 0,
           sortGroup,
-          sortOrder: sortGroup === 0 ? teamInfo.sortOrder : expertOrder,
+          sortOrder: sortGroup === 0 ? stageOrder : expertOrder,
         });
       }
       const row = rowMap.get(rowKey)!;
@@ -1077,7 +1083,7 @@ export default function ProjectDetail() {
       return a.sortOrder - b.sortOrder;
     });
     return rows;
-  }, [staffingList, people, expertFirstMention]);
+  }, [staffingList, people, expertFirstMention, project?.status]);
 
   const totalProjectMd = staffingList.reduce((sum, s) => sum + (s.md ?? 0), 0);
 

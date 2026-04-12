@@ -821,13 +821,14 @@ function EditModal({
   };
 
   const groupedStaffing = useMemo(() => {
-    // ProjectDetail과 동일한 정렬 기준 적용
-    // sortGroup: 0=단계감리팀, 1=전문가팀
-    // sortOrder: 단계감리팀 → TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀 → 첫 등장 순서
+    // 정렬 기준:
+    //   제안사업 → 단계감리팀: 텍스트 입력 순서(staffing.id 오름차순), 전문가팀: 첫 등장 순서
+    //   감리사업 → 단계감리팀: TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀: 첫 등장 순서
+    const isProposal = projectStatus === '제안';
     type SortedRow = { s: StaffingRow; sortGroup: number; sortOrder: number };
     const expertAppearOrder = new Map<string, number>();
 
-    const sorted: SortedRow[] = phaseStaffing.map((s, idx) => {
+    const sorted: SortedRow[] = phaseStaffing.map((s) => {
       const dbCat = s.category || '';
       let sortGroup: number;
       if (dbCat === '단계감리팀' || dbCat === '감리팀') {
@@ -840,7 +841,8 @@ function EditModal({
 
       let sortOrder: number;
       if (sortGroup === 0) {
-        sortOrder = getTeamInfo(s.field).sortOrder;
+        // 제안사업: id 오름차순(입력 순서), 감리사업: field 패턴 순서
+        sortOrder = isProposal ? s.id : getTeamInfo(s.field).sortOrder;
       } else {
         // 전문가팀: 인물+분야 기준 첫 등장 순서 유지
         const key = `${s.person_name_text || s.person_id}||${s.field}`;
@@ -864,7 +866,7 @@ function EditModal({
       else groups[1].items.push(s);
     }
     return groups.filter((g) => g.items.length > 0);
-  }, [phaseStaffing]);
+  }, [phaseStaffing, projectStatus]);
 
   const activeCount = phaseStaffing.filter((s) => !deletedIds.has(s.id)).length;
 
