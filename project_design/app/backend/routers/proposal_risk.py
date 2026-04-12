@@ -46,13 +46,22 @@ _STAGE_FIELD_ORDER = [
 _STAGE_CATEGORIES = {"단계감리팀", "감리팀"}
 _EXPERT_CATEGORIES = {"전문가팀", "핵심기술", "필수기술", "보안진단", "테스트"}
 
+# 제안사업 전문가팀 카테고리 정렬 순서 (프론트 EXPERT_CATEGORY_ORDER와 동일)
+_EXPERT_CATEGORY_ORDER = {
+    "핵심기술": 0,
+    "필수기술": 1,
+    "보안진단": 2,
+    "테스트":   3,
+}
+
 
 def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
     """
     ScheduleTab resolveTeamInfo 와 동일한 정렬 키 반환.
     반환: (sortGroup, sortOrder)
       단계감리팀 → sortGroup=0, sortOrder= field 순서(0~3, 나머지 4)
-      전문가팀   → sortGroup=1, sortOrder=999
+      전문가팀   → sortGroup=1, sortOrder= 카테고리 순서(핵심기술=0,필수기술=1,보안진단=2,테스트=3,기타=4)
+                   (동일 카테고리 내 id 정렬은 sort_key 4번째 인자 s.id 로 보장)
     """
     cat = (category or "").strip()
     fld = (field or "").strip()
@@ -64,13 +73,14 @@ def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
         return (0, 4)
 
     if cat in _EXPERT_CATEGORIES:
-        return (1, 999)
+        cat_order = _EXPERT_CATEGORY_ORDER.get(cat, 4)
+        return (1, cat_order)
 
     # category 미설정: field로 판단
     for pattern, order in _STAGE_FIELD_ORDER:
         if pattern.search(fld):
             return (0, order)
-    return (1, 999)
+    return (1, 4)
 
 
 # ── 날짜 겹침 헬퍼 ────────────────────────────────────────────────────────────
