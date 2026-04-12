@@ -573,13 +573,15 @@ function PersonReplacePicker({
       ),
     }))
     .sort((a, b) => {
-      // 1순위: 즉시투입 가능 여부
+      // 1순위: 본사업 배정중 인력 최하위 (이미 투입된 인력은 교체 비추천)
+      if (a.is_assigned !== b.is_assigned) return a.is_assigned ? 1 : -1;
+      // 2순위: 즉시투입 가능 여부
       if (a.is_available !== b.is_available) return a.is_available ? -1 : 1;
-      // 2순위: 분야 매칭 여부 (교체 대상과 동일 분야 우선)
+      // 3순위: 분야 매칭 여부 (교체 대상과 동일 분야 우선)
       if (a.field_match !== b.field_match) return a.field_match ? -1 : 1;
-      // 3순위: 중복 일수 오름차순 (적을수록 리스크 낮음)
+      // 4순위: 중복 일수 오름차순 (적을수록 리스크 낮음)
       if (a.conflict_days !== b.conflict_days) return a.conflict_days - b.conflict_days;
-      // 4순위: 이름 가나다순
+      // 5순위: 이름 가나다순
       return a.person_name.localeCompare(b.person_name, 'ko');
     });
 
@@ -634,10 +636,13 @@ function PersonReplacePicker({
               <span className="text-gray-600">원본 유지</span>
             </button>
 
-            {/* 즉시투입 가능 / 중복 있음 구분 */}
+            {/* 즉시투입 가능 / 중복 있음 / 본사업 배정중 구분 */}
             {(() => {
-              const available = filtered.filter(p => p.is_available);
-              const unavailable = filtered.filter(p => !p.is_available);
+              // 본사업 배정중은 맨 아래 별도 섹션
+              const notAssigned = filtered.filter(p => !p.is_assigned);
+              const alreadyAssigned = filtered.filter(p => p.is_assigned);
+              const available   = notAssigned.filter(p => p.is_available);
+              const unavailable = notAssigned.filter(p => !p.is_available);
               return (
                 <>
                   {available.length > 0 && (
@@ -657,6 +662,16 @@ function PersonReplacePicker({
                     </div>
                   )}
                   {unavailable.map(p => (
+                    <PersonPickerItem key={p.person_key} p={p} currentValue={currentValue}
+                      onClick={() => { onChange(person.person_key, p.person_id); setOpen(false); setSearch(''); }} />
+                  ))}
+                  {alreadyAssigned.length > 0 && (
+                    <div className="px-3 py-1 text-[10px] bg-gray-100 border-b border-gray-200 font-semibold text-gray-500 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+                      본사업 배정중 ({alreadyAssigned.length}명) — 비추천
+                    </div>
+                  )}
+                  {alreadyAssigned.map(p => (
                     <PersonPickerItem key={p.person_key} p={p} currentValue={currentValue}
                       onClick={() => { onChange(person.person_key, p.person_id); setOpen(false); setSearch(''); }} />
                   ))}
