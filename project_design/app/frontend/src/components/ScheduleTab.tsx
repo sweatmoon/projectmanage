@@ -1109,6 +1109,10 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
 
   // Group staffing by team with sort (ProjectGanttTab/ProjectDetail과 동일 기준)
   const groupedStaffing = useMemo(() => {
+    // 정렬 기준:
+    //   제안사업 → 단계감리팀: 텍스트 입력 순서(staffing.id 오름차순), 전문가팀: 첫 등장 순서
+    //   감리사업 → 단계감리팀: TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀: 첫 등장 순서
+    const isProposal = projectStatus === '제안';
     type SortedRow = { s: StaffingRow; sortGroup: number; sortOrder: number };
     const expertAppearOrder = new Map<string, number>();
 
@@ -1117,7 +1121,8 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       const { sortGroup } = info;
       let sortOrder: number;
       if (sortGroup === 0) {
-        sortOrder = info.sortOrder;
+        // 제안사업: id 오름차순(입력 순서), 감리사업: field 패턴 순서
+        sortOrder = isProposal ? s.id : info.sortOrder;
       } else {
         const key = `${s.person_name_text || s.person_id}||${s.field}`;
         if (!expertAppearOrder.has(key)) expertAppearOrder.set(key, expertAppearOrder.size);
@@ -1140,7 +1145,7 @@ function EditModal({ project, phase, phaseStaffing, allPeople, allStaffing, allP
       else groups[1].items.push(s);
     }
     return groups.filter((g) => g.items.length > 0);
-  }, [phaseStaffing]);
+  }, [phaseStaffing, projectStatus]);
 
   const activeCount = phaseStaffing.filter((s) => !deletedIds.has(s.id)).length;
 
