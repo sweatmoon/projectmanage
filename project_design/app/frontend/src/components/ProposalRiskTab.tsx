@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { authStore } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,34 @@ interface ConflictItem {
   overlap_md: number;
 }
 
+interface PhaseOtherProject {
+  type_label: 'A' | 'P';
+  other_project_id: number;
+  other_project_name: string;
+  other_project_status: string;
+  other_phase_name: string;
+  other_phase_start: string;
+  other_phase_end: string;
+  other_field: string;
+  other_sub_field: string;
+  other_field_highlight: boolean;
+  overlap_start: string;
+  overlap_end: string;
+  overlap_days: number;
+  overlap_md: number;
+}
+
+interface MyPhaseDetail {
+  phase_id: number;
+  phase_name: string;
+  start_date: string;
+  end_date: string;
+  has_overlap: boolean;
+  overlap_days: number;
+  overlap_md: number;
+  other_projects: PhaseOtherProject[];
+}
+
 interface PersonSchedule {
   person_key: string;
   person_id: number | null;
@@ -60,6 +88,7 @@ interface PersonSchedule {
   total_overlap_md: number;
   has_conflict: boolean;
   conflicts: ConflictItem[];
+  my_phases?: MyPhaseDetail[];
 }
 
 interface ScheduleDetail {
@@ -1230,23 +1259,24 @@ function IntegratedPersonRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const isReplaced = typeof replaceValue === 'number';
+  const hasPhases = (person.my_phases ?? []).length > 0;
 
   return (
     <>
       <tr
-        className={`border-b border-gray-100 transition-colors ${
+        className={`border-b border-gray-100 transition-colors cursor-pointer ${
           isReplaced ? 'bg-violet-50/50'
           : person.has_conflict ? (person.is_chief ? 'bg-purple-50/30' : 'bg-white')
           : 'bg-white'
         }`}
+        onClick={() => hasPhases && setExpanded(v => !v)}
       >
         {/* 인력명 */}
         <td className="px-3 py-2">
           <div className="flex items-center gap-1.5">
             {person.is_chief && <Crown className="h-3 w-3 text-purple-500 flex-shrink-0" />}
             <span className={`text-[11px] font-semibold truncate max-w-[80px] ${
-              person.is_chief ? 'text-purple-700'
-              : 'text-slate-700'
+              person.is_chief ? 'text-purple-700' : 'text-slate-700'
             }`}>
               {person.person_name}
             </span>
@@ -1278,7 +1308,7 @@ function IntegratedPersonRow({
         </td>
 
         {/* 교체 드롭다운 */}
-        <td className="px-2 py-2">
+        <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
           <PersonReplacePicker
             person={person}
             allPeople={allPeople}
@@ -1287,13 +1317,13 @@ function IntegratedPersonRow({
           />
         </td>
 
-        {/* 충돌 확장 버튼 */}
-        <td className="px-1 py-2">
-          {person.has_conflict && (
+        {/* 확장 버튼 — 항상 표시 (단계 데이터 있을 때) */}
+        <td className="px-1 py-2 text-center">
+          {hasPhases && (
             <button
-              onClick={() => setExpanded(v => !v)}
+              onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
               className="text-gray-400 hover:text-gray-600 p-0.5"
-              title="충돌 상세 보기"
+              title="단계별 일정 보기"
             >
               {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </button>
@@ -1301,45 +1331,83 @@ function IntegratedPersonRow({
         </td>
       </tr>
 
-      {/* 충돌 상세 행 */}
-      {expanded && person.conflicts.map((c, idx) => (
-        <tr
-          key={idx}
-          className={`border-b border-gray-50 ${c.other_field_highlight ? 'bg-rose-50/60' : 'bg-slate-50/50'}`}
-        >
-          <td colSpan={2} className="pl-10 pr-3 py-1.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <TypeBadge type={c.type_label} />
-              <span className="text-[10px] text-slate-700 font-medium" title={c.other_project_name}
-                style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
-                {c.other_project_name}
-              </span>
-              {c.other_field_highlight && (
-                <span className="text-[9px] bg-rose-100 text-rose-600 px-1 rounded font-bold">⚠ 동일분야</span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 text-[9px] text-gray-400 mt-0.5 pl-1">
-              <span className="truncate">{c.other_phase_name}</span>
-              <span className="text-gray-300">|</span>
-              <span className="text-blue-400 whitespace-nowrap">{c.overlap_start} ~ {c.overlap_end}</span>
-              {c.other_field && (
-                <>
-                  <span className="text-gray-300">|</span>
-                  <span className={c.other_field_highlight ? 'text-rose-500 font-semibold' : 'text-gray-400'}>
-                    {c.other_field}
+      {/* ── 펼침: 단계별 일정 + 타사업 ─────────────────────────────────────── */}
+      {expanded && (person.my_phases ?? []).map((ph, phIdx) => (
+        <React.Fragment key={ph.phase_id ?? phIdx}>
+          {/* 단계 헤더 행 */}
+          <tr className={`border-b ${ph.has_overlap ? 'bg-red-50/40' : 'bg-slate-50/60'}`}>
+            <td colSpan={2} className="pl-8 pr-3 py-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[10px] font-bold ${ph.has_overlap ? 'text-red-600' : 'text-slate-500'}`}>
+                  {ph.phase_name}
+                </span>
+                <span className="text-[9px] text-gray-400 whitespace-nowrap">
+                  {ph.start_date} ~ {ph.end_date}
+                </span>
+                {!ph.has_overlap && (
+                  <span className="text-[9px] text-emerald-500 font-medium">중복 없음</span>
+                )}
+              </div>
+            </td>
+            <td className="px-2 py-1.5 text-center">
+              {ph.has_overlap
+                ? <span className="text-[10px] font-semibold text-red-600">{ph.overlap_days}일</span>
+                : <span className="text-[9px] text-gray-300">–</span>
+              }
+            </td>
+            <td className="px-2 py-1.5 text-center">
+              {ph.has_overlap
+                ? <span className="text-[10px] text-orange-600">{ph.overlap_md}MD</span>
+                : <span className="text-[9px] text-gray-300">–</span>
+              }
+            </td>
+            <td colSpan={2} />
+          </tr>
+
+          {/* 이 단계와 겹치는 타사업 목록 */}
+          {ph.other_projects.map((op, opIdx) => (
+            <tr
+              key={opIdx}
+              className={`border-b border-gray-50/80 ${op.other_field_highlight ? 'bg-rose-50/50' : 'bg-white/80'}`}
+            >
+              <td colSpan={2} className="pl-14 pr-3 py-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <TypeBadge type={op.type_label} />
+                  <span
+                    className="text-[10px] text-slate-700 font-medium"
+                    title={op.other_project_name}
+                    style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}
+                  >
+                    {op.other_project_name}
                   </span>
-                </>
-              )}
-            </div>
-          </td>
-          <td className="px-2 py-1.5 text-center">
-            <span className="text-[10px] font-semibold text-red-600">{c.overlap_days}일</span>
-          </td>
-          <td className="px-2 py-1.5 text-center">
-            <span className="text-[10px] text-orange-600">{c.overlap_md}MD</span>
-          </td>
-          <td colSpan={2} />
-        </tr>
+                  {op.other_field_highlight && (
+                    <span className="text-[9px] bg-rose-100 text-rose-600 px-1 rounded font-bold">⚠ 동일분야</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-[9px] text-gray-400 mt-0.5 pl-1 flex-wrap">
+                  <span className="truncate max-w-[100px]">{op.other_phase_name}</span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-blue-400 whitespace-nowrap">{op.overlap_start} ~ {op.overlap_end}</span>
+                  {op.other_field && (
+                    <>
+                      <span className="text-gray-300">|</span>
+                      <span className={op.other_field_highlight ? 'text-rose-500 font-semibold' : 'text-gray-400'}>
+                        {op.other_field}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </td>
+              <td className="px-2 py-1 text-center">
+                <span className="text-[10px] font-semibold text-red-600">{op.overlap_days}일</span>
+              </td>
+              <td className="px-2 py-1 text-center">
+                <span className="text-[10px] text-orange-600">{op.overlap_md}MD</span>
+              </td>
+              <td colSpan={2} />
+            </tr>
+          ))}
+        </React.Fragment>
       ))}
     </>
   );

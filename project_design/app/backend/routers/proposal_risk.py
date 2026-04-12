@@ -739,12 +739,61 @@ def _build_schedule_overlap(
         total_days = sum(c["overlap_days"] for c in conflicts)
         total_md = sum(c["overlap_md"] for c in conflicts)
 
+        # ── 단계별 상세 (my_phases): 중복 여부와 무관하게 모든 phase 포함 ──
+        my_phases_detail = []
+        for t_ph in sorted(my_phases, key=lambda p: p["start_date"]):
+            phase_others = []
+            for o_ph in other_phases:
+                if not _dates_overlap(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                ):
+                    continue
+                ov_s, ov_e = _overlap_range(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                )
+                days_ph = _overlap_days(
+                    t_ph["start_date"], t_ph["end_date"],
+                    o_ph["start_date"], o_ph["end_date"]
+                )
+                overlap_md_ph = o_ph["md"] if o_ph["md"] else days_ph
+                status_ph = o_ph["project_status"]
+                phase_others.append({
+                    "type_label":            "A" if status_ph == "감리" else "P",
+                    "other_project_id":      o_ph["project_id"],
+                    "other_project_name":    o_ph["project_name"],
+                    "other_project_status":  status_ph,
+                    "other_phase_name":      o_ph["phase_name"],
+                    "other_phase_start":     str(o_ph["start_date"]),
+                    "other_phase_end":       str(o_ph["end_date"]),
+                    "other_field":           o_ph["field"],
+                    "other_sub_field":       o_ph["sub_field"],
+                    "other_field_highlight": _is_highlight_field(o_ph["field"]),
+                    "overlap_start":         str(ov_s),
+                    "overlap_end":           str(ov_e),
+                    "overlap_days":          days_ph,
+                    "overlap_md":            overlap_md_ph,
+                })
+            phase_others.sort(key=lambda x: (0 if x["type_label"] == "A" else 1, x["other_project_name"]))
+            my_phases_detail.append({
+                "phase_id":       t_ph["phase_id"],
+                "phase_name":     t_ph["phase_name"],
+                "start_date":     str(t_ph["start_date"]),
+                "end_date":       str(t_ph["end_date"]),
+                "has_overlap":    len(phase_others) > 0,
+                "overlap_days":   sum(x["overlap_days"] for x in phase_others),
+                "overlap_md":     sum(x["overlap_md"]   for x in phase_others),
+                "other_projects": phase_others,
+            })
+
         result.append({
             **pinfo,
             "total_overlap_days": total_days,
             "total_overlap_md":   total_md,
             "has_conflict":       len(conflicts) > 0,
             "conflicts":          conflicts,
+            "my_phases":          my_phases_detail,
         })
 
     return result
