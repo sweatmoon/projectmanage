@@ -467,10 +467,10 @@ async def export_project_to_text(
         all_people = people_result.scalars().all()
         people_by_id = {p.id: p.person_name for p in all_people}
 
-        # Get all staffing for this project
+        # Get all staffing for this project (id 오름차순 = 입력 순서)
         staffing_stmt = select(Staffing).where(
             Staffing.project_id == project_id
-        )
+        ).order_by(Staffing.id)
         staffing_result = await db.execute(staffing_stmt)
         all_staffing = staffing_result.scalars().all()
 
