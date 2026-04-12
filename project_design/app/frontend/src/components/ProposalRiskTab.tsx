@@ -519,6 +519,10 @@ function PersonReplacePicker({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // 교체 대상 인력(person)의 분야 — 이 분야와 일치하는 후보에 "분야일치" 뱃지
+  const targetField = person.my_field?.trim() ?? '';
+  const targetSubField = person.my_sub_field?.trim() ?? '';
+
   // 검색 필터 (자기 자신 제외) + 정렬: 즉시투입 우선 → 분야매칭 우선 → 중복일 오름차순
   const filtered = allPeople
     .filter(p =>
@@ -529,13 +533,19 @@ function PersonReplacePicker({
         p.company.includes(search) ||
         (p.my_field ?? '').includes(search))
     )
+    .map(p => ({
+      ...p,
+      // 분야일치: 교체 대상 인력의 분야(field/sub_field)와 후보의 분야가 일치할 때
+      field_match: targetField !== '' && (
+        (p.my_field?.trim() ?? '') === targetField ||
+        (targetSubField !== '' && (p.my_field?.trim() ?? '') === targetSubField)
+      ),
+    }))
     .sort((a, b) => {
       // 1순위: 즉시투입 가능 여부
       if (a.is_available !== b.is_available) return a.is_available ? -1 : 1;
-      // 2순위: 분야 매칭 여부 (있으면 우선)
-      const aMatch = a.field_match ?? false;
-      const bMatch = b.field_match ?? false;
-      if (aMatch !== bMatch) return aMatch ? -1 : 1;
+      // 2순위: 분야 매칭 여부 (교체 대상과 동일 분야 우선)
+      if (a.field_match !== b.field_match) return a.field_match ? -1 : 1;
       // 3순위: 중복 일수 오름차순 (적을수록 리스크 낮음)
       if (a.conflict_days !== b.conflict_days) return a.conflict_days - b.conflict_days;
       // 4순위: 이름 가나다순
