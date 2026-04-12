@@ -1116,6 +1116,125 @@ async def get_text_output(
     }
 
 
+@router.get("/{project_id}/all-people")
+async def get_all_people_for_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    [DB 격리 보장] 읽기 전용.
+
+    프로젝트에 배정된 인력 목록 + 전체 인력 풀을 반환.
+    - assigned: 현재 배정 인력 (person_key, 충돌일수, 분야 등)
+    - all_people: 전체 인력 목록 (가용 여부, 충돌일수 정렬)
+    시뮬레이션에서 인력 교체 드롭다운에 사용.
+    """
+    from fastapi import HTTPException
+
+    all_projects, phases, staffings, peoples = await _load_all(db)
+    people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
+
+    target = next((p for p in all_projects if p.id == project_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    t_start, t_end = _project_date_range(project_id, phases)
+
+    # 현재 배정 인력 및 중복 현황
+    schedule_data = _build_schedule_overlap(project_id, staffings, phases, people_map, project_map)
+    assigned_keys = {p["person_key"] for p in schedule_data}
+
+    # 배정 인력의 분야 목록 수집 (field_match 계산용)
+    # staffing에서 이 프로젝트에 배정된 인력의 field 직접 추출
+    target_phase_ids = {
+        ph.id for ph in phases
+        if hasattr(ph, 'project_id') and ph.project_id == project_id
+    }
+    assigned_fields: set = set()
+    assigned_sub_fields: set = set()
+    for s in staffings:
+        if s.phase_id in target_phase_ids:
+            if s.field:
+                assigned_fields.add(s.field.strip())
+            if s.sub_field:
+                assigned_sub_fields.add(s.sub_field.strip())
+
+    # 전체 인력 busy 기간 계산
+    ph_map = {p.id: p for p in phases}
+    person_busy: Dict[str, List[Tuple[date, date]]] = {}
+    for s in staffings:
+        ph = ph_map.get(s.phase_id)
+        if not ph or not ph.start_date or not ph.end_date:
+            continue
+        key, _, _, _ = _resolve_person_key(s, people_map)
+        if not key:
+            continue
+        person_busy.setdefault(key, []).append((ph.start_date, ph.end_date))
+
+    # 전체 인력 목록 빌드 (삭제되지 않은 인력)
+    all_people_list = []
+    for person in people_map.values():
+        if person.deleted_at:
+            continue
+        p_key = f"id:{person.id}"
+        is_assigned = p_key in assigned_keys
+
+        # 이 인력의 해당 기간 중복일수
+        conflict_days = 0
+        is_available = True
+        if t_start and t_end:
+            for bs, be in person_busy.get(p_key, []):
+                od = _overlap_days(t_start, t_end, bs, be)
+                conflict_days += od
+            is_available = conflict_days == 0
+
+        # 이 인력이 다른 프로젝트에서 주로 맡은 분야 (staffing에서 추출)
+        person_fields_in_staffings: set = set()
+        for s in staffings:
+            s_key, _, _, _ = _resolve_person_key(s, people_map)
+            if s_key == p_key and s.field:
+                person_fields_in_staffings.add(s.field.strip())
+
+        person_main_field = next(iter(person_fields_in_staffings), "")
+
+        # 분야 매칭 여부: 이 인력의 분야가 현재 프로젝트 배정 인력 분야 중 하나와 일치
+        field_match = bool(
+            person_fields_in_staffings & assigned_fields
+        )
+
+        all_people_list.append({
+            "person_id":    person.id,
+            "person_key":   p_key,
+            "person_name":  person.person_name,
+            "grade":        person.grade or "",
+            "position":     person.position or "",
+            "company":      person.company or "",
+            "is_chief":     bool(person.is_chief),
+            "is_assigned":  is_assigned,
+            "is_available": is_available,
+            "conflict_days": conflict_days,
+            "my_field":     person_main_field,
+            "field_match":  field_match,
+        })
+
+    # 정렬: 가용 먼저 → 분야매칭 먼저 → 중복 적은 순 → 이름 순
+    all_people_list.sort(key=lambda p: (
+        0 if p["is_available"] else 1,
+        0 if p["field_match"] else 1,
+        p["conflict_days"],
+        p["person_name"],
+    ))
+
+    return {
+        "project_id": project_id,
+        "assigned": schedule_data,
+        "all_people": all_people_list,
+        "project_start": str(t_start) if t_start else None,
+        "project_end": str(t_end) if t_end else None,
+    }
+
+
 @router.get("/{project_id}/schedule")
 async def get_proposal_schedule_overlap(
     project_id: int,
