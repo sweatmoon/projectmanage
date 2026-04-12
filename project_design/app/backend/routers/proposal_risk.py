@@ -1884,136 +1884,158 @@ async def optimize_risk(
         key=lambda x: (-x["expected_danger_delta"], -x["expected_overlap_delta"])
     )
 
-    # ── 안 B: 일정 이동 추천 ────────────────────────────────────────────────
+    # ── 안 B: 일정 이동 추천안 3개 (리스크 큼→중간→0) ──────────────────────────
+    # 헬퍼: 주어진 delay_days로 shifted phases 목록 생성
+    def _make_shifted_phases(delay: int) -> List[Dict]:
+        return [
+            {
+                "phase_id":   ph.id,
+                "phase_name": ph.phase_name,
+                "orig_start": str(ph.start_date),
+                "orig_end":   str(ph.end_date),
+                "new_start":  str(ph.start_date + timedelta(days=delay)),
+                "new_end":    str(ph.end_date   + timedelta(days=delay)),
+                "shift_days": delay,
+            }
+            for ph in t_phases_sorted
+        ]
+
+    # 헬퍼: 시뮬레이션 phase_shifts 딕셔너리 생성 후 실제 리스크 계산
+    def _calc_risk_for_shift(delay: int) -> Dict:
+        if delay <= 0:
+            return {
+                "danger": orig_danger,
+                "warning": orig_warning,
+                "conflict_people": orig_conflict_people,
+                "overlap_days": orig_overlap_days,
+                "overlap_md": orig_overlap_md,
+            }
+        import copy as _copy
+        virtual_phases = []
+        for ph in phases:
+            if ph.project_id == project_id and ph.start_date and ph.end_date:
+                v = _copy.copy(ph)
+                v.start_date = ph.start_date + timedelta(days=delay)
+                v.end_date   = ph.end_date   + timedelta(days=delay)
+                virtual_phases.append(v)
+            else:
+                virtual_phases.append(ph)
+        sim_risks    = _analyze_risks(target, all_projects, virtual_phases, staffings, people_map)
+        sim_schedule = _build_schedule_overlap(project_id, staffings, virtual_phases, people_map, project_map)
+        return {
+            "danger":          sum(1 for r in sim_risks if r["severity"] == "danger"),
+            "warning":         sum(1 for r in sim_risks if r["severity"] == "warning"),
+            "conflict_people": sum(1 for p in sim_schedule if p["has_conflict"]),
+            "overlap_days":    sum(p["total_overlap_days"] for p in sim_schedule),
+            "overlap_md":      sum(p["total_overlap_md"]   for p in sim_schedule),
+        }
+
     phase_shift_options: List[Dict] = []
 
-    if t_start and t_end and t_phases_sorted:
-        # 중복이 끝나는 최대 날짜 수집
+    if t_start and t_end and t_phases_sorted and conflict_people:
+        # 모든 중복 종료일 수집
         all_overlap_ends: List[date] = []
         for cp in conflict_people:
             for c in cp["conflicts"]:
                 try:
-                    oe = date.fromisoformat(c["overlap_end"])
-                    all_overlap_ends.append(oe)
+                    all_overlap_ends.append(date.fromisoformat(c["overlap_end"]))
                 except Exception:
                     pass
 
         if all_overlap_ends:
-            max_conflict_end = max(all_overlap_ends)
-            delay_days = (max_conflict_end - t_start).days + 1
+            max_overlap_end = max(all_overlap_ends)
+            # 중복이 완전히 없어지려면 이 일수만큼 연기해야 함
+            zero_delay = (max_overlap_end - t_start).days + 1
 
-            if delay_days > 0:
-                # 전체 사업 착수 연기 옵션
-                shifted_phases_full = [
-                    {
-                        "phase_id":   ph.id,
-                        "phase_name": ph.phase_name,
-                        "orig_start": str(ph.start_date),
-                        "orig_end":   str(ph.end_date),
-                        "new_start":  str(ph.start_date + timedelta(days=delay_days)),
-                        "new_end":    str(ph.end_date   + timedelta(days=delay_days)),
-                        "shift_days": delay_days,
-                    }
-                    for ph in t_phases_sorted
-                ]
+            # ── 안 1: 최소변경 (리스크 큼) ─────────────────────────────────
+            # 모든 중복 중 가장 짧은 것만 해소 (1/3 수준 연기)
+            min_overlap_end = min(all_overlap_ends)
+            minimal_delay = max(1, (min_overlap_end - t_start).days + 1)
+            # 최소 7일 이상은 돼야 의미 있음
+            if minimal_delay < 7:
+                minimal_delay = 7
+            if minimal_delay >= zero_delay:
+                minimal_delay = max(1, zero_delay // 3)
 
-                # 착수 연기 시 리스크 시뮬레이션
-                # 가상의 phase shift를 적용한 staffing mock 생성
-                shifted_phase_map: Dict[int, Dict] = {
-                    d["phase_id"]: d for d in shifted_phases_full
-                }
+            sim_minimal = _calc_risk_for_shift(minimal_delay)
+            phase_shift_options.append({
+                "option_id":   "delay_minimal",
+                "risk_level":  "high",
+                "label":       f"최소 변경안 ({minimal_delay}일 연기)",
+                "description": (
+                    f"전체 일정을 {minimal_delay}일 뒤로 이동 — "
+                    f"일부 중복 해소, 일정 변경 최소화"
+                ),
+                "shift_days":  minimal_delay,
+                "new_start":   str(t_start + timedelta(days=minimal_delay)),
+                "new_end":     str(t_end   + timedelta(days=minimal_delay)),
+                "phases":      _make_shifted_phases(minimal_delay),
+                "simulated":   sim_minimal,
+            })
 
+            # ── 안 2: 중간 (리스크 중간) ────────────────────────────────────
+            # 중복 인력 중 과반수 해소 (2/3 수준)
+            # 총괄급 중복이 있으면 총괄급 중복 끝나는 날 기준
+            chief_ends = [
+                date.fromisoformat(c["overlap_end"])
+                for cp in conflict_people if cp.get("is_chief")
+                for c in cp["conflicts"]
+                if "overlap_end" in c
+            ]
+            if chief_ends:
+                medium_delay = (max(chief_ends) - t_start).days + 1
+            else:
+                medium_delay = max(minimal_delay + 1, zero_delay * 2 // 3)
+
+            # minimal과 zero 사이여야 함
+            if medium_delay <= minimal_delay:
+                medium_delay = (minimal_delay + zero_delay) // 2
+            if medium_delay >= zero_delay:
+                medium_delay = max(minimal_delay + 1, zero_delay - 1)
+
+            if medium_delay != minimal_delay:
+                sim_medium = _calc_risk_for_shift(medium_delay)
                 phase_shift_options.append({
-                    "option_id":    "delay_all",
-                    "label":        f"전체 착수 {delay_days}일 연기",
-                    "description":  (
-                        f"모든 단계를 {delay_days}일 뒤로 이동하면 "
-                        f"현재 중복 인력의 타 사업 일정과 겹치지 않음"
+                    "option_id":   "delay_medium",
+                    "risk_level":  "medium",
+                    "label":       f"중간 변경안 ({medium_delay}일 연기)",
+                    "description": (
+                        f"전체 일정을 {medium_delay}일 뒤로 이동 — "
+                        f"주요 인력(총괄급) 중복 해소"
                     ),
-                    "new_start":    str(t_start + timedelta(days=delay_days)),
-                    "new_end":      str(t_end   + timedelta(days=delay_days)),
-                    "shift_days":   delay_days,
-                    "phases":       shifted_phases_full,
-                    "estimated_conflict_reduction": orig_conflict_people,
+                    "shift_days":  medium_delay,
+                    "new_start":   str(t_start + timedelta(days=medium_delay)),
+                    "new_end":     str(t_end   + timedelta(days=medium_delay)),
+                    "phases":      _make_shifted_phases(medium_delay),
+                    "simulated":   sim_medium,
                 })
 
-                # 최소 연기 옵션 (충돌이 가장 적은 인력만 고려)
-                if delay_days > 7:
-                    min_delay = min(
-                        (date.fromisoformat(c["overlap_end"]) - t_start).days + 1
-                        for cp in conflict_people for c in cp["conflicts"]
-                        if cp.get("is_chief")  # 총괄급 기준 최소 연기
-                    ) if any(cp.get("is_chief") for cp in conflict_people) else delay_days // 2
+            # ── 안 3: 일정중복 완전 제로 (리스크 0) ─────────────────────────
+            if zero_delay > 0:
+                sim_zero = _calc_risk_for_shift(zero_delay)
+                phase_shift_options.append({
+                    "option_id":   "delay_zero_conflict",
+                    "risk_level":  "low",
+                    "label":       f"중복 제로안 ({zero_delay}일 연기)",
+                    "description": (
+                        f"전체 일정을 {zero_delay}일 뒤로 이동 — "
+                        f"모든 인력 일정 중복 완전 해소"
+                    ),
+                    "shift_days":  zero_delay,
+                    "new_start":   str(t_start + timedelta(days=zero_delay)),
+                    "new_end":     str(t_end   + timedelta(days=zero_delay)),
+                    "phases":      _make_shifted_phases(zero_delay),
+                    "simulated":   sim_zero,
+                })
 
-                    if 0 < min_delay < delay_days:
-                        shifted_min = [
-                            {
-                                "phase_id":   ph.id,
-                                "phase_name": ph.phase_name,
-                                "orig_start": str(ph.start_date),
-                                "orig_end":   str(ph.end_date),
-                                "new_start":  str(ph.start_date + timedelta(days=min_delay)),
-                                "new_end":    str(ph.end_date   + timedelta(days=min_delay)),
-                                "shift_days": min_delay,
-                            }
-                            for ph in t_phases_sorted
-                        ]
-                        phase_shift_options.append({
-                            "option_id":    "delay_minimum",
-                            "label":        f"최소 연기 ({min_delay}일, 총괄급 기준)",
-                            "description":  f"총괄 인력의 타 사업 종료 시점 기준 {min_delay}일 연기",
-                            "new_start":    str(t_start + timedelta(days=min_delay)),
-                            "new_end":      str(t_end   + timedelta(days=min_delay)),
-                            "shift_days":   min_delay,
-                            "phases":       shifted_min,
-                            "estimated_conflict_reduction": sum(
-                                1 for cp in conflict_people if cp.get("is_chief")
-                            ),
-                        })
-
-        # 단계별 개별 이동 옵션 (1단계만 연기하거나, 특정 단계만 조정)
-        if len(t_phases_sorted) >= 2:
-            first_ph = t_phases_sorted[0]
-            first_conflicts = [
-                c for cp in conflict_people
-                for c in cp["conflicts"]
-                if c["my_phase_name"] == first_ph.phase_name
-            ]
-            if first_conflicts:
-                first_max_end = max(
-                    date.fromisoformat(c["overlap_end"]) for c in first_conflicts
-                )
-                first_delay = (first_max_end - first_ph.start_date).days + 1
-                if first_delay > 0:
-                    phase_shift_options.append({
-                        "option_id":  "delay_first_phase",
-                        "label":      f"1단계만 {first_delay}일 연기",
-                        "description": (
-                            f"'{first_ph.phase_name}' 단계만 {first_delay}일 뒤로 이동. "
-                            f"이후 단계는 그대로 유지"
-                        ),
-                        "new_start":  str(first_ph.start_date + timedelta(days=first_delay)),
-                        "new_end":    str(first_ph.end_date   + timedelta(days=first_delay)),
-                        "shift_days": first_delay,
-                        "phases": [{
-                            "phase_id":   first_ph.id,
-                            "phase_name": first_ph.phase_name,
-                            "orig_start": str(first_ph.start_date),
-                            "orig_end":   str(first_ph.end_date),
-                            "new_start":  str(first_ph.start_date + timedelta(days=first_delay)),
-                            "new_end":    str(first_ph.end_date   + timedelta(days=first_delay)),
-                            "shift_days": first_delay,
-                        }],
-                        "estimated_conflict_reduction": len(set(
-                            c["other_project_name"] for c in first_conflicts
-                        )),
-                    })
-
-    # ── 최적 조합 제안 (효과 가장 큰 인력 교체 + 최소 연기 조합) ──────────────
+    # ── 최적 조합 제안 (가장 효과 큰 안 = 중복제로 안) ────────────────────────
     best_combo: Dict = {}
-    if person_replace_options and phase_shift_options:
+    zero_opt = next((o for o in phase_shift_options if o["option_id"] == "delay_zero_conflict"), None)
+    medium_opt = next((o for o in phase_shift_options if o["option_id"] == "delay_medium"), None)
+    top_shift = zero_opt or medium_opt or (phase_shift_options[0] if phase_shift_options else None)
+
+    if person_replace_options and top_shift:
         top_replace = person_replace_options[0]
-        top_shift   = phase_shift_options[0]
         best_combo = {
             "label": "최적 조합 안",
             "description": (
@@ -2035,15 +2057,14 @@ async def optimize_risk(
             "expected_danger":  max(0, orig_danger  - top_replace["expected_danger_delta"]),
             "expected_warning": max(0, orig_warning - top_replace["expected_warning_delta"]),
         }
-    elif phase_shift_options:
-        top_shift = phase_shift_options[0]
+    elif top_shift:
         best_combo = {
             "label": "일정 이동 최적 안",
             "description": top_shift["label"],
             "replace": None,
             "shift":   top_shift,
-            "expected_danger":  orig_danger,
-            "expected_warning": max(0, orig_warning - 1),
+            "expected_danger":  top_shift["simulated"]["danger"],
+            "expected_warning": top_shift["simulated"]["warning"],
         }
 
     return {
