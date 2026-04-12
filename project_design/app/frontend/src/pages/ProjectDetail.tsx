@@ -654,8 +654,9 @@ export default function ProjectDetail() {
       '테스트': '기능테스트',
     };
 
-    // 섹션에서 이름 → { field, category } 맵 구성
-    const nameInfo: Record<string, { field: string; category: string }> = {};
+    // 섹션에서 이름 → { field, category, order } 맵 구성 (order: 섹션 입력 순서)
+    const nameInfo: Record<string, { field: string; category: string; order: number }> = {};
+    let sectionOrderCounter = 0;
     for (const section of sections) {
       if (!section.text.trim()) continue;
       const defaultField = sectionDefaultField[section.label] ?? section.label;
@@ -672,7 +673,7 @@ export default function ProjectDetail() {
           name = l.trim();
         }
         if (!field) field = defaultField;
-        if (name) nameInfo[name] = { field, category };
+        if (name) nameInfo[name] = { field, category, order: sectionOrderCounter++ };
       }
     }
 
@@ -702,11 +703,24 @@ export default function ProjectDetail() {
       const parts = l.split(',').map(s => s.trim());
       if (parts.length < 3) return l;
       const header = parts.slice(0, 3);
-      const people = parts.slice(3).map(entry => {
-        if (!entry) return '';
+      // 일정 텍스트에 등장한 인력의 MD 정보 수집 (이름 → mdStr)
+      const mdMap: Record<string, string> = {};
+      for (const entry of parts.slice(3)) {
+        if (!entry) continue;
         const colonParts = entry.split(':');
         const name = colonParts[0].trim();
-        const mdStr = extractMd(colonParts);
+        if (name) mdMap[name] = extractMd(colonParts);
+      }
+      // 일정 텍스트에 등장한 인력 집합
+      const lineNames = new Set(Object.keys(mdMap));
+      // 섹션 입력 순서 기준으로 정렬: 섹션에 없는 인력은 맨 뒤
+      const allNames = [...lineNames].sort((a, b) => {
+        const oa = nameInfo[a]?.order ?? 999999;
+        const ob = nameInfo[b]?.order ?? 999999;
+        return oa - ob;
+      });
+      const people = allNames.map(name => {
+        const mdStr = mdMap[name] || '';
         const info = nameInfo[name];
         const field = info?.field || '';
         if (field && mdStr) return `${name}:${field}:${mdStr}`;
