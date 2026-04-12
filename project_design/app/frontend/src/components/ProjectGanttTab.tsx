@@ -1093,7 +1093,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   const [viewMonth, setViewMonth] = useState(initSettings.viewMonth);
   const [periodMonths, setPeriodMonths] = useState(initSettings.periodMonths); // 3, 6, 12
   const [scale, setScale] = useState<ScaleMode>(initSettings.scale);
-  const { isViewer } = useUserRole();
+  const { isViewer, isWriter } = useUserRole();
+  const readOnlyMode = isViewer || isWriter;  // writer도 간트 읽기 전용
   const [editTarget, setEditTarget] = useState<{ project: Project; phase: Phase } | null>(null);
   const [projectInfoTarget, setProjectInfoTarget] = useState<Project | null>(null);
   const [mdExpandDialog, setMdExpandDialog] = useState<{
@@ -1602,7 +1603,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   };
 
   const handleBadgeClick = (project: Project, phase: Phase) => {
-    // 뷰어도 투입인력 조회를 위해 readOnly 모달 허용
+    // 뷰어/작성자도 투입인력 조회를 위해 readOnly 모달 허용
     setEditTarget({ project: { ...project }, phase: { ...phase } });
   };
 
@@ -2647,7 +2648,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
           onHatDelete={handleHatDelete}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
-          readOnly={isViewer}
+          readOnly={readOnlyMode}
         />
       )}
 

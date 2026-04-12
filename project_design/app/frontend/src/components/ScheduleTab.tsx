@@ -1858,7 +1858,8 @@ const DayRow = React.memo(function DayRow({
 export default function ScheduleTab({ projects, phases, staffing, people, onRefresh }: ScheduleTabProps) {
   const now = new Date();
   const saved = getSavedMonth();
-  const { canWrite, isViewer } = useUserRole();
+  const { canWrite, isViewer, isWriter } = useUserRole();
+  const readOnlyMode = isViewer || isWriter;  // writer도 사업별일정 읽기 전용
   const [year, setYear] = useState(saved?.year ?? now.getFullYear());
   const [month, setMonth] = useState(saved?.month ?? (now.getMonth() + 1));
   const [autoNavigated, setAutoNavigated] = useState(!!saved);
@@ -2744,8 +2745,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   );
 
   const handleCellClick = async (staffingId: number, dateStr: string, currentlySelected: boolean, badge: PhaseBadgeInfo) => {
-    if (isViewer) {
-      // 뷰어: 셀 클릭 시 해당 단계 투입인력 읽기전용 모달 열기
+    if (readOnlyMode) {
+      // 뷰어/작성자: 셀 클릭 시 해당 단계 투입인력 읽기전용 모달 열기
       const proj = projectMap.get(badge.projectId);
       const ph = phaseMapLocal.get(badge.phaseId);
       if (proj && ph) {
@@ -2999,8 +3000,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [year, month, daysInMonth]);
 
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
-    if (isViewer) {
-      // 뷰어: 읽기전용 모달로 투입인력 조회 허용
+    if (readOnlyMode) {
+      // 뷰어/작성자: 읽기전용 모달로 투입인력 조회 허용
       const proj = projectMap.get(badge.projectId);
       const ph = phaseMapLocal.get(badge.phaseId);
       if (proj && ph) {
@@ -3902,7 +3903,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           hatMap={hatMap}
           onHatSave={handleHatSave}
           onHatDelete={handleHatDelete}
-          readOnly={isViewer}
+          readOnly={readOnlyMode}
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
         />
