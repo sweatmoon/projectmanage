@@ -697,6 +697,11 @@ export default function ProjectDetail() {
       return /^\d+$/.test(nums[1]) ? nums[1] : ''; // 이름:예비:감리:시정 → 감리(두번째)
     };
 
+    // nameInfo 전체 인력을 order 순서로 정렬한 배열 (섹션 입력 순서)
+    const allSectionNames = Object.entries(nameInfo)
+      .sort((a, b) => a[1].order - b[1].order)
+      .map(([name]) => name);
+
     const text = scheduleText.trim().split('\n').map(line => {
       const l = line.trim();
       if (!l) return '';
@@ -711,15 +716,14 @@ export default function ProjectDetail() {
         const name = colonParts[0].trim();
         if (name) mdMap[name] = extractMd(colonParts);
       }
-      // 일정 텍스트에 등장한 인력 집합
-      const lineNames = new Set(Object.keys(mdMap));
-      // 섹션 입력 순서 기준으로 정렬: 섹션에 없는 인력은 맨 뒤
-      const allNames = [...lineNames].sort((a, b) => {
-        const oa = nameInfo[a]?.order ?? 999999;
-        const ob = nameInfo[b]?.order ?? 999999;
-        return oa - ob;
-      });
-      const people = allNames.map(name => {
+      // 섹션 전체 인력(allSectionNames) + 일정 텍스트에만 있는 인력을 합산하여 정렬
+      // 일정 텍스트에 없는 섹션 인력도 포함 (MD 없음 = 전체기간)
+      const textOnlyNames = Object.keys(mdMap).filter(n => !nameInfo[n]);
+      const orderedNames = [
+        ...allSectionNames,
+        ...textOnlyNames, // 섹션에 없지만 일정 텍스트에 있는 인력은 맨 뒤
+      ];
+      const people = orderedNames.map(name => {
         const mdStr = mdMap[name] || '';
         const info = nameInfo[name];
         const field = info?.field || '';
