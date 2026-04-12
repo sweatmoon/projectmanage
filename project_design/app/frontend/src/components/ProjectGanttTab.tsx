@@ -820,10 +820,19 @@ function EditModal({
     onSave(pendingProjectUpdates, pendingPhaseUpdates, pendingStaffingChanges.length > 0 ? pendingStaffingChanges : undefined);
   };
 
+  // 제안사업 전문가팀 카테고리 정렬 순서
+  const EXPERT_CATEGORY_ORDER: Record<string, number> = {
+    '핵심기술': 0,
+    '필수기술': 1,
+    '보안진단': 2,
+    '테스트': 3,
+  };
+
   const groupedStaffing = useMemo(() => {
     // 정렬 기준:
-    //   제안사업 → 단계감리팀: 텍스트 입력 순서(staffing.id 오름차순), 전문가팀: 첫 등장 순서
-    //   감리사업 → 단계감리팀: TEAM_FIELD_ORDER(사업관리=0, 응용시스템=1, DB=2, 시스템구조=3), 전문가팀: 첫 등장 순서
+    //   제안사업 → 단계감리팀: 텍스트 입력 순서(staffing.id 오름차순)
+    //            → 전문가팀: 카테고리 순서(핵심기술→필수기술→보안진단→테스트) + 카테고리 내 id 오름차순
+    //   감리사업 → 단계감리팀: TEAM_FIELD_ORDER, 전문가팀: 첫 등장 순서
     const isProposal = projectStatus === '제안';
     type SortedRow = { s: StaffingRow; sortGroup: number; sortOrder: number };
     const expertAppearOrder = new Map<string, number>();
@@ -843,8 +852,12 @@ function EditModal({
       if (sortGroup === 0) {
         // 제안사업: id 오름차순(입력 순서), 감리사업: field 패턴 순서
         sortOrder = isProposal ? s.id : getTeamInfo(s.field).sortOrder;
+      } else if (isProposal) {
+        // 제안사업 전문가팀: 카테고리 순서 * 100000 + staffing.id (카테고리 내 입력 순서)
+        const catOrder = EXPERT_CATEGORY_ORDER[dbCat] ?? 4;
+        sortOrder = catOrder * 100000 + s.id;
       } else {
-        // 전문가팀: 인물+분야 기준 첫 등장 순서 유지
+        // 감리사업 전문가팀: 첫 등장 순서
         const key = `${s.person_name_text || s.person_id}||${s.field}`;
         if (!expertAppearOrder.has(key)) expertAppearOrder.set(key, expertAppearOrder.size);
         sortOrder = expertAppearOrder.get(key)!;
