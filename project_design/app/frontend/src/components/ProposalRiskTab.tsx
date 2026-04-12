@@ -858,39 +858,51 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   const phases = optimizeResult?.phases ?? [];
 
   // 시뮬레이션 결과가 있으면 시뮬레이션된 인력 목록 사용 (일정이동/교체 반영)
-  // 원본(assigned) 순서 유지: orig_person_key(교체 전 key) → 원본 자리에 교체 인력 매핑
+  // ① assigned 순서 완전 보존
+  // ② 교체된 자리는 personReplacements의 new_person_id로 simResult에서 찾아 대체
+  // ③ rowKey는 항상 assigned의 person_key(원본 key)를 사용 — simResult의 orig_person_key에 의존하지 않음
   const displayPeople: PersonSchedule[] = (() => {
     if (!simResult?.people?.length) return assigned;
 
-    // orig_person_key 기반 매핑 (교체된 경우): old_key → 새 인력 행
-    const origKeyMap = new Map<string, PersonSchedule>();
-    // person_key 기반 매핑 (그대로인 경우): current_key → 행
-    const currKeyMap = new Map<string, PersonSchedule>();
+    // simResult.people을 person_key → 행, person_id → 행 두 가지로 색인
+    const simByPersonKey = new Map<string, PersonSchedule>();
+    const simByPersonId  = new Map<number, PersonSchedule>();
     for (const p of simResult.people) {
-      currKeyMap.set(p.person_key, p);
-      if (p.orig_person_key) origKeyMap.set(p.orig_person_key, p);
+      simByPersonKey.set(p.person_key, p);
+      if (p.person_id != null) simByPersonId.set(p.person_id, p);
     }
 
-    const result: PersonSchedule[] = [];
-    const used = new Set<string>();
+    // _rowKey: 항상 assigned의 원본 person_key를 사용 (드롭다운 상태 연결용)
+    const result: (PersonSchedule & { _rowKey: string })[] = [];
+    const usedSimKey = new Set<string>();
 
     for (const orig of assigned) {
-      // 1순위: orig_person_key 매핑 (교체된 자리 → 새 인력)
-      const simByOrig = origKeyMap.get(orig.person_key);
-      // 2순위: 동일 person_key (교체 안 된 인력)
-      const simByCurr = currKeyMap.get(orig.person_key);
-      const sim = simByOrig ?? simByCurr;
-      if (sim && !used.has(sim.person_key)) {
-        result.push(sim);
-        used.add(sim.person_key);
+      const replaceNewId = personReplacements[orig.person_key];
+
+      let simRow: PersonSchedule | undefined;
+
+      if (replaceNewId !== undefined && replaceNewId !== null) {
+        // 이 자리는 교체됨 → new_person_id로 simResult에서 교체 인력 행을 찾음
+        simRow = simByPersonId.get(replaceNewId);
+      } else if (replaceNewId === null) {
+        // 제외(null) — 표시 안 함
+        continue;
+      } else {
+        // 교체 안됨 → 동일 person_key로 찾음
+        simRow = simByPersonKey.get(orig.person_key);
       }
-      // sim이 없으면 시뮬레이션에서 제외된 인력 → 표시 안 함
+
+      if (simRow && !usedSimKey.has(simRow.person_key)) {
+        result.push({ ...simRow, _rowKey: orig.person_key });
+        usedSimKey.add(simRow.person_key);
+      }
+      // simRow가 없으면 시뮬레이션에서 제외된 인력 → 표시 안 함
     }
     // 새로 추가된 인력(assigned에 없는 인력)은 맨 뒤
     for (const p of simResult.people) {
-      if (!used.has(p.person_key)) {
-        result.push(p);
-        used.add(p.person_key);
+      if (!usedSimKey.has(p.person_key)) {
+        result.push({ ...p, _rowKey: p.orig_person_key || p.person_key });
+        usedSimKey.add(p.person_key);
       }
     }
     return result;
@@ -1167,8 +1179,9 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                 </thead>
                 <tbody>
                   {visiblePeople.map(person => {
-                    // 교체된 인력은 orig_person_key로 드롭다운 상태와 연결
-                    const rowKey = person.orig_person_key || person.person_key;
+                    // _rowKey: displayPeople 생성 시 assigned.person_key(원본 key)로 고정됨
+                    // simResult 없으면 person.person_key 그대로 사용
+                    const rowKey = (person as PersonSchedule & { _rowKey?: string })._rowKey ?? person.person_key;
                     return (
                     <IntegratedPersonRow
                       key={rowKey}

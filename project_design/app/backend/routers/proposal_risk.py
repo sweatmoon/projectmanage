@@ -2486,13 +2486,33 @@ async def simulate_risk_v2(
 
     # ── 교체 인력 요약 ────────────────────────────────────────────────────────
     replacement_summary = []
+    # orig_schedule 조회용 맵 (person_key → person 정보)
+    orig_schedule_map = {p["person_key"]: p for p in orig_schedule}
     for old_key, new_pid in replacements.items():
-        old_person = next((p for p in orig_schedule if p["person_key"] == old_key), None)
+        old_person = orig_schedule_map.get(old_key)
         new_person = people_map.get(new_pid) if new_pid else None
+
+        # old_name: orig_schedule에서 못 찾으면 old_key에서 person_id 추출해 people_map 조회
+        if old_person:
+            old_name = old_person["person_name"]
+            old_conflict_days = old_person["total_overlap_days"]
+        else:
+            # old_key 형식: "id:123" → people_map에서 이름 조회
+            old_name = old_key  # 기본값
+            old_conflict_days = 0
+            if old_key.startswith("id:"):
+                try:
+                    old_pid = int(old_key[3:])
+                    old_p = people_map.get(old_pid)
+                    if old_p:
+                        old_name = old_p.person_name
+                except ValueError:
+                    pass
+
         replacement_summary.append({
             "old_key":        old_key,
-            "old_name":       old_person["person_name"] if old_person else old_key,
-            "old_conflict_days": old_person["total_overlap_days"] if old_person else 0,
+            "old_name":       old_name,
+            "old_conflict_days": old_conflict_days,
             "new_person_id":  new_pid,
             "new_name":       new_person.person_name if new_person else "(제외만)",
             "new_is_chief":   bool(new_person.is_chief) if new_person else False,
