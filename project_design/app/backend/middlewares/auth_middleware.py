@@ -158,19 +158,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
         #   따라서 excluded_person_keys 를 전달해도 원본 데이터는 변경되지 않음.
 
         # writer가 GET으로 접근 가능한 API prefix 목록 (사업별일정 + 인력정보 조회)
+        # 실제 라우터 prefix:
+        #   프로젝트 → /api/v1/entities/projects
+        #   인력     → /api/v1/entities/people
+        #   단계     → /api/v1/entities/phases
+        #   공수     → /api/v1/entities/staffing
         WRITER_ALLOWED_GET_PREFIXES = (
-            "/api/v1/proposal-risk/",   # 제안리스크 전체
-            "/api/v1/projects/",        # 사업별일정 조회용
-            "/api/v1/phases/",          # 단계 정보 조회용
-            "/api/v1/staffing/",        # 배정 정보 조회용
-            "/api/v1/people/",          # 인력정보 조회용
+            "/api/v1/proposal-risk/",         # 제안리스크 전체
+            "/api/v1/entities/projects/",     # 사업별일정 조회용 (단건)
+            "/api/v1/entities/phases/",       # 단계 정보 조회용 (단건)
+            "/api/v1/entities/staffing/",     # 배정 정보 조회용 (단건)
+            "/api/v1/entities/people/",       # 인력정보 조회용 (단건)
         )
         # writer가 목록 조회에 사용하는 GET 경로 (trailing slash 없는 경우)
         WRITER_ALLOWED_GET_EXACT = {
-            "/api/v1/projects",
-            "/api/v1/phases",
-            "/api/v1/staffing",
-            "/api/v1/people",
+            "/api/v1/entities/projects",
+            "/api/v1/entities/phases",
+            "/api/v1/entities/staffing",
+            "/api/v1/entities/people",
             "/api/v1/proposal-risk/list",
         }
 
