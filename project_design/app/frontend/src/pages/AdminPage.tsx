@@ -304,9 +304,23 @@ const ROLE_CONFIG: Record<string, {
       '사용자 관리 불가',
     ],
   },
+  writer: {
+    label: '작성자',
+    color: 'bg-emerald-100 text-emerald-700',
+    borderColor: 'border-emerald-200 hover:border-emerald-400',
+    dotColor: 'bg-emerald-400',
+    description: '제안리스크 분석 및 시뮬레이션 전용 역할입니다. 사업별일정·인력정보는 읽기만 가능합니다.',
+    permissions: [
+      '제안리스크 탭 — 전체 기능 (목록·상세·시뮬레이션·텍스트 출력)',
+      '사업별일정(gantt) 탭 — 읽기 전용',
+      '인력정보(people) 탭 — 읽기 전용',
+      '시뮬레이션 결과는 DB에 저장되지 않음 (메모리 계산만)',
+      '그 외 메뉴(홈·프로젝트·리포트 등) — 접근 불가',
+    ],
+  },
 };
 
-const ROLE_ORDER = ['user', 'leader', 'viewer', 'admin', 'audit_viewer'];
+const ROLE_ORDER = ['user', 'leader', 'viewer', 'admin', 'audit_viewer', 'writer'];
 
 // ── 역할 드롭다운 컴포넌트 ─────────────────────────────────────
 function RoleDropdown({

@@ -182,12 +182,18 @@ const WIDE_MODE_KEY = 'schedule_wide_mode';
 export default function IndexPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { canWrite, isViewer } = useUserRole();
+  const { canWrite, isViewer, isWriter, writerAllowedTabs } = useUserRole();
   const [activeTab, setActiveTab] = useState<string>(() => {
     // URL 파라미터가 있으면 우선, 없으면 localStorage
     try {
       const p = new URLSearchParams(window.location.search).get('tab');
-      return p || localStorage.getItem('activeTab') || 'home';
+      const saved = p || localStorage.getItem('activeTab') || 'home';
+      // writer 역할은 허용된 탭만 접근 가능 (제안리스크 / 사업별일정 / 인력)
+      // 허용되지 않은 탭이 저장되어 있으면 proposal-risk로 강제 이동
+      if (isWriter && !writerAllowedTabs.includes(saved)) {
+        return 'proposal-risk';
+      }
+      return saved;
     } catch { return 'home'; }
   });
 
@@ -214,15 +220,19 @@ export default function IndexPage() {
   };
 
   const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-    try { localStorage.setItem('activeTab', tab); } catch { /* ignore */ }
-    navigate(`/?tab=${tab}`, { replace: true });
+    // writer 역할은 허용된 탭(제안리스크·사업별일정·인력)만 접근 가능
+    const targetTab = (isWriter && !writerAllowedTabs.includes(tab))
+      ? 'proposal-risk'
+      : tab;
+    setActiveTab(targetTab);
+    try { localStorage.setItem('activeTab', targetTab); } catch { /* ignore */ }
+    navigate(`/?tab=${targetTab}`, { replace: true });
     // 탭 이동 시 데이터 새로고침
     fetchProjects();
     fetchPeople();
     fetchPhases();
     fetchStaffing();
-    if (tab === 'home') fetchHomeStats();
+    if (targetTab === 'home') fetchHomeStats();
   };
   const [projects, setProjects] = useState<Project[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -539,45 +549,54 @@ export default function IndexPage() {
     <div className="min-h-screen bg-slate-50">
       <Header />
 
-      {/* Landing Page */}
-      {activeTab === 'home' && (
+      {/* Landing Page - writer는 홈 대신 proposal-risk로 바로 이동 */}
+      {activeTab === 'home' && !isWriter && (
         <LandingPage onNavigate={handleTabChange} stats={landingStats} />
       )}
 
       {/* Main Content */}
-      {activeTab !== 'home' && (
+      {(activeTab !== 'home' || isWriter) && (
       <main className={`mx-auto px-4 py-6 ${
         (activeTab === 'schedule' || activeTab === 'gantt') && wideMode
           ? 'max-w-full'
           : 'max-w-7xl'
       }`}>
-        <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <Tabs value={isWriter && activeTab === 'home' ? 'proposal-risk' : activeTab} onValueChange={handleTabChange}>
           <div className="flex items-center justify-between mb-4">
             <TabsList>
-              <TabsTrigger value="home" className="flex items-center gap-1.5">
-                <Home className="h-4 w-4" />
-                홈
-              </TabsTrigger>
-              <TabsTrigger value="projects" className="flex items-center gap-1.5">
-                <FolderOpen className="h-4 w-4" />
-                프로젝트
-              </TabsTrigger>
+              {/* writer 역할: proposal-risk, gantt, people 탭만 표시 */}
+              {!isWriter && (
+                <TabsTrigger value="home" className="flex items-center gap-1.5">
+                  <Home className="h-4 w-4" />
+                  홈
+                </TabsTrigger>
+              )}
+              {!isWriter && (
+                <TabsTrigger value="projects" className="flex items-center gap-1.5">
+                  <FolderOpen className="h-4 w-4" />
+                  프로젝트
+                </TabsTrigger>
+              )}
               <TabsTrigger value="people" className="flex items-center gap-1.5">
                 <Users className="h-4 w-4" />
                 인력
               </TabsTrigger>
-              <TabsTrigger value="schedule" className="flex items-center gap-1.5">
-                <CalendarDays className="h-4 w-4" />
-                인력별 일정
-              </TabsTrigger>
+              {!isWriter && (
+                <TabsTrigger value="schedule" className="flex items-center gap-1.5">
+                  <CalendarDays className="h-4 w-4" />
+                  인력별 일정
+                </TabsTrigger>
+              )}
               <TabsTrigger value="gantt" className="flex items-center gap-1.5">
                 <GanttChart className="h-4 w-4" />
                 사업별 일정
               </TabsTrigger>
-              <TabsTrigger value="reports" className="flex items-center gap-1.5">
-                <BarChart3 className="h-4 w-4" />
-                리포트
-              </TabsTrigger>
+              {!isWriter && (
+                <TabsTrigger value="reports" className="flex items-center gap-1.5">
+                  <BarChart3 className="h-4 w-4" />
+                  리포트
+                </TabsTrigger>
+              )}
               <TabsTrigger value="proposal-risk" className="flex items-center gap-1.5">
                 <ShieldAlert className="h-4 w-4" />
                 제안 리스크
@@ -600,14 +619,14 @@ export default function IndexPage() {
                   {wideMode ? '기본 너비' : '전체 너비'}
                 </button>
               )}
-              {activeTab === 'projects' && (
+              {activeTab === 'projects' && !isWriter && (
                 <Button size="sm" onClick={() => setShowNewProject(true)} disabled={!canWrite}
                   title={isViewer ? '조회 전용 계정입니다' : undefined}>
                   <Plus className="h-4 w-4 mr-1" />
                   프로젝트 추가
                 </Button>
               )}
-              {activeTab === 'people' && (
+              {activeTab === 'people' && !isWriter && (
                 <Button size="sm" onClick={() => setShowNewPerson(true)} disabled={!canWrite}
                   title={isViewer ? '조회 전용 계정입니다' : undefined}>
                   <Plus className="h-4 w-4 mr-1" />
@@ -681,7 +700,7 @@ export default function IndexPage() {
           </TabsContent>
         </Tabs>
       </main>
-      )} {/* end activeTab !== 'home' */}
+      )} {/* end activeTab !== 'home' || isWriter */}
 
       {/* New Project Dialog */}
       <Dialog open={showNewProject} onOpenChange={setShowNewProject}>
