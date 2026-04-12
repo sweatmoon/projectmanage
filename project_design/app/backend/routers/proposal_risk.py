@@ -667,15 +667,20 @@ def _build_schedule_overlap(
         phase = ph_map.get(s.phase_id)
         phase_sort = phase.sort_order if phase and hasattr(phase, 'sort_order') else 9999
         sg, so = _get_sort_key(s.category or "", s.field or "", is_proposal=_is_proposal)
-        sort_key = (sg, so, phase_sort, s.id)
+        # 가상 staffing(음수 id)은 orig_id(원본 id)를 sort_key에 사용 → 정렬 순서 유지
+        sort_id = getattr(s, 'orig_id', None) or abs(s.id)
+        sort_key = (sg, so, phase_sort, sort_id)
+        # 교체 전 원본 person_key (있으면 드롭다운 연결용)
+        orig_person_key = getattr(s, 'orig_person_key', None)
 
         if key not in person_best or sort_key < person_best[key]["sort_key"]:
             person_best[key] = {
-                "sort_key":   sort_key,
-                "staffing":   s,
-                "person_obj": person_obj,
-                "person_name": name,
-                "is_chief":   is_chief,
+                "sort_key":      sort_key,
+                "staffing":      s,
+                "person_obj":    person_obj,
+                "person_name":   name,
+                "is_chief":      is_chief,
+                "orig_person_key": orig_person_key,
             }
 
     # ScheduleTab과 동일한 정렬 순서 유지
@@ -686,15 +691,16 @@ def _build_schedule_overlap(
         s = info["staffing"]
         person_obj = info["person_obj"]
         person_field_map[key] = {
-            "person_key":  key,
-            "person_id":   s.person_id,
-            "person_name": info["person_name"],
-            "is_chief":    info["is_chief"],
-            "grade":       (person_obj.grade if person_obj else None) or "",
-            "position":    (person_obj.position if person_obj else None) or "",
-            "my_field":    s.field or "",
-            "my_sub_field":s.sub_field or "",
-            "my_category": s.category or "",
+            "person_key":      key,
+            "orig_person_key": info.get("orig_person_key"),  # 교체 전 원본 key (프론트 드롭다운 연결용)
+            "person_id":       s.person_id,
+            "person_name":     info["person_name"],
+            "is_chief":        info["is_chief"],
+            "grade":           (person_obj.grade if person_obj else None) or "",
+            "position":        (person_obj.position if person_obj else None) or "",
+            "my_field":        s.field or "",
+            "my_sub_field":    s.sub_field or "",
+            "my_category":     s.category or "",
         }
 
     # 각 인력의 충돌 수집 (정렬 순서 유지)
@@ -2421,8 +2427,12 @@ async def simulate_risk_v2(
             if s_key != old_key:
                 continue
             # 가상 staffing 레코드
+            # id는 음수로 표시하되, sort_key 계산에는 원본 s.id(양수)를 사용하여
+            # 정렬 순서가 유지되도록 orig_id 속성을 별도 보존
             vs = SimpleNamespace(
                 id=-s.id,                        # 음수 id로 가상 표시
+                orig_id=s.id,                    # 정렬 순서 유지용 원본 id
+                orig_person_key=old_key,         # 교체 전 원본 person_key (프론트 교체 드롭다운 연결용)
                 project_id=s.project_id,
                 phase_id=s.phase_id,
                 person_id=new_pid,
