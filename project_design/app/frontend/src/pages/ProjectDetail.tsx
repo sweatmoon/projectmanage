@@ -916,7 +916,7 @@ export default function ProjectDetail() {
       const [projRes, phaseRes, staffRes, peopleRes] = await Promise.all([
         client.entities.projects.get({ id: String(projectId) }),
         client.entities.phases.query({ query: { project_id: projectId }, limit: 100, sort: 'sort_order' }),
-        client.entities.staffing.query({ query: { project_id: projectId }, limit: 2000 }),
+        client.entities.staffing.query({ query: { project_id: projectId }, limit: 2000, sort: 'id' }),
         client.entities.people.query({ query: {}, limit: 500 }),
       ]);
       const proj = projRes?.data;
