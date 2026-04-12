@@ -793,6 +793,15 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
     setPhaseShifts(newS);
   }, [optimizeResult]);
 
+  // ── 추천안 적용 핸들러 — 조건부 return 앞에 위치해야 hooks 순서 일정 ──────
+  const applyShiftOption = useCallback((opt: PhaseShiftOption) => {
+    const ns: Record<string, { start_date: string; end_date: string }> = {};
+    opt.phases.forEach(ph => {
+      ns[String(ph.phase_id)] = { start_date: ph.new_start, end_date: ph.new_end };
+    });
+    setPhaseShifts(ns);
+  }, []);
+
   if (loadingData) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
@@ -825,15 +834,6 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   function dLabel(v: number) {
     return v > 0 ? `▼${v}` : v < 0 ? `▲${Math.abs(v)}` : '–';
   }
-
-  // 추천안 적용 핸들러
-  const applyShiftOption = useCallback((opt: PhaseShiftOption) => {
-    const ns: Record<string, { start_date: string; end_date: string }> = {};
-    opt.phases.forEach(ph => {
-      ns[String(ph.phase_id)] = { start_date: ph.new_start, end_date: ph.new_end };
-    });
-    setPhaseShifts(ns);
-  }, []);
 
   return (
     <div className="space-y-3">
