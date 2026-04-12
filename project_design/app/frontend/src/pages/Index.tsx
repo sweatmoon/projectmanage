@@ -300,7 +300,7 @@ export default function IndexPage() {
 
   const fetchStaffing = useCallback(async () => {
     try {
-      const res = await client.entities.staffing.query({ query: {}, limit: 2000 });
+      const res = await client.entities.staffing.query({ query: {}, limit: 2000, sort: 'id' });
       setStaffing(res?.data?.items || []);
     } catch (err) {
       console.error('Failed to fetch staffing:', err);
