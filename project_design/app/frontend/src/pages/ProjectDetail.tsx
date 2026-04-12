@@ -745,7 +745,15 @@ export default function ProjectDetail() {
       '기능테스트': '테스트',
     };
 
-    const sectionPeople: Record<string, Set<string>> = {
+    // 섹션별 인력 목록 (Array로 삽입 순서 보장, 중복 방지용 Set 별도 관리)
+    const sectionPeopleArr: Record<string, string[]> = {
+      '감리원': [],
+      '핵심기술': [],
+      '필수기술': [],
+      '보안진단': [],
+      '테스트': [],
+    };
+    const sectionPeopleSet: Record<string, Set<string>> = {
       '감리원': new Set(),
       '핵심기술': new Set(),
       '필수기술': new Set(),
@@ -754,6 +762,25 @@ export default function ProjectDetail() {
     };
     const nameToField: Record<string, string> = {};
     const scheduleLines: string[] = [];
+
+    // categoryMap(= section_map from export, staffing.id 순서로 정렬된 첫 등장 순서)이 있으면
+    // 그 키 순서대로 먼저 섹션에 배정 → 입력 순서 복원
+    if (categoryMap) {
+      for (const [name, cat] of Object.entries(categoryMap)) {
+        let targetSection: string;
+        if (cat === '단계감리팀' || cat === '감리팀') {
+          targetSection = '감리원';
+        } else if (sectionPeopleArr[cat] !== undefined) {
+          targetSection = cat;
+        } else {
+          targetSection = '감리원'; // fallback
+        }
+        if (!sectionPeopleSet[targetSection].has(name)) {
+          sectionPeopleArr[targetSection].push(name);
+          sectionPeopleSet[targetSection].add(name);
+        }
+      }
+    }
 
     for (const line of text.trim().split('\n')) {
       const l = line.trim();
@@ -777,24 +804,24 @@ export default function ProjectDetail() {
         }
         if (field) nameToField[name] = field;
 
-        // 섹션 배정 (중복 방지: 전체 라인 걸쳐 한 번만)
-        if (!Object.values(sectionPeople).some(s => s.has(name))) {
+        // 섹션 배정 (categoryMap에서 이미 배정된 인력은 건너뜀)
+        const alreadyAssigned = Object.values(sectionPeopleSet).some(s => s.has(name));
+        if (!alreadyAssigned) {
           let targetSection: string;
           if (categoryMap && categoryMap[name]) {
             const cat = categoryMap[name];
             if (cat === '단계감리팀' || cat === '감리팀') {
               targetSection = '감리원';
-            } else if (sectionPeople[cat] !== undefined) {
-              // category가 세부 섹션명과 일치하면 그대로 사용 (핵심기술, 필수기술, 보안진단, 테스트)
+            } else if (sectionPeopleArr[cat] !== undefined) {
               targetSection = cat;
             } else {
-              // fallback: field 패턴 또는 핵심기술
               targetSection = defaultFieldToSection[field] || '핵심기술';
             }
           } else {
             targetSection = defaultFieldToSection[field] || '감리원';
           }
-          sectionPeople[targetSection].add(name);
+          sectionPeopleArr[targetSection].push(name);
+          sectionPeopleSet[targetSection].add(name);
         }
 
         // scheduleText용: 이름만 or 이름:MD (분야 제거)
@@ -804,8 +831,8 @@ export default function ProjectDetail() {
     }
 
     // 섹션 텍스트: "이름, 분야" (분야 있으면)
-    const makeSectionText = (names: Set<string>, defaultField: string) =>
-      [...names].map(name => {
+    const makeSectionText = (names: string[], defaultField: string) =>
+      names.map(name => {
         const field = nameToField[name] || defaultField;
         return field ? `${name}, ${field}` : name;
       }).join('\n');
@@ -813,11 +840,11 @@ export default function ProjectDetail() {
     return {
       scheduleText: scheduleLines.join('\n'),
       sections: [
-        { label: '감리원', text: makeSectionText(sectionPeople['감리원'], '') },
-        { label: '핵심기술', text: makeSectionText(sectionPeople['핵심기술'], '핵심기술') },
-        { label: '필수기술', text: makeSectionText(sectionPeople['필수기술'], '필수기술') },
-        { label: '보안진단', text: makeSectionText(sectionPeople['보안진단'], '보안진단') },
-        { label: '테스트', text: makeSectionText(sectionPeople['테스트'], '기능테스트') },
+        { label: '감리원', text: makeSectionText(sectionPeopleArr['감리원'], '') },
+        { label: '핵심기술', text: makeSectionText(sectionPeopleArr['핵심기술'], '핵심기술') },
+        { label: '필수기술', text: makeSectionText(sectionPeopleArr['필수기술'], '필수기술') },
+        { label: '보안진단', text: makeSectionText(sectionPeopleArr['보안진단'], '보안진단') },
+        { label: '테스트', text: makeSectionText(sectionPeopleArr['테스트'], '기능테스트') },
       ],
     };
   };
