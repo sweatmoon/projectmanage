@@ -262,6 +262,7 @@ interface SimulateV2Result {
   suggestions: string[];
   risks: RiskDetailItem[];
   people: PersonSchedule[];
+  all_people_updated?: AllPerson[];  // 이동된 일정 기준 재계산된 가용 인력
 }
 
 // ── 리스크 설정 ────────────────────────────────────────────────────────────────
@@ -822,7 +823,8 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   }
 
   const assigned = allPeopleData?.assigned ?? [];
-  const allPeople = allPeopleData?.all_people ?? [];
+  // 일정이 이동된 경우 simResult.all_people_updated 사용 (이동 기준 재계산된 가용 인력)
+  const allPeople: AllPerson[] = simResult?.all_people_updated ?? allPeopleData?.all_people ?? [];
   const phases = optimizeResult?.phases ?? [];
 
   // 시뮬레이션 결과가 있으면 시뮬레이션된 인력 목록 사용 (일정이동/교체 반영)
