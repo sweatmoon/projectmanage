@@ -858,27 +858,35 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   const phases = optimizeResult?.phases ?? [];
 
   // 시뮬레이션 결과가 있으면 시뮬레이션된 인력 목록 사용 (일정이동/교체 반영)
-  // 단, 원본(assigned) 순서를 유지: orig_person_key 또는 person_key로 원본 위치에 매칭
+  // 원본(assigned) 순서 유지: orig_person_key(교체 전 key) → 원본 자리에 교체 인력 매핑
   const displayPeople: PersonSchedule[] = (() => {
     if (!simResult?.people?.length) return assigned;
-    const simMap = new Map<string, PersonSchedule>();
+
+    // orig_person_key 기반 매핑 (교체된 경우): old_key → 새 인력 행
+    const origKeyMap = new Map<string, PersonSchedule>();
+    // person_key 기반 매핑 (그대로인 경우): current_key → 행
+    const currKeyMap = new Map<string, PersonSchedule>();
     for (const p of simResult.people) {
-      simMap.set(p.person_key, p);
-      if (p.orig_person_key) simMap.set(p.orig_person_key, p);
+      currKeyMap.set(p.person_key, p);
+      if (p.orig_person_key) origKeyMap.set(p.orig_person_key, p);
     }
-    // 원본 순서(assigned) 기준으로 시뮬레이션 결과와 병합
+
     const result: PersonSchedule[] = [];
     const used = new Set<string>();
+
     for (const orig of assigned) {
-      const sim = simMap.get(orig.person_key);
+      // 1순위: orig_person_key 매핑 (교체된 자리 → 새 인력)
+      const simByOrig = origKeyMap.get(orig.person_key);
+      // 2순위: 동일 person_key (교체 안 된 인력)
+      const simByCurr = currKeyMap.get(orig.person_key);
+      const sim = simByOrig ?? simByCurr;
       if (sim && !used.has(sim.person_key)) {
         result.push(sim);
         used.add(sim.person_key);
-      } else if (!sim) {
-        // 시뮬레이션에서 제외된 인력은 표시하지 않음
       }
+      // sim이 없으면 시뮬레이션에서 제외된 인력 → 표시 안 함
     }
-    // 시뮬레이션에서 새로 추가된 인력(orig_person_key가 없고 assigned에 없는 인력)은 맨 뒤
+    // 새로 추가된 인력(assigned에 없는 인력)은 맨 뒤
     for (const p of simResult.people) {
       if (!used.has(p.person_key)) {
         result.push(p);

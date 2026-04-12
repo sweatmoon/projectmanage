@@ -2468,6 +2468,16 @@ async def simulate_risk_v2(
     sim_schedule = _build_schedule_overlap(
         project_id, virtual_staffings_final, virtual_phases, people_map, project_map
     )
+
+    # ── sim_schedule에 orig_person_key 보정 ──────────────────────────────────
+    # _build_schedule_overlap 내 person_best 경쟁으로 orig_person_key가 누락/오염될 수 있으므로
+    # replacements(old_key → new_pid) 맵을 기반으로 직접 보정
+    new_pid_to_old_key: Dict[int, str] = {v: k for k, v in replacements.items() if v}
+    for person_entry in sim_schedule:
+        pid = person_entry.get("person_id")
+        if pid and pid in new_pid_to_old_key:
+            person_entry["orig_person_key"] = new_pid_to_old_key[pid]
+
     sim_danger   = sum(1 for r in sim_risks if r["severity"] == "danger")
     sim_warning  = sum(1 for r in sim_risks if r["severity"] == "warning")
     sim_conflict = sum(1 for p in sim_schedule if p["has_conflict"])
