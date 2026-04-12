@@ -55,11 +55,13 @@ _EXPERT_CATEGORY_ORDER = {
 }
 
 
-def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
+def _get_sort_key(category: str, field: str, is_proposal: bool = False) -> Tuple[int, int]:
     """
     ScheduleTab resolveTeamInfo 와 동일한 정렬 키 반환.
     반환: (sortGroup, sortOrder)
-      단계감리팀 → sortGroup=0, sortOrder= field 순서(0~3, 나머지 4)
+      단계감리팀 → sortGroup=0,
+                   is_proposal=True: sortOrder=0 (staffing.id 로만 결정 → 입력 순서 보존)
+                   is_proposal=False: sortOrder= field 순서(0~3, 나머지 4)
       전문가팀   → sortGroup=1, sortOrder= 카테고리 순서(핵심기술=0,필수기술=1,보안진단=2,테스트=3,기타=4)
                    (동일 카테고리 내 id 정렬은 sort_key 4번째 인자 s.id 로 보장)
     """
@@ -67,6 +69,9 @@ def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
     fld = (field or "").strip()
 
     if cat in _STAGE_CATEGORIES:
+        if is_proposal:
+            # 제안사업: field 순서 무시, staffing.id 로만 정렬 (sortOrder=0 고정)
+            return (0, 0)
         for pattern, order in _STAGE_FIELD_ORDER:
             if pattern.search(fld):
                 return (0, order)
@@ -77,6 +82,8 @@ def _get_sort_key(category: str, field: str) -> Tuple[int, int]:
         return (1, cat_order)
 
     # category 미설정: field로 판단
+    if is_proposal:
+        return (0, 0)
     for pattern, order in _STAGE_FIELD_ORDER:
         if pattern.search(fld):
             return (0, order)
@@ -537,17 +544,22 @@ def _get_target_staffing_people(
     staffings: list,
     phases: list,
     people_map: Dict[int, Any],
+    project_map: Optional[Dict[int, Any]] = None,
 ) -> List[Dict]:
     """
     본사업(제안) 인력을 ScheduleTab과 동일한 순서로 반환.
     정렬: (sortGroup, sortOrder, phase.sort_order, staffing.id)
       - sortGroup: 단계감리팀=0, 전문가팀=1
-      - sortOrder: 사업관리=0, 응용시스템=1, DB=2, 시스템구조=3, 기타=4/999
-      - phase.sort_order: 단계 순서
-      - staffing.id: 동일 단계/분야 내 순서
+      - 제안사업 단계감리팀: sortOrder=0 고정 (staffing.id 입력순 보존)
+      - 감리사업 단계감리팀: sortOrder= field 순서(사업관리=0, 응용시스템=1, ...)
+      - 전문가팀: sortOrder= 카테고리 순서(핵심기술=0,...)
     """
     ph_map = {p.id: p for p in phases}
     t_staffings = [s for s in staffings if s.project_id == target_project_id]
+
+    # 제안사업 여부 판단
+    target_proj = (project_map or {}).get(target_project_id)
+    is_proposal = (target_proj is not None and getattr(target_proj, 'status', '') == '제안')
 
     # 인력별 첫 번째 staffing 레코드 수집 (정렬 키 계산용)
     # 동일 인력이 여러 phase에 있을 경우, 가장 우선순위 높은(sort_key 작은) 것 사용
@@ -559,7 +571,7 @@ def _get_target_staffing_people(
             continue
         phase = ph_map.get(s.phase_id)
         phase_sort = phase.sort_order if phase and hasattr(phase, 'sort_order') else 9999
-        sg, so = _get_sort_key(s.category or "", s.field or "")
+        sg, so = _get_sort_key(s.category or "", s.field or "", is_proposal=is_proposal)
         sort_key = (sg, so, phase_sort, s.id)
 
         if key not in person_best or sort_key < person_best[key]["sort_key"]:
@@ -642,6 +654,10 @@ def _build_schedule_overlap(
 
     _excluded = excluded_keys or set()
 
+    # 제안사업 여부 판단 (단계감리팀 정렬 방식 결정)
+    _target_proj = project_map.get(target_project_id)
+    _is_proposal = (_target_proj is not None and getattr(_target_proj, 'status', '') == '제안')
+
     # 인력별로 가장 우선순위 높은 staffing 레코드로 분야/정렬키 결정 (excluded 제외)
     person_best: Dict[str, Dict] = {}
     for s in t_staffings:
@@ -650,7 +666,7 @@ def _build_schedule_overlap(
             continue
         phase = ph_map.get(s.phase_id)
         phase_sort = phase.sort_order if phase and hasattr(phase, 'sort_order') else 9999
-        sg, so = _get_sort_key(s.category or "", s.field or "")
+        sg, so = _get_sort_key(s.category or "", s.field or "", is_proposal=_is_proposal)
         sort_key = (sg, so, phase_sort, s.id)
 
         if key not in person_best or sort_key < person_best[key]["sort_key"]:
@@ -1070,6 +1086,7 @@ async def get_text_output(
     }
 
     # 인력별 대표 정보 (정렬 기준: _get_sort_key)
+    _is_proposal_text = (getattr(target, 'status', '') == '제안')
     person_best: Dict[str, Dict] = {}
     for s in filtered_staffings:
         key, name, is_chief, person_obj = _resolve_person_key(s, people_map)
@@ -1077,7 +1094,7 @@ async def get_text_output(
             continue
         ph = ph_map.get(s.phase_id)
         phase_sort = ph.sort_order if ph and hasattr(ph, 'sort_order') else 9999
-        sg, so = _get_sort_key(s.category or "", s.field or "")
+        sg, so = _get_sort_key(s.category or "", s.field or "", is_proposal=_is_proposal_text)
         sort_key = (sg, so, phase_sort, s.id)
         if key not in person_best or sort_key < person_best[key]["sort_key"]:
             person_best[key] = {
@@ -1364,7 +1381,7 @@ async def get_proposal_risk_detail(
     p_start, p_end = _project_date_range(project_id, phases)
 
     assigned_people = _get_target_staffing_people(
-        project_id, staffings, phases, people_map
+        project_id, staffings, phases, people_map, project_map=project_map
     )
 
     return {
