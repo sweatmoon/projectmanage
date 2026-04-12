@@ -717,23 +717,59 @@ function RemainingRisks({ risks }: { risks: RiskDetailItem[] }) {
 }
 
 // ── 텍스트 출력 패널 ─────────────────────────────────────────────────────────
+// TextOutputResult 타입 확장 (replacements_count, phase_shifts_count)
+interface TextOutputResultV2 extends TextOutputResult {
+  replacements_count?: number;
+  phase_shifts_count?: number;
+}
+
 function TextOutputPanel({
   projectId,
   excludedPersonKeys,
+  personReplacements,
+  phaseShifts,
+  simApplied,
 }: {
   projectId: number;
   excludedPersonKeys?: string[];
+  personReplacements?: Record<string, number | null>;
+  phaseShifts?: Record<string, { start_date: string; end_date: string }>;
+  simApplied?: boolean;   // 직접 시뮬레이션 결과가 적용된 상태인지
 }) {
-  const [textOutput, setTextOutput] = useState<TextOutputResult | null>(null);
+  const [textOutput, setTextOutput] = useState<TextOutputResultV2 | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+
+  // 시뮬레이션 설정 변경 시 이전 결과 초기화
+  const prevSimKey = useRef<string>('');
+  const simKey = JSON.stringify({ excludedPersonKeys, personReplacements, phaseShifts });
+  if (prevSimKey.current !== simKey) {
+    prevSimKey.current = simKey;
+    if (textOutput) setTextOutput(null);
+  }
+
+  const hasSimulation = (
+    (excludedPersonKeys?.length ?? 0) > 0 ||
+    Object.keys(personReplacements ?? {}).length > 0 ||
+    Object.keys(phaseShifts ?? {}).length > 0
+  );
 
   const runTextOutput = async () => {
     setLoading(true);
     try {
+      // phase_shifts 키를 숫자 형태로 변환하여 전송
+      const phaseShiftsInt: Record<number, { start_date: string; end_date: string }> = {};
+      Object.entries(phaseShifts ?? {}).forEach(([k, v]) => {
+        phaseShiftsInt[parseInt(k)] = v;
+      });
+
       const res = await axios.post(
         `/api/v1/proposal-risk/${projectId}/text-output`,
-        { excluded_person_keys: excludedPersonKeys ?? [] },
+        {
+          excluded_person_keys: excludedPersonKeys ?? [],
+          person_replacements:  personReplacements ?? {},
+          phase_shifts:         phaseShiftsInt,
+        },
         { headers: getAuthHeaders() }
       );
       setTextOutput(res.data);
@@ -758,24 +794,79 @@ function TextOutputPanel({
     await handleCopy('__all__', all);
   };
 
+  // 적용된 시뮬레이션 요약 문구
+  const simSummaryParts: string[] = [];
+  const replaceCount = Object.keys(personReplacements ?? {}).filter(k => (personReplacements ?? {})[k] !== null).length;
+  const excludeCount = Object.keys(personReplacements ?? {}).filter(k => (personReplacements ?? {})[k] === null).length
+    + (excludedPersonKeys?.length ?? 0);
+  const shiftCount = Object.keys(phaseShifts ?? {}).length;
+  if (replaceCount > 0)  simSummaryParts.push(`인력 ${replaceCount}명 교체`);
+  if (excludeCount > 0)  simSummaryParts.push(`${excludeCount}명 제외`);
+  if (shiftCount > 0)    simSummaryParts.push(`일정 ${shiftCount}건 이동`);
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-500">
-          {excludedPersonKeys && excludedPersonKeys.length > 0
-            ? <span className="text-blue-600 font-medium">{excludedPersonKeys.length}명 제외 기준으로 출력</span>
-            : '현재 배정 인력 기준 출력'}
-        </p>
-        <Button size="sm" onClick={runTextOutput} disabled={loading}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white">
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
-          텍스트 생성
-        </Button>
-      </div>
+      {/* 시뮬레이션 적용 안내 */}
+      {hasSimulation ? (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 flex items-start gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-violet-500 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-violet-700 flex-1">
+            <p className="font-semibold">시뮬레이션 결과 반영</p>
+            <p className="text-violet-500 mt-0.5">{simSummaryParts.join(' · ')} 적용 후 인력·일정 기준으로 출력됩니다</p>
+          </div>
+          <Button size="sm" onClick={runTextOutput} disabled={loading}
+            className="bg-violet-600 hover:bg-violet-700 text-white flex-shrink-0">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+            시뮬레이션 결과 출력
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-500">현재 배정 인력·일정 기준으로 출력합니다</p>
+          <Button size="sm" onClick={runTextOutput} disabled={loading}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+            텍스트 생성
+          </Button>
+        </div>
+      )}
 
+      {/* 직접 시뮬레이션 설정 없을 때 안내 */}
+      {!hasSimulation && !textOutput && !loading && (
+        <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 text-center space-y-2">
+          <FileText className="h-7 w-7 mx-auto text-gray-300" />
+          <p className="text-xs text-gray-400">
+            위 [텍스트 생성] 버튼을 눌러 현재 배정 인력 기준 텍스트를 출력하세요
+          </p>
+          <p className="text-[10px] text-gray-300">
+            💡 [직접 시뮬레이션] 탭에서 인력 교체·일정 이동 후 이 탭으로 오면<br/>시뮬레이션 결과가 반영된 텍스트를 출력할 수 있습니다
+          </p>
+        </div>
+      )}
+
+      {/* 결과 출력 */}
       {textOutput && (
         <>
-          <div className="flex justify-end">
+          {/* 결과 헤더 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-emerald-600 font-semibold">✓ 텍스트 생성 완료</span>
+              {(textOutput.replacements_count ?? 0) > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px]">
+                  인력교체 {textOutput.replacements_count}명 반영
+                </span>
+              )}
+              {(textOutput.phase_shifts_count ?? 0) > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 text-[10px]">
+                  일정이동 {textOutput.phase_shifts_count}건 반영
+                </span>
+              )}
+              {textOutput.excluded_count > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px]">
+                  {textOutput.excluded_count}명 제외
+                </span>
+              )}
+            </div>
             <button
               onClick={handleCopyAll}
               className={`text-xs px-2.5 py-1 rounded border transition-all flex items-center gap-1 ${
@@ -788,6 +879,7 @@ function TextOutputPanel({
               {copiedSection === '__all__' ? '복사됨!' : '전체 복사'}
             </button>
           </div>
+
           {textOutput.sections.map((section, idx) => (
             <div key={idx} className="rounded-xl border border-gray-200 overflow-hidden">
               <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
@@ -822,14 +914,19 @@ function TextOutputPanel({
               </div>
             </div>
           ))}
-        </>
-      )}
 
-      {!textOutput && !loading && (
-        <div className="text-center py-8 text-gray-300">
-          <FileText className="h-8 w-8 mx-auto mb-2" />
-          <p className="text-xs text-gray-400">[텍스트 생성] 버튼을 눌러 현재 배정 인력 기준 텍스트를 출력하세요</p>
-        </div>
+          {/* 재생성 버튼 */}
+          <div className="flex justify-center pt-1">
+            <button
+              onClick={runTextOutput}
+              disabled={loading}
+              className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+            >
+              <RefreshCw className="h-3 w-3" />
+              다시 생성
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1447,6 +1544,22 @@ function SimulationPanel({ projectId }: { projectId: number }) {
                   )}
 
                   <RemainingRisks risks={simV2Result.risks} />
+
+                  {/* 텍스트 출력 바로가기 */}
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 flex items-center gap-3">
+                    <FileText className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                    <p className="text-xs text-emerald-700 flex-1">
+                      이 시뮬레이션 결과(인력 교체·일정 이동)를 그대로 텍스트로 출력할 수 있습니다
+                    </p>
+                    <Button
+                      size="sm"
+                      onClick={() => setActiveTab('text')}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white flex-shrink-0"
+                    >
+                      <FileText className="h-3.5 w-3.5 mr-1" />
+                      텍스트 출력 →
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -1478,6 +1591,9 @@ function SimulationPanel({ projectId }: { projectId: number }) {
         <TextOutputPanel
           projectId={projectId}
           excludedPersonKeys={Object.keys(personReplacements).filter(k => personReplacements[k] === null)}
+          personReplacements={personReplacements}
+          phaseShifts={phaseShifts}
+          simApplied={simV2Result !== null}
         />
       )}
     </div>
