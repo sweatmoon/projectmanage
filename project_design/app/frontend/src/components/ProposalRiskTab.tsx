@@ -76,6 +76,7 @@ interface MyPhaseDetail {
 
 interface PersonSchedule {
   person_key: string;
+  orig_person_key?: string | null;  // 교체된 경우 교체 전 원본 key
   person_id: number | null;
   person_name: string;
   is_chief: boolean;
@@ -857,9 +858,35 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   const phases = optimizeResult?.phases ?? [];
 
   // 시뮬레이션 결과가 있으면 시뮬레이션된 인력 목록 사용 (일정이동/교체 반영)
-  const displayPeople: PersonSchedule[] = simResult?.people?.length
-    ? simResult.people
-    : assigned;
+  // 단, 원본(assigned) 순서를 유지: orig_person_key 또는 person_key로 원본 위치에 매칭
+  const displayPeople: PersonSchedule[] = (() => {
+    if (!simResult?.people?.length) return assigned;
+    const simMap = new Map<string, PersonSchedule>();
+    for (const p of simResult.people) {
+      simMap.set(p.person_key, p);
+      if (p.orig_person_key) simMap.set(p.orig_person_key, p);
+    }
+    // 원본 순서(assigned) 기준으로 시뮬레이션 결과와 병합
+    const result: PersonSchedule[] = [];
+    const used = new Set<string>();
+    for (const orig of assigned) {
+      const sim = simMap.get(orig.person_key);
+      if (sim && !used.has(sim.person_key)) {
+        result.push(sim);
+        used.add(sim.person_key);
+      } else if (!sim) {
+        // 시뮬레이션에서 제외된 인력은 표시하지 않음
+      }
+    }
+    // 시뮬레이션에서 새로 추가된 인력(orig_person_key가 없고 assigned에 없는 인력)은 맨 뒤
+    for (const p of simResult.people) {
+      if (!used.has(p.person_key)) {
+        result.push(p);
+        used.add(p.person_key);
+      }
+    }
+    return result;
+  })();
 
   const conflictPeople = displayPeople.filter(p => p.has_conflict);
   const visiblePeople = showOnlyConflict ? conflictPeople : displayPeople;
@@ -1131,15 +1158,18 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visiblePeople.map(person => (
+                  {visiblePeople.map(person => {
+                    // 교체된 인력은 orig_person_key로 드롭다운 상태와 연결
+                    const rowKey = person.orig_person_key || person.person_key;
+                    return (
                     <IntegratedPersonRow
-                      key={person.person_key}
+                      key={rowKey}
                       person={person}
                       allPeople={allPeople}
-                      replaceValue={personReplacements[person.person_key]}
-                      onReplaceChange={handlePersonChange}
+                      replaceValue={personReplacements[rowKey]}
+                      onReplaceChange={(_, v) => handlePersonChange(rowKey, v)}
                     />
-                  ))}
+                  );})}
                   {visiblePeople.length === 0 && (
                     <tr>
                       <td colSpan={6} className="text-center py-8 text-emerald-500 text-xs">
