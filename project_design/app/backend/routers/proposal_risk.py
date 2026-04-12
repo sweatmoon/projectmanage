@@ -1303,8 +1303,9 @@ async def get_all_people_for_project(
             "field_match":  field_match,
         })
 
-    # 정렬: 가용 먼저 → 분야매칭 먼저 → 중복 적은 순 → 이름 순
+    # 정렬: 본사업 배정중 최하위 → 가용 먼저 → 분야매칭 먼저 → 중복 적은 순 → 이름 순
     all_people_list.sort(key=lambda p: (
+        1 if p["is_assigned"] else 0,   # 본사업 배정중 인력은 최하위
         0 if p["is_available"] else 1,
         0 if p["field_match"] else 1,
         p["conflict_days"],
@@ -2292,6 +2293,7 @@ def _build_all_people_for_sim(
         })
 
     all_people_list.sort(key=lambda p: (
+        1 if p["is_assigned"] else 0,   # 본사업 배정중 인력은 최하위
         0 if p["is_available"] else 1,
         p["conflict_days"],
         p["person_name"],
