@@ -182,6 +182,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/proposal-risk/list",
         }
 
+        # writer가 POST로 접근 가능한 조회 전용 경로 (DB 읽기 전용, 쓰기 없음)
+        WRITER_ALLOWED_POST_PATHS = {
+            "/api/v1/calendar/by_staffing_ids",          # 간트 중복 인력 계산용
+            "/api/v1/calendar/month",                    # 사업별일정 달력 조회용
+            "/api/v1/calendar/range",                    # 달력 범위 조회용
+            "/api/v1/calendar/entries_by_person_ids",    # 인력별 달력 조회용
+            "/api/v1/calendar/staffing-total-count",     # 공수 카운트 조회용
+        }
+
         if request.state.user_role == "writer":
             method = request.method.upper()
 
@@ -196,14 +205,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                         content={"detail": "작성자 계정은 제안리스크·사업별일정·인력정보 조회만 허용됩니다."}
                     )
+            elif method == "POST" and path in WRITER_ALLOWED_POST_PATHS:
+                # 조회 목적 POST는 허용 (DB 쓰기 없음)
+                pass
+            elif method == "POST" and path.startswith("/api/v1/proposal-risk/"):
+                # proposal-risk 시뮬레이션 POST 허용
+                pass
             else:
-                # POST/PUT/PATCH/DELETE: proposal-risk 시뮬레이션만 허용
-                # (simulate, text-output — 모두 DB 쓰기 없는 순수 계산)
-                if not path.startswith("/api/v1/proposal-risk/"):
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "작성자 계정은 제안리스크 시뮬레이션 외 쓰기 작업은 허용되지 않습니다."}
-                    )
+                # 그 외 POST/PUT/PATCH/DELETE → 차단
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "작성자 계정은 제안리스크 시뮬레이션 외 쓰기 작업은 허용되지 않습니다."}
+                )
 
         # ── user 역할: 달력 셀 토글(추가/제거) 차단 ───────────────
         # user는 달력 셀 클릭(toggle) 불가 - leader/admin만 허용
