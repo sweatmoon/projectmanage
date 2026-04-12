@@ -1491,3 +1491,615 @@ async def simulate_risk(
         "risks":   sim_risks,
         "people":  sim_schedule,
     }
+
+
+# ── 최적화 시뮬레이션 스키마 ──────────────────────────────────────────────────
+class OptimizeRequest(BaseModel):
+    """최적 인력/일정 추천 요청 (DB 변경 없음)"""
+    pass  # 향후 옵션 추가 가능
+
+
+class SimulateV2Request(BaseModel):
+    """인력 교체 + 일정 이동 시뮬레이션 요청 (DB 변경 없음)"""
+    # 인력 교체: {old_person_key: new_person_id}
+    person_replacements: Dict[str, Optional[int]] = {}
+    # 일정 이동: {phase_id: {start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD"}}
+    phase_shifts: Dict[int, Dict[str, str]] = {}
+
+
+# ── 헬퍼: 해당 기간 가용 인력 풀 수집 ────────────────────────────────────────
+def _get_available_people(
+    project_id: int,
+    t_start: Optional[date],
+    t_end: Optional[date],
+    staffings: list,
+    phases: list,
+    people_map: Dict[int, Any],
+    need_field: str = "",
+    need_is_chief: bool = False,
+    exclude_keys: Optional[set] = None,
+    top_n: int = 5,
+) -> List[Dict]:
+    """
+    해당 기간(t_start~t_end)에 가용한 인력을 반환.
+    - 본사업에 이미 배정된 인력은 제외
+    - 분야(field) 유사도 기준 필터
+    - is_chief 필요 시 chief만 포함
+    """
+    if not t_start or not t_end:
+        return []
+
+    exclude_keys = exclude_keys or set()
+    ph_map = {p.id: p for p in phases}
+
+    # 이미 배정된 인력 키
+    assigned_keys: set = set()
+    for s in staffings:
+        if s.project_id == project_id:
+            key, _, _, _ = _resolve_person_key(s, people_map)
+            if key:
+                assigned_keys.add(key)
+
+    # 전체 인력 busy 기간
+    person_busy: Dict[str, List[Tuple[date, date]]] = {}
+    for s in staffings:
+        ph = ph_map.get(s.phase_id)
+        if not ph or not ph.start_date or not ph.end_date:
+            continue
+        key, _, _, _ = _resolve_person_key(s, people_map)
+        if not key:
+            continue
+        person_busy.setdefault(key, []).append((ph.start_date, ph.end_date))
+
+    candidates = []
+    for person in people_map.values():
+        if person.deleted_at:
+            continue
+        p_key = f"id:{person.id}"
+        if p_key in assigned_keys or p_key in exclude_keys:
+            continue
+        if need_is_chief and not person.is_chief:
+            continue
+
+        # 분야 매칭
+        if need_field:
+            matched = False
+            for s in staffings:
+                if s.person_id == person.id:
+                    s_field = (s.field or "").strip()
+                    if need_field in s_field or s_field in need_field:
+                        matched = True
+                        break
+            if not matched:
+                continue
+
+        # 가용 여부
+        is_available = not any(
+            _dates_overlap(t_start, t_end, bs, be)
+            for bs, be in person_busy.get(p_key, [])
+        )
+
+        # 중복일수 계산 (참고용)
+        conflict_days = sum(
+            _overlap_days(t_start, t_end, bs, be)
+            for bs, be in person_busy.get(p_key, [])
+        )
+
+        candidates.append({
+            "person_id":     person.id,
+            "person_name":   person.person_name,
+            "person_key":    p_key,
+            "is_chief":      bool(person.is_chief),
+            "grade":         person.grade or "",
+            "position":      person.position or "",
+            "company":       person.company or "",
+            "is_available":  is_available,
+            "conflict_days": conflict_days,
+        })
+
+    candidates.sort(key=lambda c: (0 if c["is_available"] else 1, c["conflict_days"], c["person_name"]))
+    return candidates[:top_n]
+
+
+@router.post("/{project_id}/optimize")
+async def optimize_risk(
+    project_id: int,
+    body: OptimizeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    [DB 격리 보장] DB에 쓰기 없음 — 읽기+메모리 계산만 수행.
+
+    현재 배정 상태를 분석하여:
+    1. 최적 인력 교체 안 추천 (중복 인력 → 가용 대체 인력)
+    2. 최적 일정 이동 안 추천 (중복 구간 → 착수 연기/단계 조정)
+    3. 각 개선안의 예상 리스크 감소 효과 계산
+    """
+    from fastapi import HTTPException
+    from datetime import timedelta
+
+    all_projects, phases, staffings, peoples = await _load_all(db)
+    people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
+
+    target = next((p for p in all_projects if p.id == project_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    t_start, t_end = _project_date_range(project_id, phases)
+    t_phases_sorted = sorted(
+        [ph for ph in phases if ph.project_id == project_id and ph.start_date and ph.end_date],
+        key=lambda p: p.start_date
+    )
+
+    # 현재 리스크 / 스케줄 계산
+    orig_risks = _analyze_risks(target, all_projects, phases, staffings, people_map)
+    orig_schedule = _build_schedule_overlap(project_id, staffings, phases, people_map, project_map)
+    orig_danger  = sum(1 for r in orig_risks if r["severity"] == "danger")
+    orig_warning = sum(1 for r in orig_risks if r["severity"] == "warning")
+    orig_conflict_people = sum(1 for p in orig_schedule if p["has_conflict"])
+    orig_overlap_days    = sum(p["total_overlap_days"] for p in orig_schedule)
+    orig_overlap_md      = sum(p["total_overlap_md"]   for p in orig_schedule)
+
+    # ── 안 A: 인력 교체 추천 ────────────────────────────────────────────────
+    person_replace_options: List[Dict] = []
+    conflict_people = [p for p in orig_schedule if p["has_conflict"]]
+
+    for cp in conflict_people:
+        pk = cp["person_key"]
+        # 대체 인력 찾기
+        alternates = _get_available_people(
+            project_id, t_start, t_end,
+            staffings, phases, people_map,
+            need_field=cp.get("my_field", ""),
+            need_is_chief=cp.get("is_chief", False),
+            exclude_keys={pk},
+            top_n=3,
+        )
+
+        # 이 인력 제외 시 예상 리스크 감소
+        sim_risks_if_excluded = _analyze_risks(
+            target, all_projects, phases, staffings, people_map,
+            excluded_keys={pk}
+        )
+        sim_schedule_if_excluded = _build_schedule_overlap(
+            project_id, staffings, phases, people_map, project_map,
+            excluded_keys={pk}
+        )
+        exc_danger  = sum(1 for r in sim_risks_if_excluded if r["severity"] == "danger")
+        exc_warning = sum(1 for r in sim_risks_if_excluded if r["severity"] == "warning")
+        exc_overlap = sum(p["total_overlap_days"] for p in sim_schedule_if_excluded)
+
+        person_replace_options.append({
+            "person_key":        pk,
+            "person_name":       cp["person_name"],
+            "is_chief":          cp["is_chief"],
+            "grade":             cp.get("grade", ""),
+            "my_field":          cp.get("my_field", ""),
+            "my_category":       cp.get("my_category", ""),
+            "conflict_days":     cp["total_overlap_days"],
+            "conflict_md":       cp["total_overlap_md"],
+            "conflicts_count":   len(cp["conflicts"]),
+            # 교체 시 예상 효과
+            "expected_danger_delta":  orig_danger  - exc_danger,
+            "expected_warning_delta": orig_warning - exc_warning,
+            "expected_overlap_delta": orig_overlap_days - exc_overlap,
+            # 대체 후보
+            "alternates": alternates,
+        })
+
+    # 효과 큰 순으로 정렬
+    person_replace_options.sort(
+        key=lambda x: (-x["expected_danger_delta"], -x["expected_overlap_delta"])
+    )
+
+    # ── 안 B: 일정 이동 추천 ────────────────────────────────────────────────
+    phase_shift_options: List[Dict] = []
+
+    if t_start and t_end and t_phases_sorted:
+        # 중복이 끝나는 최대 날짜 수집
+        all_overlap_ends: List[date] = []
+        for cp in conflict_people:
+            for c in cp["conflicts"]:
+                try:
+                    oe = date.fromisoformat(c["overlap_end"])
+                    all_overlap_ends.append(oe)
+                except Exception:
+                    pass
+
+        if all_overlap_ends:
+            max_conflict_end = max(all_overlap_ends)
+            delay_days = (max_conflict_end - t_start).days + 1
+
+            if delay_days > 0:
+                # 전체 사업 착수 연기 옵션
+                shifted_phases_full = [
+                    {
+                        "phase_id":   ph.id,
+                        "phase_name": ph.phase_name,
+                        "orig_start": str(ph.start_date),
+                        "orig_end":   str(ph.end_date),
+                        "new_start":  str(ph.start_date + timedelta(days=delay_days)),
+                        "new_end":    str(ph.end_date   + timedelta(days=delay_days)),
+                        "shift_days": delay_days,
+                    }
+                    for ph in t_phases_sorted
+                ]
+
+                # 착수 연기 시 리스크 시뮬레이션
+                # 가상의 phase shift를 적용한 staffing mock 생성
+                shifted_phase_map: Dict[int, Dict] = {
+                    d["phase_id"]: d for d in shifted_phases_full
+                }
+
+                phase_shift_options.append({
+                    "option_id":    "delay_all",
+                    "label":        f"전체 착수 {delay_days}일 연기",
+                    "description":  (
+                        f"모든 단계를 {delay_days}일 뒤로 이동하면 "
+                        f"현재 중복 인력의 타 사업 일정과 겹치지 않음"
+                    ),
+                    "new_start":    str(t_start + timedelta(days=delay_days)),
+                    "new_end":      str(t_end   + timedelta(days=delay_days)),
+                    "shift_days":   delay_days,
+                    "phases":       shifted_phases_full,
+                    "estimated_conflict_reduction": orig_conflict_people,
+                })
+
+                # 최소 연기 옵션 (충돌이 가장 적은 인력만 고려)
+                if delay_days > 7:
+                    min_delay = min(
+                        (date.fromisoformat(c["overlap_end"]) - t_start).days + 1
+                        for cp in conflict_people for c in cp["conflicts"]
+                        if cp.get("is_chief")  # 총괄급 기준 최소 연기
+                    ) if any(cp.get("is_chief") for cp in conflict_people) else delay_days // 2
+
+                    if 0 < min_delay < delay_days:
+                        shifted_min = [
+                            {
+                                "phase_id":   ph.id,
+                                "phase_name": ph.phase_name,
+                                "orig_start": str(ph.start_date),
+                                "orig_end":   str(ph.end_date),
+                                "new_start":  str(ph.start_date + timedelta(days=min_delay)),
+                                "new_end":    str(ph.end_date   + timedelta(days=min_delay)),
+                                "shift_days": min_delay,
+                            }
+                            for ph in t_phases_sorted
+                        ]
+                        phase_shift_options.append({
+                            "option_id":    "delay_minimum",
+                            "label":        f"최소 연기 ({min_delay}일, 총괄급 기준)",
+                            "description":  f"총괄 인력의 타 사업 종료 시점 기준 {min_delay}일 연기",
+                            "new_start":    str(t_start + timedelta(days=min_delay)),
+                            "new_end":      str(t_end   + timedelta(days=min_delay)),
+                            "shift_days":   min_delay,
+                            "phases":       shifted_min,
+                            "estimated_conflict_reduction": sum(
+                                1 for cp in conflict_people if cp.get("is_chief")
+                            ),
+                        })
+
+        # 단계별 개별 이동 옵션 (1단계만 연기하거나, 특정 단계만 조정)
+        if len(t_phases_sorted) >= 2:
+            first_ph = t_phases_sorted[0]
+            first_conflicts = [
+                c for cp in conflict_people
+                for c in cp["conflicts"]
+                if c["my_phase_name"] == first_ph.phase_name
+            ]
+            if first_conflicts:
+                first_max_end = max(
+                    date.fromisoformat(c["overlap_end"]) for c in first_conflicts
+                )
+                first_delay = (first_max_end - first_ph.start_date).days + 1
+                if first_delay > 0:
+                    phase_shift_options.append({
+                        "option_id":  "delay_first_phase",
+                        "label":      f"1단계만 {first_delay}일 연기",
+                        "description": (
+                            f"'{first_ph.phase_name}' 단계만 {first_delay}일 뒤로 이동. "
+                            f"이후 단계는 그대로 유지"
+                        ),
+                        "new_start":  str(first_ph.start_date + timedelta(days=first_delay)),
+                        "new_end":    str(first_ph.end_date   + timedelta(days=first_delay)),
+                        "shift_days": first_delay,
+                        "phases": [{
+                            "phase_id":   first_ph.id,
+                            "phase_name": first_ph.phase_name,
+                            "orig_start": str(first_ph.start_date),
+                            "orig_end":   str(first_ph.end_date),
+                            "new_start":  str(first_ph.start_date + timedelta(days=first_delay)),
+                            "new_end":    str(first_ph.end_date   + timedelta(days=first_delay)),
+                            "shift_days": first_delay,
+                        }],
+                        "estimated_conflict_reduction": len(set(
+                            c["other_project_name"] for c in first_conflicts
+                        )),
+                    })
+
+    # ── 최적 조합 제안 (효과 가장 큰 인력 교체 + 최소 연기 조합) ──────────────
+    best_combo: Dict = {}
+    if person_replace_options and phase_shift_options:
+        top_replace = person_replace_options[0]
+        top_shift   = phase_shift_options[0]
+        best_combo = {
+            "label": "최적 조합 안",
+            "description": (
+                f"① {top_replace['person_name']} 교체 + "
+                f"② {top_shift['label']} 적용 시 리스크 최소화 예상"
+            ),
+            "replace": top_replace,
+            "shift":   top_shift,
+            "expected_danger":  max(0, orig_danger  - top_replace["expected_danger_delta"]),
+            "expected_warning": max(0, orig_warning - top_replace["expected_warning_delta"]),
+        }
+    elif person_replace_options:
+        top_replace = person_replace_options[0]
+        best_combo = {
+            "label": "인력 교체 최적 안",
+            "description": f"{top_replace['person_name']}을 대체 인력으로 교체 시 리스크 최소화",
+            "replace": top_replace,
+            "shift":   None,
+            "expected_danger":  max(0, orig_danger  - top_replace["expected_danger_delta"]),
+            "expected_warning": max(0, orig_warning - top_replace["expected_warning_delta"]),
+        }
+    elif phase_shift_options:
+        top_shift = phase_shift_options[0]
+        best_combo = {
+            "label": "일정 이동 최적 안",
+            "description": top_shift["label"],
+            "replace": None,
+            "shift":   top_shift,
+            "expected_danger":  orig_danger,
+            "expected_warning": max(0, orig_warning - 1),
+        }
+
+    return {
+        "project_id":          project_id,
+        "project_name":        target.project_name,
+        "current": {
+            "danger":          orig_danger,
+            "warning":         orig_warning,
+            "conflict_people": orig_conflict_people,
+            "overlap_days":    orig_overlap_days,
+            "overlap_md":      orig_overlap_md,
+        },
+        "person_replace_options":  person_replace_options,
+        "phase_shift_options":     phase_shift_options,
+        "best_combo":              best_combo,
+        "phases": [
+            {
+                "phase_id":   ph.id,
+                "phase_name": ph.phase_name,
+                "start_date": str(ph.start_date),
+                "end_date":   str(ph.end_date),
+                "sort_order": getattr(ph, "sort_order", 9999),
+            }
+            for ph in t_phases_sorted
+        ],
+    }
+
+
+@router.post("/{project_id}/simulate-v2")
+async def simulate_risk_v2(
+    project_id: int,
+    body: SimulateV2Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    [DB 격리 보장] DB에 쓰기 없음 — 읽기+메모리 계산만 수행.
+
+    인력 교체 + 일정 이동을 동시에 시뮬레이션:
+    - person_replacements: {old_person_key: new_person_id} — old 제거 후 new 투입
+    - phase_shifts: {phase_id: {start_date, end_date}} — 해당 phase 날짜 가상 변경
+
+    원본 DB는 절대 변경되지 않으며 메모리에서만 계산.
+    """
+    from fastapi import HTTPException
+    from datetime import timedelta
+    import copy
+
+    all_projects, phases, staffings, peoples = await _load_all(db)
+    people_map = {p.id: p for p in peoples}
+    project_map = {p.id: p for p in all_projects}
+
+    target = next((p for p in all_projects if p.id == project_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # ── 원본 리스크/스케줄 ────────────────────────────────────────────────────
+    orig_risks    = _analyze_risks(target, all_projects, phases, staffings, people_map)
+    orig_schedule = _build_schedule_overlap(project_id, staffings, phases, people_map, project_map)
+    orig_danger   = sum(1 for r in orig_risks if r["severity"] == "danger")
+    orig_warning  = sum(1 for r in orig_risks if r["severity"] == "warning")
+    orig_conflict = sum(1 for p in orig_schedule if p["has_conflict"])
+    orig_days     = sum(p["total_overlap_days"] for p in orig_schedule)
+    orig_md       = sum(p["total_overlap_md"]   for p in orig_schedule)
+
+    # ── 가상 staffing / phases 목록 생성 (메모리 조작, DB 불변) ──────────────
+    # 1) phase 날짜 이동 적용
+    phase_shift_map = {}  # phase_id → (new_start, new_end)
+    for phase_id_str, dates in body.phase_shifts.items():
+        try:
+            pid_int = int(phase_id_str)
+            ns = date.fromisoformat(dates["start_date"])
+            ne = date.fromisoformat(dates["end_date"])
+            phase_shift_map[pid_int] = (ns, ne)
+        except Exception:
+            continue
+
+    # 가상 phase 객체 생성 (SimpleNamespace 사용)
+    from types import SimpleNamespace
+
+    def _make_virtual_phases(phases, phase_shift_map):
+        result = []
+        for ph in phases:
+            if ph.id in phase_shift_map:
+                ns_date, ne_date = phase_shift_map[ph.id]
+                vph = SimpleNamespace(
+                    id=ph.id,
+                    project_id=ph.project_id,
+                    phase_name=ph.phase_name,
+                    start_date=ns_date,
+                    end_date=ne_date,
+                    sort_order=getattr(ph, "sort_order", 9999),
+                    deleted_at=ph.deleted_at,
+                )
+            else:
+                vph = ph
+            result.append(vph)
+        return result
+
+    virtual_phases = _make_virtual_phases(phases, phase_shift_map)
+
+    # 2) 인력 교체 적용
+    # person_replacements = {old_key: new_person_id or None}
+    # old_key 인력을 제거하고, new_person_id 가 있으면 같은 위치에 새 인력을 넣은 것처럼 시뮬레이션
+    # → old_key를 excluded_keys에 추가하고, new staffing 레코드를 가상으로 추가
+
+    replacements = body.person_replacements  # {old_key: new_person_id}
+    excluded_old_keys = set(replacements.keys())
+
+    # 가상 staffing 생성: 교체 인력의 기존 배정 위치에 새 인력을 배치
+    virtual_staffings = list(staffings)  # 원본 참조 (읽기 전용)
+
+    added_virtual: List[Any] = []
+    for old_key, new_pid in replacements.items():
+        if not new_pid:
+            continue
+        # 새 인력이 DB에 없으면 스킵
+        if new_pid not in people_map:
+            continue
+
+        # old_key의 본사업 배정 staffing 레코드를 찾아서 new_pid로 교체한 가상 레코드 생성
+        for s in staffings:
+            if s.project_id != project_id:
+                continue
+            s_key, _, _, _ = _resolve_person_key(s, people_map)
+            if s_key != old_key:
+                continue
+            # 가상 staffing 레코드
+            vs = SimpleNamespace(
+                id=-s.id,                        # 음수 id로 가상 표시
+                project_id=s.project_id,
+                phase_id=s.phase_id,
+                person_id=new_pid,
+                person_name_text=None,
+                field=s.field,
+                sub_field=s.sub_field,
+                category=s.category,
+                md=s.md,
+                deleted_at=None,
+            )
+            added_virtual.append(vs)
+
+    # 가상 staffing = 원본(excluded 제거) + 추가 가상
+    def _filter_excluded(staffings, excluded_keys, people_map, project_id):
+        result = []
+        for s in staffings:
+            if s.project_id == project_id:
+                key, _, _, _ = _resolve_person_key(s, people_map)
+                if key in excluded_keys:
+                    continue
+            result.append(s)
+        return result
+
+    virtual_staffings_filtered = _filter_excluded(virtual_staffings, excluded_old_keys, people_map, project_id)
+    virtual_staffings_final = virtual_staffings_filtered + added_virtual
+
+    # ── 시뮬레이션 리스크/스케줄 계산 ────────────────────────────────────────
+    sim_risks = _analyze_risks(
+        target, all_projects, virtual_phases, virtual_staffings_final, people_map
+    )
+    sim_schedule = _build_schedule_overlap(
+        project_id, virtual_staffings_final, virtual_phases, people_map, project_map
+    )
+    sim_danger   = sum(1 for r in sim_risks if r["severity"] == "danger")
+    sim_warning  = sum(1 for r in sim_risks if r["severity"] == "warning")
+    sim_conflict = sum(1 for p in sim_schedule if p["has_conflict"])
+    sim_days     = sum(p["total_overlap_days"] for p in sim_schedule)
+    sim_md       = sum(p["total_overlap_md"]   for p in sim_schedule)
+
+    # ── 교체 인력 요약 ────────────────────────────────────────────────────────
+    replacement_summary = []
+    for old_key, new_pid in replacements.items():
+        old_person = next((p for p in orig_schedule if p["person_key"] == old_key), None)
+        new_person = people_map.get(new_pid) if new_pid else None
+        replacement_summary.append({
+            "old_key":        old_key,
+            "old_name":       old_person["person_name"] if old_person else old_key,
+            "old_conflict_days": old_person["total_overlap_days"] if old_person else 0,
+            "new_person_id":  new_pid,
+            "new_name":       new_person.person_name if new_person else "(제외만)",
+            "new_is_chief":   bool(new_person.is_chief) if new_person else False,
+            "new_grade":      new_person.grade or "" if new_person else "",
+        })
+
+    # ── 일정 이동 요약 ────────────────────────────────────────────────────────
+    shift_summary = []
+    for ph in phases:
+        if ph.id in phase_shift_map:
+            ns, ne = phase_shift_map[ph.id]
+            shift_days = (ns - ph.start_date).days
+            shift_summary.append({
+                "phase_id":   ph.id,
+                "phase_name": ph.phase_name,
+                "orig_start": str(ph.start_date),
+                "orig_end":   str(ph.end_date),
+                "new_start":  str(ns),
+                "new_end":    str(ne),
+                "shift_days": shift_days,
+            })
+
+    # ── 시뮬레이션 제안 메시지 ────────────────────────────────────────────────
+    suggestions = []
+    delta_danger  = orig_danger  - sim_danger
+    delta_warning = orig_warning - sim_warning
+    delta_days    = orig_days    - sim_days
+    delta_ppl     = orig_conflict - sim_conflict
+
+    if delta_danger > 0:
+        suggestions.append(f"위험 리스크 {delta_danger}건 해소 ({orig_danger} → {sim_danger}건)")
+    if delta_warning > 0:
+        suggestions.append(f"주의 리스크 {delta_warning}건 해소 ({orig_warning} → {sim_warning}건)")
+    if delta_days > 0:
+        suggestions.append(f"중복 일수 {delta_days}일 감소 ({orig_days} → {sim_days}일)")
+    if delta_ppl > 0:
+        suggestions.append(f"중복 인력 {delta_ppl}명 해소 ({orig_conflict} → {sim_conflict}명)")
+    if sim_conflict == 0 and (replacements or phase_shift_map):
+        suggestions.append("✅ 이 조합으로 모든 일정 중복 완전 해소 가능")
+    elif sim_conflict > 0:
+        suggestions.append(f"적용 후에도 {sim_conflict}명 중복 잔존 — 추가 조정 검토 필요")
+    if not suggestions:
+        suggestions.append("현재 조합에서는 리스크 변화 없음")
+
+    return {
+        "project_id": project_id,
+        "original": {
+            "danger":          orig_danger,
+            "warning":         orig_warning,
+            "conflict_people": orig_conflict,
+            "overlap_days":    orig_days,
+            "overlap_md":      orig_md,
+        },
+        "simulated": {
+            "danger":          sim_danger,
+            "warning":         sim_warning,
+            "conflict_people": sim_conflict,
+            "overlap_days":    sim_days,
+            "overlap_md":      sim_md,
+        },
+        "delta": {
+            "danger":          delta_danger,
+            "warning":         delta_warning,
+            "conflict_people": delta_ppl,
+            "overlap_days":    delta_days,
+            "overlap_md":      orig_md - sim_md,
+        },
+        "replacement_summary": replacement_summary,
+        "shift_summary":       shift_summary,
+        "suggestions":         suggestions,
+        "risks":               sim_risks,
+        "people":              sim_schedule,
+    }

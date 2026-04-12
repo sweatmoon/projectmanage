@@ -144,18 +144,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # writer 권한 범위:
         #   ✅ 제안리스크 (/api/v1/proposal-risk/*) → 모든 메서드 허용
         #      - GET:  목록/상세/일정 조회
-        #      - POST: /simulate (DB 변경 없는 메모리 계산), /text-output (DB 변경 없음)
+        #      - POST: /simulate, /simulate-v2, /optimize, /text-output
+        #             (모두 DB 변경 없는 메모리 계산)
         #   ✅ 사업별일정 조회용 API → GET/HEAD/OPTIONS만 허용
         #      - /api/v1/projects/*, /api/v1/phases/*, /api/v1/staffing/*
         #   ✅ 인력정보 조회용 API → GET/HEAD/OPTIONS만 허용
         #      - /api/v1/people/*
         #   ❌ 그 외 모든 API → 차단
         #
-        # ⚠️  시뮬레이션 격리 보장:
-        #   /simulate 와 /text-output 엔드포인트는 DB에 쓰기를 전혀 수행하지 않음.
-        #   _analyze_risks(), _build_schedule_overlap() 등 모든 계산은
-        #   DB에서 읽어온 데이터를 메모리에서만 가공하며 session.add/commit 호출 없음.
-        #   따라서 excluded_person_keys 를 전달해도 원본 데이터는 변경되지 않음.
+        # ⚠️  시뮬레이션 격리 보장 (모든 POST 엔드포인트):
+        #   /simulate:     인력 제외 시뮬레이션 (excluded_person_keys → 메모리 필터)
+        #   /simulate-v2:  인력 교체 + 일정 이동 시뮬레이션 (person_replacements, phase_shifts → 메모리)
+        #   /optimize:     최적 인력/일정 추천 계산 (DB 읽기 + 메모리 계산만)
+        #   /text-output:  텍스트 출력 생성 (excluded_person_keys → 메모리 필터)
+        #   모든 엔드포인트는 _analyze_risks(), _build_schedule_overlap() 등 순수 함수만 사용하며
+        #   session.add / session.commit 호출이 없어 원본 DB는 절대 변경되지 않음.
 
         # writer가 GET으로 접근 가능한 API prefix 목록 (사업별일정 + 인력정보 조회)
         # 실제 라우터 prefix:

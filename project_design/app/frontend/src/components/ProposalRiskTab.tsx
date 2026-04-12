@@ -8,6 +8,7 @@ import {
   AlertTriangle, AlertCircle, CheckCircle2, ChevronRight,
   ArrowLeft, RefreshCw, Loader2, Users, Calendar, Building2, Crown,
   ChevronDown, ChevronUp, Play, Copy, FileText, Sparkles, UserMinus,
+  ArrowRightLeft, CalendarRange, Zap, TrendingDown, RotateCcw, Info,
 } from 'lucide-react';
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
@@ -155,6 +156,86 @@ interface TextOutputResult {
   excluded_keys: string[];
   excluded_count: number;
   sections: TextSection[];
+}
+
+// ── 최적화 추천 결과 타입 ────────────────────────────────────────────────────────
+interface AlternateCandidate {
+  person_id: number;
+  person_name: string;
+  person_key: string;
+  is_chief: boolean;
+  grade: string;
+  position: string;
+  company: string;
+  is_available: boolean;
+  conflict_days: number;
+}
+
+interface PersonReplaceOption {
+  person_key: string;
+  person_name: string;
+  is_chief: boolean;
+  grade: string;
+  my_field: string;
+  my_category: string;
+  conflict_days: number;
+  conflict_md: number;
+  conflicts_count: number;
+  expected_danger_delta: number;
+  expected_warning_delta: number;
+  expected_overlap_delta: number;
+  alternates: AlternateCandidate[];
+}
+
+interface PhaseShiftPhase {
+  phase_id: number;
+  phase_name: string;
+  orig_start: string;
+  orig_end: string;
+  new_start: string;
+  new_end: string;
+  shift_days: number;
+}
+
+interface PhaseShiftOption {
+  option_id: string;
+  label: string;
+  description: string;
+  new_start: string;
+  new_end: string;
+  shift_days: number;
+  phases: PhaseShiftPhase[];
+  estimated_conflict_reduction: number;
+}
+
+interface OptimizeResult {
+  project_id: number;
+  project_name: string;
+  current: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  person_replace_options: PersonReplaceOption[];
+  phase_shift_options: PhaseShiftOption[];
+  best_combo: {
+    label: string;
+    description: string;
+    replace: PersonReplaceOption | null;
+    shift: PhaseShiftOption | null;
+    expected_danger: number;
+    expected_warning: number;
+  };
+  phases: { phase_id: number; phase_name: string; start_date: string; end_date: string; sort_order: number }[];
+}
+
+// simulate-v2 결과 타입
+interface SimulateV2Result {
+  project_id: number;
+  original: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  simulated: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  delta: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  replacement_summary: { old_key: string; old_name: string; old_conflict_days: number; new_person_id: number | null; new_name: string; new_is_chief: boolean; new_grade: string }[];
+  shift_summary: { phase_id: number; phase_name: string; orig_start: string; orig_end: string; new_start: string; new_end: string; shift_days: number }[];
+  suggestions: string[];
+  risks: RiskDetailItem[];
+  people: PersonSchedule[];
 }
 
 // ── 리스크 설정 ────────────────────────────────────────────────────────────────
@@ -541,86 +622,125 @@ function SchedulePanel({ projectId, projectName, onBack }: {
   );
 }
 
-// ── 시뮬레이션 패널 ───────────────────────────────────────────────────────────
-function SimulationPanel({ projectId }: { projectId: number }) {
-  const [scheduleData, setScheduleData] = useState<ScheduleDetail | null>(null);
-  const [loadingSchedule, setLoadingSchedule] = useState(true);
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [simResult, setSimResult] = useState<SimulateResult | null>(null);
+// ── 리스크 수치 비교 테이블 (공통) ───────────────────────────────────────────
+function RiskCompareTable({
+  original,
+  simulated,
+  delta,
+  loading,
+}: {
+  original: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  simulated: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  delta: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  loading?: boolean;
+}) {
+  function deltaColor(val: number) {
+    if (val > 0) return 'text-emerald-600 font-bold';
+    if (val < 0) return 'text-red-500 font-bold';
+    return 'text-gray-400';
+  }
+  function deltaLabel(val: number) {
+    if (val > 0) return `▼ ${val}`;
+    if (val < 0) return `▲ ${Math.abs(val)}`;
+    return '–';
+  }
+
+  const rows = [
+    { label: '위험 건수',  o: original.danger,          s: simulated.danger,          d: delta.danger,          unit: '' },
+    { label: '주의 건수',  o: original.warning,         s: simulated.warning,         d: delta.warning,         unit: '' },
+    { label: '중복 인력',  o: original.conflict_people, s: simulated.conflict_people, d: delta.conflict_people, unit: '명' },
+    { label: '중복 일수',  o: original.overlap_days,    s: simulated.overlap_days,    d: delta.overlap_days,    unit: '일' },
+    { label: '중복 공수',  o: original.overlap_md,      s: simulated.overlap_md,      d: delta.overlap_md,      unit: 'MD' },
+  ];
+
+  return (
+    <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-600">리스크 수치 비교</p>
+        {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-gray-100 text-gray-400">
+            <th className="text-left px-3 py-1.5 font-medium">항목</th>
+            <th className="text-center px-3 py-1.5 font-medium">현재</th>
+            <th className="text-center px-3 py-1.5 font-medium">시뮬레이션</th>
+            <th className="text-center px-3 py-1.5 font-medium">변화</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.label} className="border-b border-gray-50 hover:bg-gray-50/50">
+              <td className="px-3 py-1.5 text-gray-600">{row.label}</td>
+              <td className="px-3 py-1.5 text-center font-semibold text-gray-700">
+                {row.o}{row.unit}
+              </td>
+              <td className={`px-3 py-1.5 text-center font-semibold ${row.d > 0 ? 'text-emerald-600' : row.d < 0 ? 'text-red-500' : 'text-blue-600'}`}>
+                {row.s}{row.unit}
+              </td>
+              <td className={`px-3 py-1.5 text-center ${deltaColor(row.d)}`}>
+                {deltaLabel(row.d)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── 잔여 리스크 목록 ─────────────────────────────────────────────────────────
+function RemainingRisks({ risks }: { risks: RiskDetailItem[] }) {
+  if (risks.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-6 text-emerald-600 gap-2">
+        <CheckCircle2 className="h-7 w-7" />
+        <p className="text-xs font-semibold">모든 리스크 해소!</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-semibold text-gray-500">잔여 리스크 ({risks.length}건)</p>
+      {risks.map((risk, i) => {
+        const sev = SEVERITY_CONFIG[risk.severity] ?? SEVERITY_CONFIG.info;
+        return (
+          <div key={i} className={`rounded-lg border ${sev.border} ${sev.bg} px-3 py-2 flex items-center gap-2`}>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${sev.badge}`}>{sev.label}</span>
+            <span className="text-xs text-gray-700">{risk.title}</span>
+            <span className="text-xs text-gray-400 ml-auto">{risk.count}건</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── 텍스트 출력 패널 ─────────────────────────────────────────────────────────
+function TextOutputPanel({
+  projectId,
+  excludedPersonKeys,
+}: {
+  projectId: number;
+  excludedPersonKeys?: string[];
+}) {
   const [textOutput, setTextOutput] = useState<TextOutputResult | null>(null);
-  const [simLoading, setSimLoading] = useState(false);
-  const [textLoading, setTextLoading] = useState(false);
-  const [showOnlyConflict, setShowOnlyConflict] = useState(true);
-  const [activeResultTab, setActiveResultTab] = useState<'effect' | 'text'>('effect');
+  const [loading, setLoading] = useState(false);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 초기 데이터 로드
-  const loadSchedule = useCallback(async () => {
-    setLoadingSchedule(true);
-    try {
-      const res = await axios.get(`/api/v1/proposal-risk/${projectId}/schedule`, {
-        headers: getAuthHeaders(),
-      });
-      setScheduleData(res.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingSchedule(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => { loadSchedule(); }, [loadSchedule]);
-
-  // 체크박스 변경 → 자동 시뮬레이션 (디바운스 300ms)
-  const handleCheck = useCallback((key: string, checked: boolean) => {
-    setSelectedKeys(prev => {
-      const next = new Set(prev);
-      checked ? next.add(key) : next.delete(key);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      runSimulate(Array.from(selectedKeys));
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [selectedKeys, projectId]);
-
-  const runSimulate = async (keys: string[]) => {
-    setSimLoading(true);
-    try {
-      const res = await axios.post(
-        `/api/v1/proposal-risk/${projectId}/simulate`,
-        { excluded_person_keys: keys },
-        { headers: getAuthHeaders() }
-      );
-      setSimResult(res.data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSimLoading(false);
-    }
-  };
 
   const runTextOutput = async () => {
-    setTextLoading(true);
+    setLoading(true);
     try {
       const res = await axios.post(
         `/api/v1/proposal-risk/${projectId}/text-output`,
-        { excluded_person_keys: Array.from(selectedKeys) },
+        { excluded_person_keys: excludedPersonKeys ?? [] },
         { headers: getAuthHeaders() }
       );
       setTextOutput(res.data);
-      setActiveResultTab('text');
     } catch (e) {
       console.error(e);
     } finally {
-      setTextLoading(false);
+      setLoading(false);
     }
   };
 
@@ -634,401 +754,732 @@ function SimulationPanel({ projectId }: { projectId: number }) {
 
   const handleCopyAll = async () => {
     if (!textOutput) return;
-    const all = textOutput.sections
-      .map(s => `[${s.label}]\n${s.content}`)
-      .join('\n\n');
+    const all = textOutput.sections.map(s => `[${s.label}]\n${s.content}`).join('\n\n');
     await handleCopy('__all__', all);
   };
 
-  const people = scheduleData?.people ?? [];
-  const conflictPeople = people.filter(p => p.has_conflict);
-  const visiblePeople = showOnlyConflict ? conflictPeople : people;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-500">
+          {excludedPersonKeys && excludedPersonKeys.length > 0
+            ? <span className="text-blue-600 font-medium">{excludedPersonKeys.length}명 제외 기준으로 출력</span>
+            : '현재 배정 인력 기준 출력'}
+        </p>
+        <Button size="sm" onClick={runTextOutput} disabled={loading}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+          텍스트 생성
+        </Button>
+      </div>
 
-  // 시뮬레이션 효과 계산
-  const orig = simResult?.original;
-  const sim  = simResult?.simulated;
-  const delta = simResult?.delta;
+      {textOutput && (
+        <>
+          <div className="flex justify-end">
+            <button
+              onClick={handleCopyAll}
+              className={`text-xs px-2.5 py-1 rounded border transition-all flex items-center gap-1 ${
+                copiedSection === '__all__'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+              }`}
+            >
+              <Copy className="h-3 w-3" />
+              {copiedSection === '__all__' ? '복사됨!' : '전체 복사'}
+            </button>
+          </div>
+          {textOutput.sections.map((section, idx) => (
+            <div key={idx} className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-700">
+                    {section.label === '감리 일정' ? '📅' : section.label === '감리원' ? '👤' : '🔧'} {section.label}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{section.format}</p>
+                </div>
+                <button
+                  onClick={() => handleCopy(section.label, section.content)}
+                  className={`text-[10px] px-2 py-1 rounded border transition-all flex items-center gap-1 ${
+                    copiedSection === section.label
+                      ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  <Copy className="h-3 w-3" />
+                  {copiedSection === section.label ? '복사됨!' : '복사'}
+                </button>
+              </div>
+              <div className="p-3">
+                {section.content ? (
+                  <pre className="text-[11px] font-mono text-gray-700 whitespace-pre-wrap leading-relaxed">
+                    {section.content}
+                  </pre>
+                ) : (
+                  <p className="text-[10px] text-gray-300 italic">
+                    {section.label.includes('전문가') ? '해당 분야 배정 인력 없음' : '내용 없음'}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
 
-  // 위험 레벨 색상
-  function deltaColor(val: number) {
-    if (val > 0) return 'text-emerald-600';
-    if (val < 0) return 'text-red-600';
-    return 'text-gray-400';
-  }
-  function deltaLabel(val: number) {
-    if (val > 0) return `▼ ${val}`;
-    if (val < 0) return `▲ ${Math.abs(val)}`;
-    return '-';
-  }
-
-  if (loadingSchedule) return (
-    <div className="flex items-center justify-center py-20 text-gray-400">
-      <Loader2 className="h-6 w-6 animate-spin mr-2" />인력 데이터 로드 중...
+      {!textOutput && !loading && (
+        <div className="text-center py-8 text-gray-300">
+          <FileText className="h-8 w-8 mx-auto mb-2" />
+          <p className="text-xs text-gray-400">[텍스트 생성] 버튼을 눌러 현재 배정 인력 기준 텍스트를 출력하세요</p>
+        </div>
+      )}
     </div>
   );
+}
 
+// ── 시뮬레이션 패널 (V2: 인력교체 + 일정이동 + 최적화 추천) ───────────────────
+function SimulationPanel({ projectId }: { projectId: number }) {
+  const [activeTab, setActiveTab] = useState<'optimize' | 'custom' | 'text'>('optimize');
+
+  // ── 최적화 추천 상태 ─────────────────────────────────────────────────────────
+  const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
+  const [optimizeLoading, setOptimizeLoading] = useState(false);
+
+  // ── 직접 시뮬레이션 상태 ─────────────────────────────────────────────────────
+  // 인력 교체: {old_person_key → new_person_id | null}
+  const [personReplacements, setPersonReplacements] = useState<Record<string, number | null>>({});
+  // 일정 이동: {phase_id → {start_date, end_date}}
+  const [phaseShifts, setPhaseShifts] = useState<Record<string, { start_date: string; end_date: string }>>({});
+  const [simV2Result, setSimV2Result] = useState<SimulateV2Result | null>(null);
+  const [simV2Loading, setSimV2Loading] = useState(false);
+
+  // ── 스케줄/인력 데이터 ────────────────────────────────────────────────────────
+  const [scheduleData, setScheduleData] = useState<ScheduleDetail | null>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
+
+  // ── 초기 로드 ────────────────────────────────────────────────────────────────
+  const loadSchedule = useCallback(async () => {
+    setScheduleLoading(true);
+    try {
+      const res = await axios.get(`/api/v1/proposal-risk/${projectId}/schedule`, { headers: getAuthHeaders() });
+      setScheduleData(res.data);
+    } catch (e) { console.error(e); }
+    finally { setScheduleLoading(false); }
+  }, [projectId]);
+
+  const loadOptimize = useCallback(async () => {
+    setOptimizeLoading(true);
+    try {
+      const res = await axios.post(`/api/v1/proposal-risk/${projectId}/optimize`, {}, { headers: getAuthHeaders() });
+      setOptimizeResult(res.data);
+    } catch (e) { console.error(e); }
+    finally { setOptimizeLoading(false); }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadSchedule();
+    loadOptimize();
+  }, [loadSchedule, loadOptimize]);
+
+  // ── 직접 시뮬레이션 실행 ─────────────────────────────────────────────────────
+  const runSimulateV2 = useCallback(async () => {
+    setSimV2Loading(true);
+    try {
+      const res = await axios.post(
+        `/api/v1/proposal-risk/${projectId}/simulate-v2`,
+        { person_replacements: personReplacements, phase_shifts: phaseShifts },
+        { headers: getAuthHeaders() }
+      );
+      setSimV2Result(res.data);
+    } catch (e) { console.error(e); }
+    finally { setSimV2Loading(false); }
+  }, [projectId, personReplacements, phaseShifts]);
+
+  // ── 최적 조합 즉시 적용 ──────────────────────────────────────────────────────
+  const applyBestCombo = useCallback(() => {
+    if (!optimizeResult?.best_combo) return;
+    const combo = optimizeResult.best_combo;
+    const newReplacements: Record<string, number | null> = {};
+    const newShifts: Record<string, { start_date: string; end_date: string }> = {};
+
+    if (combo.replace) {
+      // 대체 후보 중 첫 번째 가용 인력으로 교체
+      const firstAvail = combo.replace.alternates.find(a => a.is_available);
+      newReplacements[combo.replace.person_key] = firstAvail?.person_id ?? null;
+    }
+    if (combo.shift) {
+      combo.shift.phases.forEach(ph => {
+        newShifts[String(ph.phase_id)] = { start_date: ph.new_start, end_date: ph.new_end };
+      });
+    }
+    setPersonReplacements(newReplacements);
+    setPhaseShifts(newShifts);
+    setActiveTab('custom');
+  }, [optimizeResult]);
+
+  const resetCustom = () => {
+    setPersonReplacements({});
+    setPhaseShifts({});
+    setSimV2Result(null);
+  };
+
+  const conflictPeople = scheduleData?.people.filter(p => p.has_conflict) ?? [];
+  const phases = optimizeResult?.phases ?? [];
+
+  // ── 탭 헤더 ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       {/* 안내 배너 */}
-      <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 flex items-start gap-3">
-        <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
-        <div className="text-xs text-blue-700 space-y-0.5">
-          <p className="font-semibold">리스크 감소 시뮬레이션</p>
-          <p>중복 인력 옆 체크박스를 선택하면 해당 인력을 제외했을 때의 리스크 변화를 실시간으로 계산합니다.</p>
-          <p className="text-blue-500">※ DB에 저장되지 않으며 시뮬레이션 결과만 표시됩니다.</p>
+      <div className="rounded-xl bg-violet-50 border border-violet-200 px-4 py-3 flex items-start gap-3">
+        <Zap className="h-4 w-4 text-violet-500 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-violet-700 space-y-0.5">
+          <p className="font-semibold">인력·일정 최적화 시뮬레이션</p>
+          <p>AI가 추천하는 최적 인력 교체 및 일정 이동 조합으로 리스크를 최소화할 수 있습니다.</p>
+          <p className="text-violet-500">※ DB에 저장되지 않으며 시뮬레이션 결과만 표시됩니다.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* ── 좌측: 인력 체크박스 테이블 ── */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-gray-600">
-              인력 선택
-              {selectedKeys.size > 0 && (
-                <span className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">
-                  {selectedKeys.size}명 제외
-                </span>
-              )}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowOnlyConflict(v => !v)}
-                className={`text-xs px-2 py-1 rounded-full border transition-all ${
-                  showOnlyConflict
-                    ? 'bg-red-600 text-white border-red-600'
-                    : 'bg-white text-gray-600 border-gray-200'
-                }`}
-              >
-                중복만
-              </button>
-              {selectedKeys.size > 0 && (
-                <button
-                  onClick={() => setSelectedKeys(new Set())}
-                  className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-500 hover:border-red-300"
-                >
-                  초기화
-                </button>
-              )}
-            </div>
-          </div>
+      {/* 탭 */}
+      <div className="flex gap-0 border-b border-gray-200">
+        {([
+          { key: 'optimize', icon: Sparkles,       label: '최적화 추천' },
+          { key: 'custom',   icon: ArrowRightLeft,  label: '직접 시뮬레이션' },
+          { key: 'text',     icon: FileText,         label: '텍스트 출력' },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === t.key
+                ? 'border-violet-600 text-violet-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <t.icon className="h-3.5 w-3.5" />
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-          {people.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-xs">배정 인력 없음</div>
+      {/* ── 최적화 추천 탭 ─────────────────────────────────────────────────── */}
+      {activeTab === 'optimize' && (
+        <div className="space-y-4">
+          {optimizeLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+              <Loader2 className="h-7 w-7 animate-spin" />
+              <p className="text-sm">최적 조합 분석 중...</p>
+            </div>
+          ) : !optimizeResult ? (
+            <div className="text-center py-12 text-gray-400 text-sm">분석 결과가 없습니다.</div>
           ) : (
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
-                    <th className="px-2 py-2 text-center w-8">제외</th>
-                    <th className="text-left px-3 py-2 font-semibold">인력</th>
-                    <th className="text-left px-3 py-2 font-semibold">분야</th>
-                    <th className="text-center px-3 py-2 font-semibold">중복일</th>
-                    <th className="text-center px-3 py-2 font-semibold">MD</th>
-                    <th className="text-center px-3 py-2 font-semibold">건</th>
-                    <th className="w-6" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visiblePeople.map(person => (
-                    <PersonConflictRow
-                      key={person.person_key}
-                      person={person}
-                      checked={selectedKeys.has(person.person_key)}
-                      onCheck={handleCheck}
-                      simMode
-                    />
-                  ))}
-                  {visiblePeople.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="text-center py-8 text-emerald-500 text-xs">
-                        <CheckCircle2 className="h-6 w-6 mx-auto mb-1" />
-                        중복 인력 없음
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* ── 우측: 시뮬레이션 결과 ── */}
-        <div className="space-y-3">
-          {/* 액션 버튼 */}
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => runSimulate(Array.from(selectedKeys))}
-              disabled={simLoading}
-              className="flex-1"
-            >
-              {simLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
-              리스크 재계산
-            </Button>
-            <Button
-              size="sm"
-              onClick={runTextOutput}
-              disabled={textLoading}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {textLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
-              텍스트 출력
-            </Button>
-          </div>
-
-          {/* 결과 탭 */}
-          {(simResult || textOutput) && (
-            <div className="flex gap-1 border-b border-gray-200">
-              <button
-                onClick={() => setActiveResultTab('effect')}
-                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                  activeResultTab === 'effect'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📊 효과 분석
-              </button>
-              <button
-                onClick={() => setActiveResultTab('text')}
-                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                  activeResultTab === 'text'
-                    ? 'border-emerald-600 text-emerald-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📝 텍스트 출력
-                {textOutput && <span className="ml-1 text-[10px] text-emerald-500">●</span>}
-              </button>
-            </div>
-          )}
-
-          {/* 효과 분석 탭 */}
-          {activeResultTab === 'effect' && simResult && (
-            <div className="space-y-3">
-              {simLoading && (
-                <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 rounded-lg px-3 py-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />재계산 중...
-                </div>
-              )}
-
-              {/* 수치 비교 */}
-              <div className="rounded-xl border border-gray-200 overflow-hidden">
-                <div className="bg-gray-50 border-b border-gray-200 px-3 py-2">
-                  <p className="text-xs font-semibold text-gray-600">리스크 수치 비교</p>
-                </div>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-100 text-gray-400">
-                      <th className="text-left px-3 py-1.5 font-medium">항목</th>
-                      <th className="text-center px-3 py-1.5 font-medium">현재</th>
-                      <th className="text-center px-3 py-1.5 font-medium">시뮬레이션</th>
-                      <th className="text-center px-3 py-1.5 font-medium">변화</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { label: '위험 건수', o: orig?.danger, s: sim?.danger, d: delta?.danger },
-                      { label: '주의 건수', o: orig?.warning, s: sim?.warning, d: delta?.warning },
-                      { label: '중복 인력', o: orig?.conflict_people, s: sim?.conflict_people, d: delta?.conflict_people },
-                      { label: '중복 일수', o: orig?.overlap_days, s: sim?.overlap_days, d: delta?.overlap_days },
-                      { label: '중복 공수', o: orig?.overlap_md, s: sim?.overlap_md, d: delta?.overlap_md, unit: 'MD' },
-                    ].map(row => (
-                      <tr key={row.label} className="border-b border-gray-50 hover:bg-gray-50/50">
-                        <td className="px-3 py-1.5 text-gray-600">{row.label}</td>
-                        <td className="px-3 py-1.5 text-center font-semibold text-gray-700">
-                          {row.o ?? '-'}{row.unit ?? ''}
-                        </td>
-                        <td className="px-3 py-1.5 text-center font-semibold text-blue-600">
-                          {row.s ?? '-'}{row.unit ?? ''}
-                        </td>
-                        <td className={`px-3 py-1.5 text-center font-bold ${deltaColor(row.d ?? 0)}`}>
-                          {row.d !== undefined ? deltaLabel(row.d) : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <>
+              {/* 현재 리스크 요약 */}
+              <div className="grid grid-cols-5 gap-2">
+                {[
+                  { label: '위험', val: optimizeResult.current.danger, cls: 'text-red-600' },
+                  { label: '주의', val: optimizeResult.current.warning, cls: 'text-amber-500' },
+                  { label: '중복 인력', val: `${optimizeResult.current.conflict_people}명`, cls: 'text-orange-500' },
+                  { label: '중복 일수', val: `${optimizeResult.current.overlap_days}일`, cls: 'text-slate-600' },
+                  { label: '중복 MD', val: `${optimizeResult.current.overlap_md}MD`, cls: 'text-slate-600' },
+                ].map(item => (
+                  <div key={item.label} className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-center">
+                    <p className="text-[10px] text-gray-400">{item.label}</p>
+                    <p className={`text-sm font-bold mt-0.5 ${item.cls}`}>{item.val}</p>
+                  </div>
+                ))}
               </div>
 
-              {/* 제안 사항 */}
-              {simResult.suggestions.length > 0 && (
-                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-2">
-                  <p className="text-xs font-semibold text-emerald-700">💡 시뮬레이션 기반 제안</p>
-                  <ul className="space-y-1">
-                    {simResult.suggestions.map((s, i) => (
-                      <li key={i} className="text-xs text-emerald-700 flex gap-1.5">
-                        <span className="text-emerald-400 flex-shrink-0">→</span>{s}
-                      </li>
-                    ))}
-                  </ul>
+              {/* 최적 조합 추천 카드 */}
+              {optimizeResult.best_combo?.label && (
+                <div className="rounded-xl border-2 border-violet-300 bg-violet-50 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-violet-600" />
+                    <p className="text-sm font-bold text-violet-700">{optimizeResult.best_combo.label}</p>
+                  </div>
+                  <p className="text-xs text-violet-600">{optimizeResult.best_combo.description}</p>
+
+                  <div className="flex gap-4 text-xs">
+                    <span className="text-gray-500">적용 후 예상:</span>
+                    {optimizeResult.best_combo.expected_danger < optimizeResult.current.danger && (
+                      <span className="text-emerald-600 font-semibold">
+                        위험 {optimizeResult.current.danger} → {optimizeResult.best_combo.expected_danger}
+                      </span>
+                    )}
+                    {optimizeResult.best_combo.expected_warning < optimizeResult.current.warning && (
+                      <span className="text-emerald-600 font-semibold">
+                        주의 {optimizeResult.current.warning} → {optimizeResult.best_combo.expected_warning}
+                      </span>
+                    )}
+                    {optimizeResult.best_combo.expected_danger === 0 && optimizeResult.best_combo.expected_warning === 0 && (
+                      <span className="text-emerald-600 font-bold">✅ 모든 리스크 해소 예상</span>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    onClick={applyBestCombo}
+                    className="bg-violet-600 hover:bg-violet-700 text-white w-full"
+                  >
+                    <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5" />
+                    이 조합으로 직접 시뮬레이션 해보기
+                  </Button>
                 </div>
               )}
 
-              {/* 제외 인력별 상세 */}
-              {simResult.excluded_detail.length > 0 && (
+              {/* 인력 교체 추천 목록 */}
+              {optimizeResult.person_replace_options.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                    <UserMinus className="h-3.5 w-3.5 text-blue-500" />
-                    제외 인력별 효과
-                  </p>
-                  {simResult.excluded_detail.map(ed => (
-                    <div key={ed.person_key} className="rounded-xl border border-blue-200 bg-blue-50/30 p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        {ed.is_chief && <Crown className="h-3.5 w-3.5 text-purple-500" />}
-                        <span className="text-xs font-semibold text-slate-700">{ed.person_name}</span>
-                        {ed.grade && <span className="text-[10px] text-gray-400">{ed.grade}</span>}
-                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
-                          {ed.my_field || ed.my_category}
-                        </span>
+                  <div className="flex items-center gap-2">
+                    <ArrowRightLeft className="h-3.5 w-3.5 text-blue-500" />
+                    <p className="text-xs font-semibold text-gray-700">인력 교체 추천</p>
+                    <span className="text-[10px] text-gray-400">효과 큰 순</span>
+                  </div>
+                  {optimizeResult.person_replace_options.map((opt, idx) => (
+                    <div key={opt.person_key}
+                      className={`rounded-xl border p-3 space-y-2 ${idx === 0 ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white font-bold">1순위</span>}
+                        {opt.is_chief && <Crown className="h-3.5 w-3.5 text-purple-500" />}
+                        <span className="text-xs font-semibold text-slate-700">{opt.person_name}</span>
+                        {opt.grade && <span className="text-[10px] text-gray-400">{opt.grade}</span>}
+                        {opt.my_field && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{opt.my_field}</span>
+                        )}
+                        <span className="ml-auto text-xs text-red-600 font-bold">{opt.conflict_days}일 중복</span>
                       </div>
-                      <div className="flex gap-3 text-[10px]">
-                        <span className="text-emerald-600 font-semibold">↓ {ed.resolved_days}일 해소</span>
-                        <span className="text-orange-600">({ed.resolved_md}MD)</span>
-                        <span className="text-gray-400">{ed.conflict_count}건 충돌 제거</span>
+
+                      {/* 교체 시 기대 효과 */}
+                      <div className="flex gap-3 flex-wrap">
+                        {opt.expected_danger_delta > 0 && (
+                          <span className="text-[10px] text-emerald-600 font-semibold">
+                            <TrendingDown className="h-3 w-3 inline mr-0.5" />위험 -{opt.expected_danger_delta}
+                          </span>
+                        )}
+                        {opt.expected_warning_delta > 0 && (
+                          <span className="text-[10px] text-emerald-600 font-semibold">
+                            주의 -{opt.expected_warning_delta}
+                          </span>
+                        )}
+                        {opt.expected_overlap_delta > 0 && (
+                          <span className="text-[10px] text-blue-600">
+                            중복 {opt.expected_overlap_delta}일 감소
+                          </span>
+                        )}
+                        {opt.expected_danger_delta === 0 && opt.expected_warning_delta === 0 && (
+                          <span className="text-[10px] text-gray-400">리스크 레벨 변화 없음 (중복일 감소)</span>
+                        )}
                       </div>
-                      {/* 충돌 사업 요약 */}
-                      {ed.conflicts_summary.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {ed.conflicts_summary.map((c, i) => (
-                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                              c.type_label === 'A'
-                                ? 'bg-blue-50 border-blue-200 text-blue-600'
-                                : 'bg-orange-50 border-orange-200 text-orange-600'
-                            }`}>
-                              {c.type_label}: {c.other_project_name.slice(0, 10)} ({c.overlap_days}일)
-                            </span>
-                          ))}
-                        </div>
-                      )}
+
                       {/* 대체 후보 */}
-                      {ed.replacement_candidates.length > 0 && (
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-semibold text-gray-500">대체 후보</p>
-                          {ed.replacement_candidates.map(c => (
-                            <div key={c.person_id} className={`flex items-center gap-2 px-2 py-1 rounded ${
-                              c.is_available ? 'bg-emerald-50 border border-emerald-200' : 'bg-gray-50 border border-gray-200'
+                      {opt.alternates.length > 0 && (
+                        <div className="space-y-1 pt-1 border-t border-gray-100">
+                          <p className="text-[10px] text-gray-500 font-semibold">대체 후보</p>
+                          {opt.alternates.map(alt => (
+                            <div key={alt.person_id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${
+                              alt.is_available ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'
                             }`}>
-                              <span className={`text-[10px] font-semibold ${c.is_available ? 'text-emerald-700' : 'text-gray-500'}`}>
-                                {c.person_name}
+                              {alt.is_chief && <Crown className="h-3 w-3 text-purple-500" />}
+                              <span className={`text-[10px] font-semibold ${alt.is_available ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                {alt.person_name}
                               </span>
-                              {c.grade && <span className="text-[10px] text-gray-400">{c.grade}</span>}
-                              {c.company && <span className="text-[10px] text-gray-300">· {c.company}</span>}
-                              <span className={`ml-auto text-[10px] font-bold ${c.is_available ? 'text-emerald-600' : 'text-gray-400'}`}>
-                                {c.is_available ? '✓ 투입 가능' : '일정 중복'}
+                              {alt.grade && <span className="text-[10px] text-gray-400">{alt.grade}</span>}
+                              {alt.company && <span className="text-[10px] text-gray-300 truncate">· {alt.company}</span>}
+                              <span className={`ml-auto text-[10px] font-bold flex-shrink-0 ${alt.is_available ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                {alt.is_available ? '✓ 즉시 투입 가능' : `${alt.conflict_days}일 중복`}
                               </span>
                             </div>
                           ))}
                         </div>
                       )}
+                      {opt.alternates.length === 0 && (
+                        <p className="text-[10px] text-gray-400 italic">동일 분야 대체 인력 없음</p>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* 시뮬레이션 후 잔여 리스크 */}
-              {simResult.risks.length > 0 && (
+              {optimizeResult.person_replace_options.length === 0 && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-500 mx-auto mb-1" />
+                  <p className="text-xs text-emerald-700 font-semibold">인력 중복 없음</p>
+                </div>
+              )}
+
+              {/* 일정 이동 추천 */}
+              {optimizeResult.phase_shift_options.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-gray-500">
-                    잔여 리스크 ({simResult.risks.length}건)
-                  </p>
-                  {simResult.risks.map((risk, i) => {
-                    const sev = SEVERITY_CONFIG[risk.severity] ?? SEVERITY_CONFIG.info;
-                    const cfg = RISK_CONFIG[risk.type];
-                    return (
-                      <div key={i} className={`rounded-lg border ${sev.border} ${sev.bg} px-3 py-2 flex items-center gap-2`}>
-                        <span className={`text-[10px] font-bold ${sev.badge} px-1.5 py-0.5 rounded-full`}>{sev.label}</span>
-                        <span className="text-xs text-gray-700">{risk.title}</span>
-                        <span className="text-xs text-gray-400 ml-auto">{risk.count}건</span>
+                  <div className="flex items-center gap-2">
+                    <CalendarRange className="h-3.5 w-3.5 text-orange-500" />
+                    <p className="text-xs font-semibold text-gray-700">일정 이동 추천</p>
+                  </div>
+                  {optimizeResult.phase_shift_options.map((opt, idx) => (
+                    <div key={opt.option_id}
+                      className={`rounded-xl border p-3 space-y-2 ${idx === 0 ? 'border-orange-300 bg-orange-50/40' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex items-center gap-2">
+                        {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500 text-white font-bold">1순위</span>}
+                        <p className="text-xs font-semibold text-slate-700">{opt.label}</p>
+                        <span className="ml-auto text-[10px] text-emerald-600">약 {opt.estimated_conflict_reduction}명 중복 해소</span>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <p className="text-[10px] text-gray-500">{opt.description}</p>
 
-              {simResult.risks.length === 0 && selectedKeys.size > 0 && (
-                <div className="flex flex-col items-center justify-center py-8 text-emerald-600 gap-2">
-                  <CheckCircle2 className="h-8 w-8" />
-                  <p className="text-sm font-semibold">모든 리스크 해소</p>
-                  <p className="text-xs text-gray-400">선택 인력 제외 시 리스크가 없어집니다</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 텍스트 출력 탭 */}
-          {activeResultTab === 'text' && textOutput && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-gray-600">
-                  {textOutput.excluded_count > 0 && (
-                    <span className="text-blue-600">{textOutput.excluded_count}명 제외 후 </span>
-                  )}
-                  텍스트 출력
-                </p>
-                <button
-                  onClick={handleCopyAll}
-                  className={`text-xs px-2.5 py-1 rounded border transition-all flex items-center gap-1 ${
-                    copiedSection === '__all__'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
-                  }`}
-                >
-                  <Copy className="h-3 w-3" />
-                  {copiedSection === '__all__' ? '복사됨!' : '전체 복사'}
-                </button>
-              </div>
-
-              {textOutput.sections.map((section, idx) => (
-                <div key={idx} className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold text-gray-700">
-                        {section.label === '감리 일정' ? '📅' :
-                         section.label === '감리원' ? '👤' : '🔧'} {section.label}
-                      </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{section.format}</p>
+                      {/* 단계별 변경 내용 */}
+                      <div className="space-y-1 pt-1 border-t border-gray-100">
+                        {opt.phases.slice(0, 3).map(ph => (
+                          <div key={ph.phase_id} className="flex items-center gap-2 text-[10px] text-gray-600">
+                            <span className="font-medium truncate max-w-[80px]">{ph.phase_name}</span>
+                            <span className="text-gray-400">{ph.orig_start}</span>
+                            <span className="text-gray-300">→</span>
+                            <span className="text-orange-600 font-semibold">{ph.new_start}</span>
+                            <span className="ml-auto text-orange-500">+{ph.shift_days}일</span>
+                          </div>
+                        ))}
+                        {opt.phases.length > 3 && (
+                          <p className="text-[10px] text-gray-400">외 {opt.phases.length - 3}개 단계 동일 이동</p>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleCopy(section.label, section.content)}
-                      className={`text-[10px] px-2 py-1 rounded border transition-all flex items-center gap-1 ${
-                        copiedSection === section.label
-                          ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                          : 'bg-white text-gray-500 border-gray-200 hover:border-blue-300'
-                      }`}
-                    >
-                      <Copy className="h-3 w-3" />
-                      {copiedSection === section.label ? '복사됨!' : '복사'}
-                    </button>
-                  </div>
-                  <div className="p-3">
-                    {section.content ? (
-                      <pre className="text-[11px] font-mono text-gray-700 whitespace-pre-wrap leading-relaxed">
-                        {section.content}
-                      </pre>
-                    ) : (
-                      <p className="text-[10px] text-gray-300 italic">
-                        {section.label.includes('전문가') ? '해당 분야 배정 인력 없음' : '내용 없음'}
-                      </p>
-                    )}
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          {/* 초기 상태 */}
-          {!simResult && !textOutput && (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-300 gap-3">
-              <Play className="h-10 w-10" />
-              <p className="text-sm font-medium text-gray-400">인력을 선택하면 자동으로 시뮬레이션됩니다</p>
-              <p className="text-xs text-gray-300">또는 [텍스트 출력] 버튼을 클릭하세요</p>
-            </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadOptimize}
+                disabled={optimizeLoading}
+                className="w-full"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                추천 새로고침
+              </Button>
+            </>
           )}
         </div>
-      </div>
+      )}
+
+      {/* ── 직접 시뮬레이션 탭 ────────────────────────────────────────────── */}
+      {activeTab === 'custom' && (
+        <div className="space-y-4">
+          {scheduleLoading ? (
+            <div className="flex items-center justify-center py-10 text-gray-400">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />데이터 로드 중...
+            </div>
+          ) : (
+            <>
+              {/* 설정 영역 */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+
+                {/* 좌측: 인력 교체 설정 */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ArrowRightLeft className="h-3.5 w-3.5 text-blue-500" />
+                    <p className="text-xs font-semibold text-gray-700">인력 교체 설정</p>
+                    <span className="text-[10px] text-gray-400">중복 인력 기준</span>
+                  </div>
+
+                  {conflictPeople.length === 0 ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-500 mx-auto mb-1" />
+                      <p className="text-xs text-emerald-700">중복 인력 없음</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {conflictPeople.map(person => {
+                        const currentReplace = personReplacements[person.person_key];
+                        const optInfo = optimizeResult?.person_replace_options.find(o => o.person_key === person.person_key);
+                        return (
+                          <div key={person.person_key}
+                            className={`rounded-xl border p-3 space-y-2 ${
+                              currentReplace !== undefined ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              {person.is_chief && <Crown className="h-3.5 w-3.5 text-purple-500" />}
+                              <span className="text-xs font-semibold text-slate-700">{person.person_name}</span>
+                              {person.grade && <span className="text-[10px] text-gray-400">{person.grade}</span>}
+                              <span className="ml-auto text-[10px] text-red-600 font-bold">{person.total_overlap_days}일 중복</span>
+                            </div>
+
+                            <div className="flex gap-1 flex-wrap">
+                              {/* 제외(교체 없음) */}
+                              <button
+                                onClick={() => {
+                                  if (personReplacements[person.person_key] === null) {
+                                    const r = { ...personReplacements };
+                                    delete r[person.person_key];
+                                    setPersonReplacements(r);
+                                  } else {
+                                    setPersonReplacements(prev => ({ ...prev, [person.person_key]: null }));
+                                  }
+                                }}
+                                className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                                  personReplacements[person.person_key] === null
+                                    ? 'bg-red-100 border-red-300 text-red-700 font-bold'
+                                    : 'bg-white border-gray-200 text-gray-500 hover:border-red-300'
+                                }`}
+                              >
+                                {personReplacements[person.person_key] === null ? '✓ ' : ''}제외(대체 없음)
+                              </button>
+
+                              {/* 대체 후보 버튼 */}
+                              {(optInfo?.alternates ?? []).map(alt => (
+                                <button
+                                  key={alt.person_id}
+                                  onClick={() => {
+                                    if (personReplacements[person.person_key] === alt.person_id) {
+                                      const r = { ...personReplacements };
+                                      delete r[person.person_key];
+                                      setPersonReplacements(r);
+                                    } else {
+                                      setPersonReplacements(prev => ({ ...prev, [person.person_key]: alt.person_id }));
+                                    }
+                                  }}
+                                  className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                                    personReplacements[person.person_key] === alt.person_id
+                                      ? 'bg-emerald-100 border-emerald-400 text-emerald-700 font-bold'
+                                      : alt.is_available
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:border-emerald-400'
+                                      : 'bg-gray-50 border-gray-200 text-gray-400 hover:border-gray-300'
+                                  }`}
+                                >
+                                  {personReplacements[person.person_key] === alt.person_id ? '✓ ' : ''}
+                                  {alt.person_name}
+                                  {alt.is_available ? '' : ` (${alt.conflict_days}일↑)`}
+                                </button>
+                              ))}
+                            </div>
+
+                            {currentReplace !== undefined && (
+                              <p className="text-[10px] text-blue-600 font-medium">
+                                {currentReplace === null
+                                  ? `→ ${person.person_name} 제외 (대체 없음)`
+                                  : `→ ${person.person_name}을 ID:${currentReplace}로 교체`
+                                }
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 우측: 일정 이동 설정 */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CalendarRange className="h-3.5 w-3.5 text-orange-500" />
+                    <p className="text-xs font-semibold text-gray-700">일정 이동 설정</p>
+                    <span className="text-[10px] text-gray-400">단계별 날짜 조정</span>
+                  </div>
+
+                  {/* 추천 일정 이동 빠른 적용 */}
+                  {optimizeResult?.phase_shift_options && optimizeResult.phase_shift_options.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] text-gray-500 font-medium">추천 일정 이동 빠른 적용</p>
+                      {optimizeResult.phase_shift_options.map(opt => (
+                        <button
+                          key={opt.option_id}
+                          onClick={() => {
+                            const newShifts: Record<string, { start_date: string; end_date: string }> = {};
+                            opt.phases.forEach(ph => {
+                              newShifts[String(ph.phase_id)] = { start_date: ph.new_start, end_date: ph.new_end };
+                            });
+                            setPhaseShifts(newShifts);
+                          }}
+                          className="w-full text-left text-[10px] px-2.5 py-1.5 rounded-lg border border-orange-200 bg-orange-50 text-orange-700 hover:border-orange-400 transition-all"
+                        >
+                          📅 {opt.label} 적용
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 단계별 날짜 직접 수정 */}
+                  <div className="space-y-2">
+                    {phases.length === 0 && (
+                      <p className="text-[10px] text-gray-400 text-center py-4">단계 정보 없음</p>
+                    )}
+                    {phases.map(ph => {
+                      const shifted = phaseShifts[String(ph.phase_id)];
+                      const curStart = shifted?.start_date ?? ph.start_date;
+                      const curEnd = shifted?.end_date ?? ph.end_date;
+                      const isChanged = !!shifted;
+                      return (
+                        <div key={ph.phase_id}
+                          className={`rounded-xl border p-2.5 space-y-1.5 ${isChanged ? 'border-orange-300 bg-orange-50/40' : 'border-gray-200'}`}>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] font-semibold text-gray-700 flex-1">{ph.phase_name}</p>
+                            {isChanged && (
+                              <button
+                                onClick={() => {
+                                  const s = { ...phaseShifts };
+                                  delete s[String(ph.phase_id)];
+                                  setPhaseShifts(s);
+                                }}
+                                className="text-[10px] text-gray-400 hover:text-red-500"
+                                title="원복"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                              <p className="text-[9px] text-gray-400 mb-0.5">시작일</p>
+                              <input
+                                type="date"
+                                value={curStart}
+                                onChange={e => setPhaseShifts(prev => ({
+                                  ...prev,
+                                  [String(ph.phase_id)]: { start_date: e.target.value, end_date: curEnd }
+                                }))}
+                                className={`w-full text-[10px] border rounded px-1.5 py-1 ${isChanged ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[9px] text-gray-400 mb-0.5">종료일</p>
+                              <input
+                                type="date"
+                                value={curEnd}
+                                onChange={e => setPhaseShifts(prev => ({
+                                  ...prev,
+                                  [String(ph.phase_id)]: { start_date: curStart, end_date: e.target.value }
+                                }))}
+                                className={`w-full text-[10px] border rounded px-1.5 py-1 ${isChanged ? 'border-orange-300 bg-orange-50' : 'border-gray-200'}`}
+                              />
+                            </div>
+                          </div>
+                          {isChanged && (
+                            <p className="text-[9px] text-orange-600">
+                              원래: {ph.start_date} ~ {ph.end_date}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 시뮬레이션 실행 버튼 */}
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <Button
+                  onClick={runSimulateV2}
+                  disabled={simV2Loading || (Object.keys(personReplacements).length === 0 && Object.keys(phaseShifts).length === 0)}
+                  className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+                >
+                  {simV2Loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
+                  시뮬레이션 실행
+                  {Object.keys(personReplacements).length + Object.keys(phaseShifts).length > 0 && (
+                    <span className="ml-1.5 text-[10px] bg-white/30 rounded-full px-1.5">
+                      {Object.keys(personReplacements).length > 0 && `인력 ${Object.keys(personReplacements).length}명`}
+                      {Object.keys(personReplacements).length > 0 && Object.keys(phaseShifts).length > 0 && ' · '}
+                      {Object.keys(phaseShifts).length > 0 && `일정 ${Object.keys(phaseShifts).length}건`}
+                    </span>
+                  )}
+                </Button>
+                {(Object.keys(personReplacements).length > 0 || Object.keys(phaseShifts).length > 0) && (
+                  <Button variant="outline" size="sm" onClick={resetCustom}>
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />초기화
+                  </Button>
+                )}
+              </div>
+
+              {/* 시뮬레이션 결과 */}
+              {simV2Result && (
+                <div className="space-y-4 pt-2 border-t border-gray-100">
+                  <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
+                    <TrendingDown className="h-3.5 w-3.5 text-violet-500" />
+                    시뮬레이션 결과
+                  </p>
+
+                  <RiskCompareTable
+                    original={simV2Result.original}
+                    simulated={simV2Result.simulated}
+                    delta={simV2Result.delta}
+                    loading={simV2Loading}
+                  />
+
+                  {/* 교체/이동 요약 */}
+                  {simV2Result.replacement_summary.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold text-gray-500">인력 교체 내역</p>
+                      {simV2Result.replacement_summary.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[10px] text-gray-600 bg-blue-50 rounded-lg px-3 py-1.5">
+                          <UserMinus className="h-3 w-3 text-red-400" />
+                          <span className="font-semibold text-red-600">{r.old_name}</span>
+                          <span className="text-gray-400">({r.old_conflict_days}일↓)</span>
+                          <ArrowRightLeft className="h-3 w-3 text-gray-400" />
+                          <span className={`font-semibold ${r.new_name !== '(제외만)' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                            {r.new_name}
+                          </span>
+                          {r.new_grade && <span className="text-gray-400">{r.new_grade}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {simV2Result.shift_summary.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold text-gray-500">일정 이동 내역</p>
+                      {simV2Result.shift_summary.map((s, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[10px] text-gray-600 bg-orange-50 rounded-lg px-3 py-1.5">
+                          <CalendarRange className="h-3 w-3 text-orange-400" />
+                          <span className="font-semibold">{s.phase_name}</span>
+                          <span className="text-gray-400">{s.orig_start}</span>
+                          <span>→</span>
+                          <span className="text-orange-600 font-semibold">{s.new_start}</span>
+                          <span className="ml-auto text-orange-500">+{s.shift_days}일</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 제안 메시지 */}
+                  {simV2Result.suggestions.length > 0 && (
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-emerald-700">💡 시뮬레이션 기반 제안</p>
+                      {simV2Result.suggestions.map((s, i) => (
+                        <p key={i} className="text-xs text-emerald-700 flex gap-1.5">
+                          <span className="text-emerald-400 flex-shrink-0">→</span>{s}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  <RemainingRisks risks={simV2Result.risks} />
+                </div>
+              )}
+
+              {/* 초기 상태 */}
+              {!simV2Result && Object.keys(personReplacements).length === 0 && Object.keys(phaseShifts).length === 0 && (
+                <div className="rounded-xl border border-violet-100 bg-violet-50/30 p-4 text-center space-y-2">
+                  <Info className="h-6 w-6 text-violet-400 mx-auto" />
+                  <p className="text-xs text-gray-500">
+                    위에서 인력 교체 또는 일정 이동을 설정하고<br />
+                    [시뮬레이션 실행]을 누르세요
+                  </p>
+                  {optimizeResult?.best_combo?.label && (
+                    <button
+                      onClick={applyBestCombo}
+                      className="text-xs text-violet-600 hover:text-violet-700 underline"
+                    >
+                      최적화 추천 조합 바로 적용 →
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── 텍스트 출력 탭 ────────────────────────────────────────────────── */}
+      {activeTab === 'text' && (
+        <TextOutputPanel
+          projectId={projectId}
+          excludedPersonKeys={Object.keys(personReplacements).filter(k => personReplacements[k] === null)}
+        />
+      )}
     </div>
   );
 }
