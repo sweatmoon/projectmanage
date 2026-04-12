@@ -2358,6 +2358,23 @@ async def simulate_risk_v2(
     replacements = body.person_replacements  # {old_key: new_person_id}
     excluded_old_keys = set(replacements.keys())
 
+    # 교체 대상 new_pid들 수집:
+    # new_pid가 본사업에 이미 직접 배정된 경우 그 배정도 제거해야 중복 계산 방지
+    # 예) 손정순→이동영, id:168→진기호 동시 교체 시
+    #     이동영이 본사업에 원래 배정된 경우 → 이동영 원본 배정 제거 필요
+    new_person_ids_as_replacements = {
+        new_pid for new_pid in replacements.values() if new_pid
+    }
+    # new_pid의 person_key 계산 (id:N 형식 또는 name 키)
+    excluded_new_keys: set = set()
+    for s in staffings:
+        if s.project_id != project_id:
+            continue
+        s_key, _, _, _ = _resolve_person_key(s, people_map)
+        pid = s.person_id
+        if pid and pid in new_person_ids_as_replacements:
+            excluded_new_keys.add(s_key)
+
     # 가상 staffing 생성: 교체 인력의 기존 배정 위치에 새 인력을 배치
     virtual_staffings = list(staffings)  # 원본 참조 (읽기 전용)
 
@@ -2402,7 +2419,9 @@ async def simulate_risk_v2(
             result.append(s)
         return result
 
-    virtual_staffings_filtered = _filter_excluded(virtual_staffings, excluded_old_keys, people_map, project_id)
+    # excluded_old_keys(교체 대상 원본) + excluded_new_keys(교체 인력의 기존 본사업 배정) 모두 제거
+    all_excluded_keys = excluded_old_keys | excluded_new_keys
+    virtual_staffings_filtered = _filter_excluded(virtual_staffings, all_excluded_keys, people_map, project_id)
     virtual_staffings_final = virtual_staffings_filtered + added_virtual
 
     # ── 시뮬레이션 리스크/스케줄 계산 ────────────────────────────────────────
