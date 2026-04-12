@@ -2390,7 +2390,36 @@ async def simulate_risk_v2(
     # old_key 인력을 제거하고, new_person_id 가 있으면 같은 위치에 새 인력을 넣은 것처럼 시뮬레이션
     # → old_key를 excluded_keys에 추가하고, new staffing 레코드를 가상으로 추가
 
-    replacements = body.person_replacements  # {old_key: new_person_id}
+    replacements_raw = body.person_replacements  # {old_key: new_person_id}
+
+    # ── 체인 압축: A→B, B→C → A→C / B는 중간 노드 제거 ──────────────────────
+    # 중간 노드 판단: new_pid 값들 → 그 id의 "id:N" key가 old_key에 있으면 중간
+    _raw_new_pids: set = {v for v in replacements_raw.values() if v}
+    def _is_mid(key: str) -> bool:
+        if key.startswith("id:"):
+            try: return int(key[3:]) in _raw_new_pids
+            except ValueError: pass
+        return False
+
+    def _resolve_final_pid(key: str, visited: set) -> Optional[int]:
+        if key in visited:
+            return None
+        visited.add(key)
+        pid = replacements_raw.get(key)
+        if pid is None:
+            return None
+        nk = f"id:{pid}"
+        if nk in replacements_raw:
+            return _resolve_final_pid(nk, visited)
+        return pid
+
+    # 체인 압축된 최종 교체 맵 {original_old_key: final_new_pid}
+    replacements: Dict[str, Optional[int]] = {}
+    for k in replacements_raw:
+        if _is_mid(k):
+            continue  # 중간 노드는 독립 교체로 처리하지 않음
+        replacements[k] = _resolve_final_pid(k, set())
+
     excluded_old_keys = set(replacements.keys())
 
     # 교체 대상 new_pid들 수집:
@@ -2486,39 +2515,69 @@ async def simulate_risk_v2(
     sim_days     = sum(p["total_overlap_days"] for p in sim_schedule)
     sim_md       = sum(p["total_overlap_md"]   for p in sim_schedule)
 
-    # ── 교체 인력 요약 ────────────────────────────────────────────────────────
+    # ── 교체 인력 요약 (체인 압축) ───────────────────────────────────────────
+    # A→B, B→C 같은 체인은 A→C 하나로 압축.
+    # "중간 노드"(다른 교체의 결과로 투입된 new_pid와 old_key가 일치하는 항목)는 제외.
     replacement_summary = []
-    # orig_schedule 조회용 맵 (person_key → person 정보)
     orig_schedule_map = {p["person_key"]: p for p in orig_schedule}
-    for old_key, new_pid in replacements.items():
-        old_person = orig_schedule_map.get(old_key)
-        new_person = people_map.get(new_pid) if new_pid else None
 
-        # old_name: orig_schedule에서 못 찾으면 old_key에서 person_id 추출해 people_map 조회
+    # new_pid 집합으로 사용되는 id들 → 그 id의 person_key를 중간 노드로 간주
+    new_pid_values: set = {v for v in replacements.values() if v}
+    # old_key가 "id:N" 형식이고 N이 new_pid_values에 있으면 중간 노드
+    def _is_intermediate(key: str) -> bool:
+        if key.startswith("id:"):
+            try:
+                return int(key[3:]) in new_pid_values
+            except ValueError:
+                pass
+        return False
+
+    # 체인 추적: old_key에서 출발해 최종 new_pid 반환 (순환 방지)
+    def _resolve_chain(key: str, visited: set) -> Optional[int]:
+        if key in visited:
+            return None
+        visited.add(key)
+        pid = replacements.get(key)
+        if pid is None:
+            return None
+        next_key = f"id:{pid}"
+        if next_key in replacements:
+            return _resolve_chain(next_key, visited)
+        return pid
+
+    for old_key in replacements:
+        # 중간 노드는 별도 줄로 표시하지 않음
+        if _is_intermediate(old_key):
+            continue
+
+        final_pid = _resolve_chain(old_key, set())
+        old_person = orig_schedule_map.get(old_key)
+        new_person = people_map.get(final_pid) if final_pid else None
+
+        # old_name
         if old_person:
             old_name = old_person["person_name"]
             old_conflict_days = old_person["total_overlap_days"]
         else:
-            # old_key 형식: "id:123" → people_map에서 이름 조회
-            old_name = old_key  # 기본값
+            old_name = old_key
             old_conflict_days = 0
             if old_key.startswith("id:"):
                 try:
-                    old_pid = int(old_key[3:])
-                    old_p = people_map.get(old_pid)
+                    old_pid_int = int(old_key[3:])
+                    old_p = people_map.get(old_pid_int)
                     if old_p:
                         old_name = old_p.person_name
                 except ValueError:
                     pass
 
         replacement_summary.append({
-            "old_key":        old_key,
-            "old_name":       old_name,
+            "old_key":           old_key,
+            "old_name":          old_name,
             "old_conflict_days": old_conflict_days,
-            "new_person_id":  new_pid,
-            "new_name":       new_person.person_name if new_person else "(제외만)",
-            "new_is_chief":   bool(new_person.is_chief) if new_person else False,
-            "new_grade":      new_person.grade or "" if new_person else "",
+            "new_person_id":     final_pid,
+            "new_name":          new_person.person_name if new_person else "(제외만)",
+            "new_is_chief":      bool(new_person.is_chief) if new_person else False,
+            "new_grade":         new_person.grade or "" if new_person else "",
         })
 
     # ── 일정 이동 요약 ────────────────────────────────────────────────────────

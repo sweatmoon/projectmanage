@@ -1250,18 +1250,58 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
               ) : simResult ? (
                 <div className="space-y-3">
                   <RiskCompareTable original={simResult.original} simulated={simResult.simulated} delta={simResult.delta} />
-                  {simResult.replacement_summary.length > 0 && (
-                    <div className="space-y-1">
-                      {simResult.replacement_summary.map((r, i) => (
-                        <div key={i} className="flex items-center gap-1.5 text-[10px] bg-blue-50 rounded-lg px-2 py-1.5">
-                          <ArrowRightLeft className="h-3 w-3 text-blue-400 flex-shrink-0" />
-                          <span className="text-red-600 font-semibold">{r.old_name}</span>
-                          <span className="text-gray-300">→</span>
-                          <span className="text-emerald-600 font-semibold">{r.new_name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    // 교체 요약: personReplacements 기반으로 직접 계산 (체인 압축)
+                    // A→B, B→C 같은 체인은 A→C로 합침
+                    // 1) newId→person_key 역맵
+                    const idToKey = (id: number) => `id:${id}`;
+                    // 2) 체인 압축: oldKey에서 출발해 체인 끝까지 추적
+                    const resolveChain = (startKey: string, visited = new Set<string>()): number | null | undefined => {
+                      if (visited.has(startKey)) return undefined; // 순환 방지
+                      visited.add(startKey);
+                      const newId = personReplacements[startKey];
+                      if (newId === undefined) return undefined;
+                      if (newId === null) return null;
+                      const nextKey = idToKey(newId);
+                      const chained = personReplacements[nextKey];
+                      if (chained !== undefined) return resolveChain(nextKey, visited);
+                      return newId;
+                    };
+                    // 3) 체인의 시작점만 표시 (중간 노드는 제외)
+                    const newIdSet = new Set(
+                      Object.values(personReplacements)
+                        .filter((v): v is number => typeof v === 'number')
+                        .map(id => idToKey(id))
+                    );
+                    const assignedMap = new Map(assigned.map(p => [p.person_key, p.person_name]));
+                    const allPeopleMap = new Map(allPeople.map(p => [p.person_id, p.person_name]));
+
+                    const summaryItems: { oldName: string; newName: string }[] = [];
+                    for (const [oldKey, rawNewId] of Object.entries(personReplacements)) {
+                      if (rawNewId === undefined) continue;
+                      // 중간 노드(다른 교체의 결과로 투입된 인력)는 건너뜀
+                      if (newIdSet.has(oldKey)) continue;
+                      const finalId = resolveChain(oldKey);
+                      if (finalId === undefined) continue;
+                      const oldName = assignedMap.get(oldKey) ?? oldKey;
+                      const newName = finalId === null ? '(제외)' : (allPeopleMap.get(finalId) ?? String(finalId));
+                      summaryItems.push({ oldName, newName });
+                    }
+
+                    if (summaryItems.length === 0) return null;
+                    return (
+                      <div className="space-y-1">
+                        {summaryItems.map((r, i) => (
+                          <div key={i} className="flex items-center gap-1.5 text-[10px] bg-blue-50 rounded-lg px-2 py-1.5">
+                            <ArrowRightLeft className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                            <span className="text-red-600 font-semibold">{r.oldName}</span>
+                            <span className="text-gray-300">→</span>
+                            <span className="text-emerald-600 font-semibold">{r.newName}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {simResult.shift_summary.length > 0 && (
                     <div className="space-y-1">
                       {simResult.shift_summary.map((s, i) => (
