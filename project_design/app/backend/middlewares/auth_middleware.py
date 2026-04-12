@@ -139,6 +139,64 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "조회 전용 계정입니다. 입력·수정·삭제 작업은 허용되지 않습니다."}
             )
 
+        # ── writer(작성자) 역할 권한 제어 ──────────────────────────────────────
+        #
+        # writer 권한 범위:
+        #   ✅ 제안리스크 (/api/v1/proposal-risk/*) → 모든 메서드 허용
+        #      - GET:  목록/상세/일정 조회
+        #      - POST: /simulate (DB 변경 없는 메모리 계산), /text-output (DB 변경 없음)
+        #   ✅ 사업별일정 조회용 API → GET/HEAD/OPTIONS만 허용
+        #      - /api/v1/projects/*, /api/v1/phases/*, /api/v1/staffing/*
+        #   ✅ 인력정보 조회용 API → GET/HEAD/OPTIONS만 허용
+        #      - /api/v1/people/*
+        #   ❌ 그 외 모든 API → 차단
+        #
+        # ⚠️  시뮬레이션 격리 보장:
+        #   /simulate 와 /text-output 엔드포인트는 DB에 쓰기를 전혀 수행하지 않음.
+        #   _analyze_risks(), _build_schedule_overlap() 등 모든 계산은
+        #   DB에서 읽어온 데이터를 메모리에서만 가공하며 session.add/commit 호출 없음.
+        #   따라서 excluded_person_keys 를 전달해도 원본 데이터는 변경되지 않음.
+
+        # writer가 GET으로 접근 가능한 API prefix 목록 (사업별일정 + 인력정보 조회)
+        WRITER_ALLOWED_GET_PREFIXES = (
+            "/api/v1/proposal-risk/",   # 제안리스크 전체
+            "/api/v1/projects/",        # 사업별일정 조회용
+            "/api/v1/phases/",          # 단계 정보 조회용
+            "/api/v1/staffing/",        # 배정 정보 조회용
+            "/api/v1/people/",          # 인력정보 조회용
+        )
+        # writer가 목록 조회에 사용하는 GET 경로 (trailing slash 없는 경우)
+        WRITER_ALLOWED_GET_EXACT = {
+            "/api/v1/projects",
+            "/api/v1/phases",
+            "/api/v1/staffing",
+            "/api/v1/people",
+            "/api/v1/proposal-risk/list",
+        }
+
+        if request.state.user_role == "writer":
+            method = request.method.upper()
+
+            if method in ("GET", "HEAD", "OPTIONS"):
+                # GET 요청: 허용된 prefix/exact 경로만 통과
+                allowed = (
+                    any(path.startswith(pfx) for pfx in WRITER_ALLOWED_GET_PREFIXES)
+                    or path in WRITER_ALLOWED_GET_EXACT
+                )
+                if not allowed:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "작성자 계정은 제안리스크·사업별일정·인력정보 조회만 허용됩니다."}
+                    )
+            else:
+                # POST/PUT/PATCH/DELETE: proposal-risk 시뮬레이션만 허용
+                # (simulate, text-output — 모두 DB 쓰기 없는 순수 계산)
+                if not path.startswith("/api/v1/proposal-risk/"):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "작성자 계정은 제안리스크 시뮬레이션 외 쓰기 작업은 허용되지 않습니다."}
+                    )
+
         # ── user 역할: 달력 셀 토글(추가/제거) 차단 ───────────────
         # user는 달력 셀 클릭(toggle) 불가 - leader/admin만 허용
         # leader, admin, viewer(이미 위에서 차단)는 해당 없음

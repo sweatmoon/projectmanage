@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { authStore } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   AlertTriangle, AlertCircle, CheckCircle2, ChevronRight,
   ArrowLeft, RefreshCw, Loader2, Users, Calendar, Building2, Crown,
-  ChevronDown, ChevronUp, Info,
+  ChevronDown, ChevronUp, Play, Copy, FileText, Sparkles, UserMinus,
 } from 'lucide-react';
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ interface ConflictItem {
   other_phase_end: string;
   other_field: string;
   other_sub_field: string;
-  other_field_highlight: boolean;   // 사업관리/품질보증 여부
+  other_field_highlight: boolean;
   my_phase_name: string;
   my_phase_start: string;
   my_phase_end: string;
@@ -52,9 +52,9 @@ interface PersonSchedule {
   is_chief: boolean;
   grade: string;
   position: string;
-  my_field: string;       // 본사업에서의 분야
+  my_field: string;
   my_sub_field: string;
-  my_category: string;    // 본사업에서의 구분 (단계감리팀/전문가팀 등)
+  my_category: string;
   total_overlap_days: number;
   total_overlap_md: number;
   has_conflict: boolean;
@@ -102,6 +102,59 @@ interface ProjectDetail {
   }[];
   risks: RiskDetailItem[];
   risk_summary: RiskSummary;
+}
+
+// 시뮬레이션 결과 타입
+interface ReplacementCandidate {
+  person_id: number;
+  person_name: string;
+  is_chief: boolean;
+  grade: string;
+  position: string;
+  is_available: boolean;
+  company: string;
+}
+
+interface ExcludedDetail {
+  person_key: string;
+  person_name: string;
+  is_chief: boolean;
+  grade: string;
+  my_field: string;
+  my_category: string;
+  resolved_days: number;
+  resolved_md: number;
+  conflict_count: number;
+  replacement_candidates: ReplacementCandidate[];
+  conflicts_summary: { other_project_name: string; type_label: string; overlap_days: number }[];
+}
+
+interface SimulateResult {
+  project_id: number;
+  excluded_keys: string[];
+  original: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  simulated: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  delta: { danger: number; warning: number; conflict_people: number; overlap_days: number; overlap_md: number };
+  suggestions: string[];
+  excluded_detail: ExcludedDetail[];
+  risks: RiskDetailItem[];
+  people: PersonSchedule[];
+}
+
+// 텍스트 출력 결과
+interface TextSection {
+  label: string;
+  format: string;
+  content: string;
+}
+
+interface TextOutputResult {
+  project_id: number;
+  project_name: string;
+  organization: string;
+  excluded_keys: string[];
+  excluded_count: number;
+  sections: TextSection[];
 }
 
 // ── 리스크 설정 ────────────────────────────────────────────────────────────────
@@ -182,7 +235,6 @@ function FieldBadge({ field, highlight }: { field: string; highlight: boolean })
 // ── 본사업 분야 셀 (field + sub_field 중복 방지) ──────────────────────────────
 function MyFieldCell({ field, subField }: { field: string; subField: string }) {
   if (!field) return <span className="text-[10px] text-gray-300">-</span>;
-  // field와 sub_field가 동일하면 한 번만 표시
   const showSub = subField && subField !== field;
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -195,12 +247,28 @@ function MyFieldCell({ field, subField }: { field: string; subField: string }) {
 }
 
 // ── 인력 1명의 충돌 행 ────────────────────────────────────────────────────────
-function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirst: boolean }) {
+function PersonConflictRow({ person, checked, onCheck, simMode }: {
+  person: PersonSchedule;
+  checked?: boolean;
+  onCheck?: (key: string, checked: boolean) => void;
+  simMode?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   if (!person.has_conflict) {
     return (
       <tr className="border-b border-gray-50 hover:bg-gray-50/50">
+        {simMode && (
+          <td className="px-2 py-2 text-center">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={e => onCheck?.(person.person_key, e.target.checked)}
+              className="h-3.5 w-3.5 accent-blue-600"
+              title="이 인력 제외 시뮬레이션"
+            />
+          </td>
+        )}
         <td className="px-3 py-2">
           <div className="flex items-center gap-1.5">
             {person.is_chief && <Crown className="h-3 w-3 text-purple-500 flex-shrink-0" />}
@@ -227,14 +295,24 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
 
   return (
     <>
-      {/* 인력 헤더 행 */}
       <tr
         className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-          person.is_chief ? 'bg-purple-50/40' : 'bg-white'
+          checked ? 'bg-blue-50/60' : person.is_chief ? 'bg-purple-50/40' : 'bg-white'
         }`}
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => !simMode && setExpanded(v => !v)}
       >
-        <td className="px-3 py-2">
+        {simMode && (
+          <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={e => onCheck?.(person.person_key, e.target.checked)}
+              className="h-3.5 w-3.5 accent-blue-600"
+              title="이 인력 제외 시뮬레이션"
+            />
+          </td>
+        )}
+        <td className="px-3 py-2" onClick={() => setExpanded(v => !v)}>
           <div className="flex items-center gap-1.5">
             {person.is_chief && <Crown className="h-3 w-3 text-purple-500 flex-shrink-0" />}
             <span className={`text-xs font-semibold ${person.is_chief ? 'text-purple-700' : 'text-slate-700'}`}>
@@ -246,19 +324,19 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
           </div>
           {person.grade && <div className="text-[10px] text-gray-400 mt-0.5 pl-4">{person.grade}</div>}
         </td>
-        <td className="px-3 py-2">
+        <td className="px-3 py-2" onClick={() => setExpanded(v => !v)}>
           <MyFieldCell field={person.my_field} subField={person.my_sub_field} />
         </td>
-        <td className="px-3 py-2 text-center">
+        <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
           <span className="text-xs font-bold text-red-600">{person.total_overlap_days}일</span>
         </td>
-        <td className="px-3 py-2 text-center">
+        <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
           <span className="text-xs font-semibold text-orange-600">{person.total_overlap_md}MD</span>
         </td>
-        <td className="px-3 py-2 text-center">
+        <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
           <span className="text-xs text-gray-500">{person.conflicts.length}건</span>
         </td>
-        <td className="px-3 py-2 text-right">
+        <td className="px-3 py-2 text-right" onClick={() => setExpanded(v => !v)}>
           {expanded
             ? <ChevronUp className="h-3.5 w-3.5 text-gray-400 ml-auto" />
             : <ChevronDown className="h-3.5 w-3.5 text-gray-400 ml-auto" />
@@ -266,7 +344,6 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
         </td>
       </tr>
 
-      {/* 충돌 상세 */}
       {expanded && person.conflicts.map((c, idx) => (
         <tr
           key={idx}
@@ -276,30 +353,22 @@ function PersonConflictRow({ person, isFirst }: { person: PersonSchedule; isFirs
               : idx % 2 === 0 ? 'bg-gray-50/30' : 'bg-white'
           }`}
         >
+          {simMode && <td />}
           <td className="pl-8 pr-3 py-2" colSpan={2}>
-            {/* 충돌 사업명 */}
             <div className="flex items-center gap-1.5">
               <TypeBadge type={c.type_label} />
-              <span
-                className="text-xs text-slate-700 font-medium truncate max-w-[180px]"
-                title={c.other_project_name}
-              >
+              <span className="text-xs text-slate-700 font-medium truncate max-w-[180px]" title={c.other_project_name}>
                 {c.other_project_name}
               </span>
               {c.other_field_highlight && (
                 <span className="text-[10px] text-rose-600 font-bold flex-shrink-0">⚠</span>
               )}
             </div>
-            {/* 충돌 단계 + 분야 */}
             <div className="flex items-center gap-1.5 mt-1 pl-6 flex-wrap">
               <span className="text-[10px] text-gray-500">{c.other_phase_name}</span>
               <span className="text-[10px] text-gray-400">{c.other_phase_start}~{c.other_phase_end}</span>
               <FieldBadge field={c.other_field} highlight={c.other_field_highlight} />
-              {c.other_sub_field && (
-                <span className="text-[10px] text-gray-400">{c.other_sub_field}</span>
-              )}
             </div>
-            {/* 본사업 단계 */}
             <div className="text-[10px] text-gray-400 mt-0.5 pl-6">
               ← 본사업: {c.my_phase_name} ({c.my_phase_start}~{c.my_phase_end})
             </div>
@@ -359,23 +428,6 @@ function SchedulePanel({ projectId, projectName, onBack }: {
 
   return (
     <div className="space-y-4">
-      {/* 헤더 */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack} className="text-gray-500">
-          <ArrowLeft className="h-4 w-4 mr-1" />목록
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h2 className="font-bold text-slate-800 truncate">{data.project_name}</h2>
-          <p className="text-xs text-gray-500">
-            {data.organization}
-            {data.start_date && ` · ${data.start_date} ~ ${data.end_date ?? '?'}`}
-          </p>
-        </div>
-        <Button variant="ghost" size="icon" onClick={load} title="새로고침">
-          <RefreshCw className="h-4 w-4 text-gray-400" />
-        </Button>
-      </div>
-
       {/* 요약 카드 */}
       <div className="grid grid-cols-4 gap-2">
         <Card className="text-center py-3 bg-gray-50">
@@ -489,6 +541,498 @@ function SchedulePanel({ projectId, projectName, onBack }: {
   );
 }
 
+// ── 시뮬레이션 패널 ───────────────────────────────────────────────────────────
+function SimulationPanel({ projectId }: { projectId: number }) {
+  const [scheduleData, setScheduleData] = useState<ScheduleDetail | null>(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(true);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [simResult, setSimResult] = useState<SimulateResult | null>(null);
+  const [textOutput, setTextOutput] = useState<TextOutputResult | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [textLoading, setTextLoading] = useState(false);
+  const [showOnlyConflict, setShowOnlyConflict] = useState(true);
+  const [activeResultTab, setActiveResultTab] = useState<'effect' | 'text'>('effect');
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 초기 데이터 로드
+  const loadSchedule = useCallback(async () => {
+    setLoadingSchedule(true);
+    try {
+      const res = await axios.get(`/api/v1/proposal-risk/${projectId}/schedule`, {
+        headers: getAuthHeaders(),
+      });
+      setScheduleData(res.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingSchedule(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  // 체크박스 변경 → 자동 시뮬레이션 (디바운스 300ms)
+  const handleCheck = useCallback((key: string, checked: boolean) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      checked ? next.add(key) : next.delete(key);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      runSimulate(Array.from(selectedKeys));
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [selectedKeys, projectId]);
+
+  const runSimulate = async (keys: string[]) => {
+    setSimLoading(true);
+    try {
+      const res = await axios.post(
+        `/api/v1/proposal-risk/${projectId}/simulate`,
+        { excluded_person_keys: keys },
+        { headers: getAuthHeaders() }
+      );
+      setSimResult(res.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const runTextOutput = async () => {
+    setTextLoading(true);
+    try {
+      const res = await axios.post(
+        `/api/v1/proposal-risk/${projectId}/text-output`,
+        { excluded_person_keys: Array.from(selectedKeys) },
+        { headers: getAuthHeaders() }
+      );
+      setTextOutput(res.data);
+      setActiveResultTab('text');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTextLoading(false);
+    }
+  };
+
+  const handleCopy = async (label: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedSection(label);
+      setTimeout(() => setCopiedSection(null), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const handleCopyAll = async () => {
+    if (!textOutput) return;
+    const all = textOutput.sections
+      .map(s => `[${s.label}]\n${s.content}`)
+      .join('\n\n');
+    await handleCopy('__all__', all);
+  };
+
+  const people = scheduleData?.people ?? [];
+  const conflictPeople = people.filter(p => p.has_conflict);
+  const visiblePeople = showOnlyConflict ? conflictPeople : people;
+
+  // 시뮬레이션 효과 계산
+  const orig = simResult?.original;
+  const sim  = simResult?.simulated;
+  const delta = simResult?.delta;
+
+  // 위험 레벨 색상
+  function deltaColor(val: number) {
+    if (val > 0) return 'text-emerald-600';
+    if (val < 0) return 'text-red-600';
+    return 'text-gray-400';
+  }
+  function deltaLabel(val: number) {
+    if (val > 0) return `▼ ${val}`;
+    if (val < 0) return `▲ ${Math.abs(val)}`;
+    return '-';
+  }
+
+  if (loadingSchedule) return (
+    <div className="flex items-center justify-center py-20 text-gray-400">
+      <Loader2 className="h-6 w-6 animate-spin mr-2" />인력 데이터 로드 중...
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* 안내 배너 */}
+      <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 flex items-start gap-3">
+        <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-700 space-y-0.5">
+          <p className="font-semibold">리스크 감소 시뮬레이션</p>
+          <p>중복 인력 옆 체크박스를 선택하면 해당 인력을 제외했을 때의 리스크 변화를 실시간으로 계산합니다.</p>
+          <p className="text-blue-500">※ DB에 저장되지 않으며 시뮬레이션 결과만 표시됩니다.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* ── 좌측: 인력 체크박스 테이블 ── */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-gray-600">
+              인력 선택
+              {selectedKeys.size > 0 && (
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">
+                  {selectedKeys.size}명 제외
+                </span>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowOnlyConflict(v => !v)}
+                className={`text-xs px-2 py-1 rounded-full border transition-all ${
+                  showOnlyConflict
+                    ? 'bg-red-600 text-white border-red-600'
+                    : 'bg-white text-gray-600 border-gray-200'
+                }`}
+              >
+                중복만
+              </button>
+              {selectedKeys.size > 0 && (
+                <button
+                  onClick={() => setSelectedKeys(new Set())}
+                  className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-500 hover:border-red-300"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+          </div>
+
+          {people.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 text-xs">배정 인력 없음</div>
+          ) : (
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                    <th className="px-2 py-2 text-center w-8">제외</th>
+                    <th className="text-left px-3 py-2 font-semibold">인력</th>
+                    <th className="text-left px-3 py-2 font-semibold">분야</th>
+                    <th className="text-center px-3 py-2 font-semibold">중복일</th>
+                    <th className="text-center px-3 py-2 font-semibold">MD</th>
+                    <th className="text-center px-3 py-2 font-semibold">건</th>
+                    <th className="w-6" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visiblePeople.map(person => (
+                    <PersonConflictRow
+                      key={person.person_key}
+                      person={person}
+                      checked={selectedKeys.has(person.person_key)}
+                      onCheck={handleCheck}
+                      simMode
+                    />
+                  ))}
+                  {visiblePeople.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-emerald-500 text-xs">
+                        <CheckCircle2 className="h-6 w-6 mx-auto mb-1" />
+                        중복 인력 없음
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* ── 우측: 시뮬레이션 결과 ── */}
+        <div className="space-y-3">
+          {/* 액션 버튼 */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runSimulate(Array.from(selectedKeys))}
+              disabled={simLoading}
+              className="flex-1"
+            >
+              {simLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
+              리스크 재계산
+            </Button>
+            <Button
+              size="sm"
+              onClick={runTextOutput}
+              disabled={textLoading}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {textLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+              텍스트 출력
+            </Button>
+          </div>
+
+          {/* 결과 탭 */}
+          {(simResult || textOutput) && (
+            <div className="flex gap-1 border-b border-gray-200">
+              <button
+                onClick={() => setActiveResultTab('effect')}
+                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  activeResultTab === 'effect'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                📊 효과 분석
+              </button>
+              <button
+                onClick={() => setActiveResultTab('text')}
+                className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                  activeResultTab === 'text'
+                    ? 'border-emerald-600 text-emerald-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                📝 텍스트 출력
+                {textOutput && <span className="ml-1 text-[10px] text-emerald-500">●</span>}
+              </button>
+            </div>
+          )}
+
+          {/* 효과 분석 탭 */}
+          {activeResultTab === 'effect' && simResult && (
+            <div className="space-y-3">
+              {simLoading && (
+                <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 rounded-lg px-3 py-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />재계산 중...
+                </div>
+              )}
+
+              {/* 수치 비교 */}
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 border-b border-gray-200 px-3 py-2">
+                  <p className="text-xs font-semibold text-gray-600">리스크 수치 비교</p>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-gray-400">
+                      <th className="text-left px-3 py-1.5 font-medium">항목</th>
+                      <th className="text-center px-3 py-1.5 font-medium">현재</th>
+                      <th className="text-center px-3 py-1.5 font-medium">시뮬레이션</th>
+                      <th className="text-center px-3 py-1.5 font-medium">변화</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: '위험 건수', o: orig?.danger, s: sim?.danger, d: delta?.danger },
+                      { label: '주의 건수', o: orig?.warning, s: sim?.warning, d: delta?.warning },
+                      { label: '중복 인력', o: orig?.conflict_people, s: sim?.conflict_people, d: delta?.conflict_people },
+                      { label: '중복 일수', o: orig?.overlap_days, s: sim?.overlap_days, d: delta?.overlap_days },
+                      { label: '중복 공수', o: orig?.overlap_md, s: sim?.overlap_md, d: delta?.overlap_md, unit: 'MD' },
+                    ].map(row => (
+                      <tr key={row.label} className="border-b border-gray-50 hover:bg-gray-50/50">
+                        <td className="px-3 py-1.5 text-gray-600">{row.label}</td>
+                        <td className="px-3 py-1.5 text-center font-semibold text-gray-700">
+                          {row.o ?? '-'}{row.unit ?? ''}
+                        </td>
+                        <td className="px-3 py-1.5 text-center font-semibold text-blue-600">
+                          {row.s ?? '-'}{row.unit ?? ''}
+                        </td>
+                        <td className={`px-3 py-1.5 text-center font-bold ${deltaColor(row.d ?? 0)}`}>
+                          {row.d !== undefined ? deltaLabel(row.d) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 제안 사항 */}
+              {simResult.suggestions.length > 0 && (
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-emerald-700">💡 시뮬레이션 기반 제안</p>
+                  <ul className="space-y-1">
+                    {simResult.suggestions.map((s, i) => (
+                      <li key={i} className="text-xs text-emerald-700 flex gap-1.5">
+                        <span className="text-emerald-400 flex-shrink-0">→</span>{s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 제외 인력별 상세 */}
+              {simResult.excluded_detail.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-600 flex items-center gap-1">
+                    <UserMinus className="h-3.5 w-3.5 text-blue-500" />
+                    제외 인력별 효과
+                  </p>
+                  {simResult.excluded_detail.map(ed => (
+                    <div key={ed.person_key} className="rounded-xl border border-blue-200 bg-blue-50/30 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        {ed.is_chief && <Crown className="h-3.5 w-3.5 text-purple-500" />}
+                        <span className="text-xs font-semibold text-slate-700">{ed.person_name}</span>
+                        {ed.grade && <span className="text-[10px] text-gray-400">{ed.grade}</span>}
+                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                          {ed.my_field || ed.my_category}
+                        </span>
+                      </div>
+                      <div className="flex gap-3 text-[10px]">
+                        <span className="text-emerald-600 font-semibold">↓ {ed.resolved_days}일 해소</span>
+                        <span className="text-orange-600">({ed.resolved_md}MD)</span>
+                        <span className="text-gray-400">{ed.conflict_count}건 충돌 제거</span>
+                      </div>
+                      {/* 충돌 사업 요약 */}
+                      {ed.conflicts_summary.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {ed.conflicts_summary.map((c, i) => (
+                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                              c.type_label === 'A'
+                                ? 'bg-blue-50 border-blue-200 text-blue-600'
+                                : 'bg-orange-50 border-orange-200 text-orange-600'
+                            }`}>
+                              {c.type_label}: {c.other_project_name.slice(0, 10)} ({c.overlap_days}일)
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* 대체 후보 */}
+                      {ed.replacement_candidates.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-semibold text-gray-500">대체 후보</p>
+                          {ed.replacement_candidates.map(c => (
+                            <div key={c.person_id} className={`flex items-center gap-2 px-2 py-1 rounded ${
+                              c.is_available ? 'bg-emerald-50 border border-emerald-200' : 'bg-gray-50 border border-gray-200'
+                            }`}>
+                              <span className={`text-[10px] font-semibold ${c.is_available ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                {c.person_name}
+                              </span>
+                              {c.grade && <span className="text-[10px] text-gray-400">{c.grade}</span>}
+                              {c.company && <span className="text-[10px] text-gray-300">· {c.company}</span>}
+                              <span className={`ml-auto text-[10px] font-bold ${c.is_available ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                {c.is_available ? '✓ 투입 가능' : '일정 중복'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 시뮬레이션 후 잔여 리스크 */}
+              {simResult.risks.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500">
+                    잔여 리스크 ({simResult.risks.length}건)
+                  </p>
+                  {simResult.risks.map((risk, i) => {
+                    const sev = SEVERITY_CONFIG[risk.severity] ?? SEVERITY_CONFIG.info;
+                    const cfg = RISK_CONFIG[risk.type];
+                    return (
+                      <div key={i} className={`rounded-lg border ${sev.border} ${sev.bg} px-3 py-2 flex items-center gap-2`}>
+                        <span className={`text-[10px] font-bold ${sev.badge} px-1.5 py-0.5 rounded-full`}>{sev.label}</span>
+                        <span className="text-xs text-gray-700">{risk.title}</span>
+                        <span className="text-xs text-gray-400 ml-auto">{risk.count}건</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {simResult.risks.length === 0 && selectedKeys.size > 0 && (
+                <div className="flex flex-col items-center justify-center py-8 text-emerald-600 gap-2">
+                  <CheckCircle2 className="h-8 w-8" />
+                  <p className="text-sm font-semibold">모든 리스크 해소</p>
+                  <p className="text-xs text-gray-400">선택 인력 제외 시 리스크가 없어집니다</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 텍스트 출력 탭 */}
+          {activeResultTab === 'text' && textOutput && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-600">
+                  {textOutput.excluded_count > 0 && (
+                    <span className="text-blue-600">{textOutput.excluded_count}명 제외 후 </span>
+                  )}
+                  텍스트 출력
+                </p>
+                <button
+                  onClick={handleCopyAll}
+                  className={`text-xs px-2.5 py-1 rounded border transition-all flex items-center gap-1 ${
+                    copiedSection === '__all__'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  <Copy className="h-3 w-3" />
+                  {copiedSection === '__all__' ? '복사됨!' : '전체 복사'}
+                </button>
+              </div>
+
+              {textOutput.sections.map((section, idx) => (
+                <div key={idx} className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700">
+                        {section.label === '감리 일정' ? '📅' :
+                         section.label === '감리원' ? '👤' : '🔧'} {section.label}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{section.format}</p>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(section.label, section.content)}
+                      className={`text-[10px] px-2 py-1 rounded border transition-all flex items-center gap-1 ${
+                        copiedSection === section.label
+                          ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-blue-300'
+                      }`}
+                    >
+                      <Copy className="h-3 w-3" />
+                      {copiedSection === section.label ? '복사됨!' : '복사'}
+                    </button>
+                  </div>
+                  <div className="p-3">
+                    {section.content ? (
+                      <pre className="text-[11px] font-mono text-gray-700 whitespace-pre-wrap leading-relaxed">
+                        {section.content}
+                      </pre>
+                    ) : (
+                      <p className="text-[10px] text-gray-300 italic">
+                        {section.label.includes('전문가') ? '해당 분야 배정 인력 없음' : '내용 없음'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 초기 상태 */}
+          {!simResult && !textOutput && (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-300 gap-3">
+              <Play className="h-10 w-10" />
+              <p className="text-sm font-medium text-gray-400">인력을 선택하면 자동으로 시뮬레이션됩니다</p>
+              <p className="text-xs text-gray-300">또는 [텍스트 출력] 버튼을 클릭하세요</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 리스크 카드 ───────────────────────────────────────────────────────────────
 function RiskCard({ risk }: { risk: RiskDetailItem }) {
   const [expanded, setExpanded] = useState(false);
@@ -537,9 +1081,9 @@ function RiskCard({ risk }: { risk: RiskDetailItem }) {
   );
 }
 
-// ── 상세 패널 (리스크 요약 + 일정 중복 탭) ───────────────────────────────────
+// ── 상세 패널 ─────────────────────────────────────────────────────────────────
 function DetailPanel({ project, onBack }: { project: ProposalItem; onBack: () => void }) {
-  const [tab, setTab] = useState<'risk' | 'schedule'>('schedule');
+  const [tab, setTab] = useState<'schedule' | 'simulate' | 'risk'>('schedule');
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
@@ -593,7 +1137,17 @@ function DetailPanel({ project, onBack }: { project: ProposalItem; onBack: () =>
               : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          📅 인력 일정 중복
+          📅 일정 중복
+        </button>
+        <button
+          onClick={() => setTab('simulate')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'simulate'
+              ? 'border-violet-600 text-violet-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          🔬 리스크 시뮬레이션
         </button>
         <button
           onClick={() => setTab('risk')}
@@ -616,6 +1170,10 @@ function DetailPanel({ project, onBack }: { project: ProposalItem; onBack: () =>
         />
       )}
 
+      {tab === 'simulate' && (
+        <SimulationPanel projectId={project.id} />
+      )}
+
       {tab === 'risk' && (
         loadingDetail ? (
           <div className="flex items-center justify-center py-16 text-gray-400">
@@ -623,7 +1181,6 @@ function DetailPanel({ project, onBack }: { project: ProposalItem; onBack: () =>
           </div>
         ) : detail ? (
           <div className="space-y-4">
-            {/* 배정 인력 */}
             {detail.assigned_people.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-500 mb-2">배정 인력 (배치 순서)</p>
@@ -645,17 +1202,10 @@ function DetailPanel({ project, onBack }: { project: ProposalItem; onBack: () =>
                 </div>
               </div>
             )}
-
-            {/* 리스크 목록 */}
             {detail.risk_summary.total === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-emerald-600 gap-2">
                 <CheckCircle2 className="h-12 w-12" />
                 <p className="font-semibold">리스크 없음</p>
-                {detail.assigned_people.length === 0 && (
-                  <p className="text-xs text-amber-500 mt-1">
-                    ※ 배정된 인력이 없거나 감리 단계 일정이 미입력된 경우 탐지 불가
-                  </p>
-                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -711,7 +1261,6 @@ export default function ProposalRiskTab() {
 
   return (
     <div className="space-y-4">
-      {/* 상단 헤더 */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-bold text-slate-800">제안일정 리스크 관리</h2>
@@ -725,7 +1274,6 @@ export default function ProposalRiskTab() {
         </Button>
       </div>
 
-      {/* 필터 탭 */}
       <div className="flex gap-1.5 flex-wrap">
         {([
           { key: 'all',     label: `전체 (${proposals.length})` },
@@ -747,7 +1295,6 @@ export default function ProposalRiskTab() {
         ))}
       </div>
 
-      {/* 목록 */}
       {loading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 className="h-6 w-6 animate-spin mr-2" />분석 중...
@@ -778,7 +1325,6 @@ export default function ProposalRiskTab() {
                   bg-white hover:shadow-md transition-shadow px-4 py-3 flex items-center gap-3`}
                 onClick={() => setSelectedProject(proj)}
               >
-                {/* 리스크 아이콘 */}
                 <div className="flex-shrink-0">
                   {hasDanger
                     ? <AlertCircle className="h-5 w-5 text-red-500" />
@@ -786,8 +1332,6 @@ export default function ProposalRiskTab() {
                     ? <AlertTriangle className="h-5 w-5 text-amber-400" />
                     : <CheckCircle2 className="h-5 w-5 text-emerald-400" />}
                 </div>
-
-                {/* 사업 정보 */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm text-slate-800 truncate">{proj.project_name}</span>
@@ -812,12 +1356,9 @@ export default function ProposalRiskTab() {
                     </div>
                   </div>
                 </div>
-
-                {/* 리스크 요약 뱃지 */}
                 <div className="flex-shrink-0">
                   <RiskBadges summary={proj.risk_summary} />
                 </div>
-
                 <ChevronRight className="h-4 w-4 text-gray-300 flex-shrink-0" />
               </button>
             );
