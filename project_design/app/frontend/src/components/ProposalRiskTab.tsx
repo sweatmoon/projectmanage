@@ -593,7 +593,7 @@ function PersonReplacePicker({
               <span className="text-gray-600">원본 유지</span>
             </button>
 
-            {/* 구분선 — 즉시투입 가능 */
+            {/* 즉시투입 가능 / 중복 있음 구분 */}
             {(() => {
               const available = filtered.filter(p => p.is_available);
               const unavailable = filtered.filter(p => !p.is_available);
