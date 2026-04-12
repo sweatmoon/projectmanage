@@ -1160,10 +1160,13 @@ async def get_all_people_for_project(
             if s.sub_field:
                 assigned_sub_fields.add(s.sub_field.strip())
 
-    # 전체 인력 busy 기간 계산
+    # 전체 인력 busy 기간 계산 (target 프로젝트 자신의 배정은 제외 — 교체 후보 용도)
+    # target 프로젝트에 이미 배정된 인력도 '가용' 여부를 다른 프로젝트 기준으로 판단해야 함
     ph_map = {p.id: p for p in phases}
     person_busy: Dict[str, List[Tuple[date, date]]] = {}
     for s in staffings:
+        if s.project_id == project_id:
+            continue  # target 프로젝트 자신의 배정은 busy 계산에서 제외
         ph = ph_map.get(s.phase_id)
         if not ph or not ph.start_date or not ph.end_date:
             continue
@@ -1945,7 +1948,43 @@ async def optimize_risk(
         if all_overlap_ends:
             max_overlap_end = max(all_overlap_ends)
             # 중복이 완전히 없어지려면 이 일수만큼 연기해야 함
+            # 초기 추정치: 현재 가시적인 최대 overlap_end + 1일
             zero_delay = (max_overlap_end - t_start).days + 1
+
+            # 이동 후 새로운 중복이 발생할 수 있으므로 실제로 충돌이 0이 될 때까지 반복 계산
+            # (최대 10회 반복으로 무한루프 방지)
+            for _iter in range(10):
+                sim_check = _calc_risk_for_shift(zero_delay)
+                if sim_check["conflict_people"] == 0:
+                    break
+                # 이동 후에도 충돌이 남아있으면: 새 충돌의 overlap_end를 찾아 더 이동
+                import copy as _cp
+                _vphases_check = []
+                for ph in phases:
+                    if ph.project_id == project_id and ph.start_date and ph.end_date:
+                        v = _cp.copy(ph)
+                        v.start_date = ph.start_date + timedelta(days=zero_delay)
+                        v.end_date   = ph.end_date   + timedelta(days=zero_delay)
+                        _vphases_check.append(v)
+                    else:
+                        _vphases_check.append(ph)
+                _sched_check = _build_schedule_overlap(project_id, staffings, _vphases_check, people_map, project_map)
+                _new_ends: List[date] = []
+                for _cp2 in _sched_check:
+                    if _cp2["has_conflict"]:
+                        for _c in _cp2["conflicts"]:
+                            try:
+                                _new_ends.append(date.fromisoformat(_c["overlap_end"]))
+                            except Exception:
+                                pass
+                if not _new_ends:
+                    break
+                _new_max = max(_new_ends)
+                # 새 t_start = t_start + zero_delay; 새 zero_delay 기준으로 추가 이동량 계산
+                _extra = (_new_max - (t_start + timedelta(days=zero_delay))).days + 1
+                if _extra <= 0:
+                    break
+                zero_delay += _extra
 
             # ── 안 1: 최소변경 (리스크 큼) ─────────────────────────────────
             # 모든 중복 중 가장 짧은 것만 해소 (1/3 수준 연기)
@@ -2091,6 +2130,103 @@ async def optimize_risk(
             for ph in t_phases_sorted
         ],
     }
+
+
+def _build_all_people_for_sim(
+    project_id: int,
+    virtual_phases: list,
+    virtual_staffings: list,
+    people_map: Dict[int, Any],
+    sim_schedule: List[Dict],
+) -> List[Dict]:
+    """
+    시뮬레이션(일정 이동 + 인력 교체) 컨텍스트에서
+    각 인력의 가용 여부를 재계산하여 반환.
+
+    - virtual_phases: 이동된 가상 phase 목록
+    - virtual_staffings: 교체 후 가상 staffing 목록
+    - sim_schedule: 이미 계산된 시뮬레이션 결과 (sim_schedule의 person_key 기준)
+
+    반환: all-people API와 동일한 구조의 리스트
+    (is_available이 이동된 일정 기준으로 재계산됨)
+    """
+    # 이동된 프로젝트의 날짜 범위
+    t_start, t_end = _project_date_range_from_phases(project_id, virtual_phases)
+
+    # 현재 시뮬레이션에서 배정된 인력 키
+    assigned_keys = {p["person_key"] for p in sim_schedule}
+
+    # 전체 인력 busy 기간 (target 프로젝트 제외)
+    ph_map = {p.id: p for p in virtual_phases}
+    person_busy: Dict[str, List[Tuple[date, date]]] = {}
+    for s in virtual_staffings:
+        if s.project_id == project_id:
+            continue  # target 프로젝트 자신의 배정은 busy에서 제외
+        ph = ph_map.get(s.phase_id)
+        if not ph or not ph.start_date or not ph.end_date:
+            continue
+        key, _, _, _ = _resolve_person_key(s, people_map)
+        if not key:
+            continue
+        person_busy.setdefault(key, []).append((ph.start_date, ph.end_date))
+
+    all_people_list = []
+    for person in people_map.values():
+        if person.deleted_at:
+            continue
+        p_key = f"id:{person.id}"
+        is_assigned = p_key in assigned_keys
+
+        conflict_days = 0
+        is_available = True
+        if t_start and t_end:
+            for bs, be in person_busy.get(p_key, []):
+                od = _overlap_days(t_start, t_end, bs, be)
+                conflict_days += od
+            is_available = conflict_days == 0
+
+        # 분야 정보
+        person_fields: set = set()
+        for s in virtual_staffings:
+            s_key, _, _, _ = _resolve_person_key(s, people_map)
+            if s_key == p_key and s.field:
+                person_fields.add(s.field.strip())
+
+        person_main_field = next(iter(person_fields), "")
+
+        all_people_list.append({
+            "person_id":    person.id,
+            "person_key":   p_key,
+            "person_name":  person.person_name,
+            "grade":        person.grade or "",
+            "position":     person.position or "",
+            "company":      person.company or "",
+            "is_chief":     bool(person.is_chief),
+            "is_assigned":  is_assigned,
+            "is_available": is_available,
+            "conflict_days": conflict_days,
+            "my_field":     person_main_field,
+            "field_match":  False,  # 프론트에서 person.my_field 기준으로 판단
+        })
+
+    all_people_list.sort(key=lambda p: (
+        0 if p["is_available"] else 1,
+        p["conflict_days"],
+        p["person_name"],
+    ))
+    return all_people_list
+
+
+def _project_date_range_from_phases(project_id: int, phases: list):
+    """virtual_phases 기반 프로젝트 날짜 범위 계산"""
+    dates = [
+        (ph.start_date, ph.end_date)
+        for ph in phases
+        if ph.project_id == project_id and ph.start_date and ph.end_date
+    ]
+    if not dates:
+        return None, None
+    return min(d[0] for d in dates), max(d[1] for d in dates)
 
 
 @router.post("/{project_id}/simulate-v2")
@@ -2314,4 +2450,7 @@ async def simulate_risk_v2(
         "suggestions":         suggestions,
         "risks":               sim_risks,
         "people":              sim_schedule,
+        "all_people_updated":  _build_all_people_for_sim(
+            project_id, virtual_phases, virtual_staffings_final, people_map, sim_schedule
+        ),
     }
