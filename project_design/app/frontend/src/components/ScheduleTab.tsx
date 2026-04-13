@@ -94,6 +94,7 @@ interface People {
   team?: string;
   grade?: string;
   company?: string;
+  can_travel?: boolean;  // 지방 출장 가능 여부
 }
 
 interface CalendarEntry {
@@ -389,6 +390,7 @@ interface UnifiedPerson {
   grade?: string;
   company?: string;
   isExternal: boolean;
+  can_travel?: boolean;  // 지방 출장 가능 여부
 }
 
 /* ───────── MD Expand Dialog ───────── */
@@ -2314,7 +2316,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       for (const p of people) {
         if (!seenDbIds.has(p.id)) {
           seenDbIds.add(p.id);
-          result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false });
+          result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false, can_travel: p.can_travel });
         }
       }
       for (const s of localStaffing) {
@@ -2341,7 +2343,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (s.person_id && !seenDbIds.has(s.person_id)) {
         seenDbIds.add(s.person_id);
         const p = people.find((pp) => pp.id === s.person_id);
-        if (p) result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false });
+        if (p) result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false, can_travel: p.can_travel });
       }
       if (!s.person_id && s.person_name_text) {
         const extName = s.person_name_text.trim();
@@ -2356,7 +2358,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (hatRecord?.actual_person_id && !seenDbIds.has(hatRecord.actual_person_id)) {
         seenDbIds.add(hatRecord.actual_person_id);
         const ap = people.find((pp) => pp.id === hatRecord.actual_person_id);
-        if (ap) result.push({ id: ap.id, name: ap.person_name, grade: ap.grade, company: ap.company, isExternal: false });
+        if (ap) result.push({ id: ap.id, name: ap.person_name, grade: ap.grade, company: ap.company, isExternal: false, can_travel: ap.can_travel });
       }
     }
 
@@ -3696,7 +3698,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             borderTop: '1px solid #d1d5db',
                             borderBottom: isInChecked ? '2px solid #818cf8' : '1px solid #d1d5db',
                           }}
-                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}${p.company && !p.isExternal ? ` · ${p.company}` : ''}\n이번달 투입: ${usedMd}MD\n전체기간 투입: ${pStaffings.reduce((sum, ps) => sum + (totalMdCount.get(ps.staffing.id) || 0), 0)}/${totalMd}MD\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
+                          title={`${p.name} ${p.isExternal ? '(외부)' : `(${p.grade || '-'})`}${p.company && !p.isExternal ? ` · ${p.company}` : ''}${p.can_travel === false ? ' · 지방출장불가' : ''}\n이번달 투입: ${usedMd}MD\n전체기간 투입: ${pStaffings.reduce((sum, ps) => sum + (totalMdCount.get(ps.staffing.id) || 0), 0)}/${totalMd}MD\n클릭하여 열 포커싱${isInChecked ? '\n🔵 체크된 사업 인력' : ''}`}
                           onClick={() => handlePersonHeaderClick(p.id)}
                         >
                           <div className="leading-tight">
@@ -3712,6 +3714,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           <div className="font-normal text-[8px] text-muted-foreground">
                             {p.isExternal ? '외부' : (p.grade || '')} {totalMd > 0 ? `(${usedMd}/${totalMd})` : ''}
                           </div>
+                          {p.can_travel === false && (
+                            <div className="font-bold text-[7px] text-orange-600 bg-orange-100 rounded px-0.5 mt-0.5 leading-tight">
+                              📍지방불가
+                            </div>
+                          )}
                         </th>
                       );
                     })}
