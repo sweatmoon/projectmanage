@@ -582,7 +582,7 @@ export default function IndexPage() {
         <Tabs value={isWriter && activeTab === 'home' ? 'proposal-risk' : activeTab} onValueChange={handleTabChange}>
           <div className="flex items-center justify-between mb-4">
             <TabsList>
-              {/* writer 역할: proposal-risk, gantt, people 탭만 표시 */}
+              {/* writer 역할: proposal-risk 탭만 표시 */}
               {!isWriter && (
                 <TabsTrigger value="home" className="flex items-center gap-1.5">
                   <Home className="h-4 w-4" />
@@ -595,20 +595,24 @@ export default function IndexPage() {
                   프로젝트
                 </TabsTrigger>
               )}
+              {!isWriter && (
               <TabsTrigger value="people" className="flex items-center gap-1.5">
                 <Users className="h-4 w-4" />
                 인력
               </TabsTrigger>
+              )}
               {!isWriter && (
                 <TabsTrigger value="schedule" className="flex items-center gap-1.5">
                   <CalendarDays className="h-4 w-4" />
                   인력별 일정
                 </TabsTrigger>
               )}
+              {!isWriter && (
               <TabsTrigger value="gantt" className="flex items-center gap-1.5">
                 <GanttChart className="h-4 w-4" />
                 사업별 일정
               </TabsTrigger>
+              )}
               {!isWriter && (
                 <TabsTrigger value="reports" className="flex items-center gap-1.5">
                   <BarChart3 className="h-4 w-4" />
