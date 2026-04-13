@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { Search, User, Download, Upload, Trash2, Loader2, ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCw, MapPinOff } from 'lucide-react';
 import { client } from '@/lib/api';
 import { toast } from 'sonner';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -487,7 +487,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
               return (
                 <Card
                   key={person.id}
-                  className={`cursor-pointer hover:shadow-md transition-shadow ${isSelected ? 'ring-2 ring-blue-400 bg-blue-50/30' : ''}`}
+                  className={`cursor-pointer hover:shadow-md transition-shadow ${isSelected ? 'ring-2 ring-blue-400 bg-blue-50/30' : ''} ${person.can_travel === false ? 'border-orange-200 bg-orange-50/30' : ''}`}
                 >
                   <CardContent className="p-3">
                     <div className="flex items-center gap-2">
@@ -514,15 +514,19 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                             {person.employment_status && (
                               <Badge className={`text-[10px] px-1.5 py-0 ${escClass}`}>{person.employment_status}</Badge>
                             )}
+                            {person.can_travel === false && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300 flex-shrink-0" title="지방출장 불가">
+                                <MapPinOff className="h-2.5 w-2.5" />
+                                지방불가
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
                             {person.company && <span className="text-blue-600 font-medium truncate max-w-[80px]">{person.company}</span>}
                             {person.position && <span>{person.company ? ' · ' : ''}{person.position}</span>}
                             {person.grade && <span className="text-blue-500">· {person.grade}</span>}
                             {person.region && <span className="text-gray-400">· {person.region}</span>}
-                            {person.can_travel === false && (
-                              <span className="text-red-400 text-[10px]">· 지방불가</span>
-                            )}
+
                           </div>
                         </div>
                       {/* Delete button */}

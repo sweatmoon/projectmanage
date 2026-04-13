@@ -701,6 +701,7 @@ def _build_schedule_overlap(
             "my_field":        s.field or "",
             "my_sub_field":    s.sub_field or "",
             "my_category":     s.category or "",
+            "can_travel":      (person_obj.can_travel if person_obj and person_obj.can_travel is not None else True),
         }
 
     # 각 인력의 충돌 수집 (정렬 순서 유지)
@@ -1301,6 +1302,7 @@ async def get_all_people_for_project(
             "conflict_days": conflict_days,
             "my_field":     person_main_field,
             "field_match":  field_match,
+            "can_travel":   person.can_travel if person.can_travel is not None else True,
         })
 
     # 정렬: 본사업 배정중 최하위 → 가용 먼저 → 분야매칭 먼저 → 중복 적은 순 → 이름 순
@@ -1872,6 +1874,7 @@ def _get_available_people(
             "company":       person.company or "",
             "is_available":  is_available,
             "conflict_days": conflict_days,
+            "can_travel":    person.can_travel if person.can_travel is not None else True,
         })
 
     candidates.sort(key=lambda c: (0 if c["is_available"] else 1, c["conflict_days"], c["person_name"]))
@@ -2290,6 +2293,7 @@ def _build_all_people_for_sim(
             "conflict_days": conflict_days,
             "my_field":     person_main_field,
             "field_match":  False,  # 프론트에서 person.my_field 기준으로 판단
+            "can_travel":   person.can_travel if person.can_travel is not None else True,
         })
 
     all_people_list.sort(key=lambda p: (
