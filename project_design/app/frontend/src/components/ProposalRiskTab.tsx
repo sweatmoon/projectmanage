@@ -90,6 +90,7 @@ interface PersonSchedule {
   has_conflict: boolean;
   conflicts: ConflictItem[];
   my_phases?: MyPhaseDetail[];
+  can_travel?: boolean;  // 지방 출장 가능 여부
 }
 
 interface ScheduleDetail {
@@ -223,6 +224,7 @@ interface AlternateCandidate {
   company: string;
   is_available: boolean;
   conflict_days: number;
+  can_travel?: boolean;    // 지방 출장 가능 여부
 }
 
 interface PersonReplaceOption {
@@ -416,6 +418,9 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
             {person.is_chief && (
               <span className="text-[10px] px-1 rounded-full bg-purple-100 text-purple-600">총괄</span>
             )}
+            {person.can_travel === false && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0 rounded-full bg-orange-100 text-orange-600 border border-orange-200 flex-shrink-0" title="지방출장 불가">📍지방불가</span>
+            )}
           </div>
           {person.grade && <div className="text-[10px] text-gray-400 mt-0.5 pl-4">{person.grade}</div>}
         </td>
@@ -458,6 +463,9 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
             </span>
             {person.is_chief && (
               <span className="text-[10px] px-1 rounded-full bg-purple-100 text-purple-600">총괄</span>
+            )}
+            {person.can_travel === false && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0 rounded-full bg-orange-100 text-orange-600 border border-orange-200 flex-shrink-0" title="지방출장 불가">📍지방불가</span>
             )}
           </div>
           {person.grade && <div className="text-[10px] text-gray-400 mt-0.5 pl-4">{person.grade}</div>}
@@ -709,6 +717,11 @@ function PersonPickerItem({ p, currentValue, onClick }: {
             {p.person_name}
           </span>
           {p.grade && <span className="text-gray-400 flex-shrink-0">{p.grade}</span>}
+          {p.can_travel === false && (
+            <span className="inline-flex items-center gap-0.5 text-[9px] px-1 rounded bg-orange-100 text-orange-600 border border-orange-200 flex-shrink-0" title="지방출장 불가">
+              📍지방불가
+            </span>
+          )}
           {p.field_match && (
             <span className="text-[9px] px-1 rounded bg-violet-100 text-violet-600 flex-shrink-0">분야일치</span>
           )}
@@ -2230,6 +2243,9 @@ function SimulationPanel({ projectId }: { projectId: number }) {
                               </span>
                               {alt.grade && <span className="text-[10px] text-gray-400">{alt.grade}</span>}
                               {alt.company && <span className="text-[10px] text-gray-300 truncate">· {alt.company}</span>}
+                              {alt.can_travel === false && (
+                                <span className="text-[9px] px-1 py-0 rounded bg-orange-100 text-orange-600 border border-orange-200 flex-shrink-0">지방불가</span>
+                              )}
                               <span className={`ml-auto text-[10px] font-bold flex-shrink-0 ${alt.is_available ? 'text-emerald-600' : 'text-gray-400'}`}>
                                 {alt.is_available ? '✓ 즉시 투입 가능' : `${alt.conflict_days}일 중복`}
                               </span>
