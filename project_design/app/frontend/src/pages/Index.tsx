@@ -188,7 +188,7 @@ export default function IndexPage() {
     try {
       const p = new URLSearchParams(window.location.search).get('tab');
       const saved = p || localStorage.getItem('activeTab') || 'home';
-      // writer 역할은 허용된 탭만 접근 가능 (제안리스크 / 사업별일정 / 인력)
+      // writer 역할은 허용된 탭만 접근 가능 (proposal-risk 전용)
       // 허용되지 않은 탭이 저장되어 있으면 proposal-risk로 강제 이동
       if (isWriter && !writerAllowedTabs.includes(saved)) {
         return 'proposal-risk';
@@ -201,10 +201,14 @@ export default function IndexPage() {
   useEffect(() => {
     const tab = new URLSearchParams(location.search).get('tab');
     if (tab) {
-      setActiveTab(tab);
-      try { localStorage.setItem('activeTab', tab); } catch { /* ignore */ }
+      // writer 역할은 허용된 탭만 접근 가능 — URL 직접 접근도 차단
+      const safeTab = (isWriter && !writerAllowedTabs.includes(tab))
+        ? 'proposal-risk'
+        : tab;
+      setActiveTab(safeTab);
+      try { localStorage.setItem('activeTab', safeTab); } catch { /* ignore */ }
     }
-  }, [location.search]);
+  }, [location.search, isWriter, writerAllowedTabs]);
 
   // 너비 확장 상태 - localStorage에 저장/복원
   const [wideMode, setWideMode] = useState<boolean>(() => {
@@ -220,7 +224,7 @@ export default function IndexPage() {
   };
 
   const handleTabChange = (tab: string) => {
-    // writer 역할은 허용된 탭(제안리스크·사업별일정·인력)만 접근 가능
+    // writer 역할은 허용된 탭(proposal-risk)만 접근 가능
     const targetTab = (isWriter && !writerAllowedTabs.includes(tab))
       ? 'proposal-risk'
       : tab;
