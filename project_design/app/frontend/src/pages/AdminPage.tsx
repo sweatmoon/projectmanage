@@ -434,7 +434,7 @@ function ApproveDropdown({
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const APPROVE_ROLES = ['user', 'leader', 'admin'];
+  const APPROVE_ROLES = ['user', 'leader', 'viewer', 'writer', 'audit_viewer', 'admin'];
 
   useEffect(() => {
     if (!open) return;
