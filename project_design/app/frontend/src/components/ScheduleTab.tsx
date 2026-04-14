@@ -94,6 +94,7 @@ interface People {
   team?: string;
   grade?: string;
   company?: string;
+  region?: string;       // 거주지역
   can_travel?: boolean;  // 지방 출장 가능 여부
 }
 
@@ -389,6 +390,7 @@ interface UnifiedPerson {
   name: string;
   grade?: string;
   company?: string;
+  region?: string;       // 거주지역
   isExternal: boolean;
   can_travel?: boolean;  // 지방 출장 가능 여부
 }
@@ -2316,7 +2318,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       for (const p of people) {
         if (!seenDbIds.has(p.id)) {
           seenDbIds.add(p.id);
-          result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false, can_travel: p.can_travel });
+          result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, region: p.region, isExternal: false, can_travel: p.can_travel });
         }
       }
       for (const s of localStaffing) {
@@ -2343,7 +2345,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (s.person_id && !seenDbIds.has(s.person_id)) {
         seenDbIds.add(s.person_id);
         const p = people.find((pp) => pp.id === s.person_id);
-        if (p) result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false, can_travel: p.can_travel });
+        if (p) result.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, region: p.region, isExternal: false, can_travel: p.can_travel });
       }
       if (!s.person_id && s.person_name_text) {
         const extName = s.person_name_text.trim();
@@ -2358,7 +2360,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (hatRecord?.actual_person_id && !seenDbIds.has(hatRecord.actual_person_id)) {
         seenDbIds.add(hatRecord.actual_person_id);
         const ap = people.find((pp) => pp.id === hatRecord.actual_person_id);
-        if (ap) result.push({ id: ap.id, name: ap.person_name, grade: ap.grade, company: ap.company, isExternal: false, can_travel: ap.can_travel });
+        if (ap) result.push({ id: ap.id, name: ap.person_name, grade: ap.grade, company: ap.company, region: ap.region, isExternal: false, can_travel: ap.can_travel });
       }
     }
 
@@ -2399,7 +2401,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       for (const pid of checkedProjectPeople) {
         if (!baseIds.has(pid) && typeof pid === 'number') {
           const p = people.find((pp) => pp.id === pid);
-          if (p) extra.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, isExternal: false });
+          if (p) extra.push({ id: p.id, name: p.person_name, grade: p.grade, company: p.company, region: p.region, isExternal: false });
         }
       }
       return [...allPeopleBase, ...extra].sort((a, b) => {
@@ -2439,7 +2441,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     for (const pid of checkedProjectPeople) {
       if (!baseIds.has(pid) && typeof pid === 'number') {
         const p = people.find((pp) => pp.id === pid);
-        if (p) extraPeople.push({ id: p.id, name: p.person_name, grade: p.grade, isExternal: false });
+        if (p) extraPeople.push({ id: p.id, name: p.person_name, grade: p.grade, region: p.region, isExternal: false });
       }
     }
     const base = [...allPeopleBase, ...extraPeople];
@@ -3714,9 +3716,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                           <div className="font-normal text-[8px] text-muted-foreground">
                             {p.isExternal ? '외부' : (p.grade || '')} {totalMd > 0 ? `(${usedMd}/${totalMd})` : ''}
                           </div>
+                          {p.region && (
+                            <div className="font-normal text-[7px] text-purple-600 bg-purple-50 rounded px-0.5 mt-0.5 leading-tight truncate">
+                              📍{p.region}
+                            </div>
+                          )}
                           {p.can_travel === false && (
                             <div className="font-bold text-[7px] text-orange-600 bg-orange-100 rounded px-0.5 mt-0.5 leading-tight">
-                              📍지방불가
+                              🚫지방불가
                             </div>
                           )}
                         </th>
