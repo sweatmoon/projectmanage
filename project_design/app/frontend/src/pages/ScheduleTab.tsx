@@ -529,6 +529,11 @@ export default function ScheduleTab() {
                         >
                           <span className="font-semibold text-gray-800">{person.person_name}</span>
                           <span className="text-gray-400 text-[10px]">{person.team || '-'}</span>
+                          {person.region && (
+                            <span className="text-[10px] text-indigo-500 font-medium bg-indigo-50 px-1.5 rounded-full leading-tight">
+                              📍{person.region}
+                            </span>
+                          )}
                           <div className="flex items-center gap-1 mt-0.5">
                             {personProjectIds.map(pid => {
                               const c = getColor(pid, projectIds)

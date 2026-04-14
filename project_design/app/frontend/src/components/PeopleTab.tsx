@@ -479,7 +479,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
         <div className="text-center py-12 text-muted-foreground">인력이 없습니다.</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {paginatedPeople.map((person) => {
               const escClass = (empStatusConfig[person.employment_status || '']?.className) ?? DEFAULT_BADGE;
               const isSelected = selectedIds.has(person.id);
@@ -507,7 +507,7 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                       </div>
                         <div className="flex-1 min-w-0" onClick={() => onSelectPerson(person.id)}>
                           <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-sm truncate">{person.person_name}</span>
+                            <span className="font-semibold text-sm">{person.person_name}</span>
                             {person.is_chief && (
                               <span className="px-1.5 py-0 rounded-full text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-200 flex-shrink-0">총괄</span>
                             )}
@@ -521,12 +521,10 @@ export default function PeopleTab({ people, loading, onSelectPerson, onRefresh }
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                            {person.company && <span className="text-blue-600 font-medium truncate max-w-[80px]">{person.company}</span>}
+                          <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
+                            {person.company && <span className="text-blue-600 font-medium">{person.company}</span>}
                             {person.position && <span>{person.company ? ' · ' : ''}{person.position}</span>}
                             {person.grade && <span className="text-blue-500">· {person.grade}</span>}
-                            {person.region && <span className="text-gray-400">· {person.region}</span>}
-
                           </div>
                         </div>
                       {/* Delete button */}
