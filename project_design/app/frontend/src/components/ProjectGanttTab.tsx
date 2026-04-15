@@ -598,6 +598,7 @@ function EditModal({
   onClose,
   onSave,
   readOnly = false,
+  hideStaffing = false,
 }: {
   project: Project;
   phase: Phase;
@@ -612,6 +613,7 @@ function EditModal({
   onClose: () => void;
   onSave: (projectUpdates: Partial<Project>, phaseUpdates: Partial<Phase>, staffingChanges?: StaffingPersonChange[]) => void;
   readOnly?: boolean;
+  hideStaffing?: boolean;  // writer: 투입인력 섹션 전체 숨김
 }) {
   // 🎩 모자 인라인 편집 state
   const [hatEditId, setHatEditId] = useState<number | null>(null);
@@ -927,7 +929,7 @@ function EditModal({
             </div>
             {businessDays !== null && <p className="text-[10px] text-muted-foreground">영업일: {businessDays}일</p>}
           </div>
-          <div className="space-y-2">
+          {!hideStaffing && <div className="space-y-2">
             <h4 className="text-sm font-semibold text-gray-700 border-b pb-1">
               투입인력 ({activeCount}명)
               {!readOnly && deletedIds.size > 0 && <span className="text-red-500 text-[10px] ml-2">({deletedIds.size}명 삭제 예정)</span>}
@@ -1019,7 +1021,7 @@ function EditModal({
                 ))}
               </div>
             )}
-          </div>
+          </div>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t bg-gray-50">
           {readOnly ? (
@@ -2012,16 +2014,16 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     );
                   })}
 
-                  {/* 유휴 인력 행 */}
-                  <div className="flex items-center px-3 border-t-2 border-slate-300 bg-slate-50"
+                  {/* 유휴 인력 행 — writer일 때 숨김 */}
+                  {!isWriter && <div className="flex items-center px-3 border-t-2 border-slate-300 bg-slate-50"
                     style={{ height: ROW_H }}>
                     <span className="text-[11px] font-semibold text-slate-500">유휴 인력</span>
-                  </div>
-                  {/* 중복 인력 행 */}
-                  <div className="flex items-center px-3 border-t border-slate-200 bg-orange-50"
+                  </div>}
+                  {/* 중복 인력 행 — writer일 때 숨김 */}
+                  {!isWriter && <div className="flex items-center px-3 border-t border-slate-200 bg-orange-50"
                     style={{ height: ROW_H }}>
                     <span className="text-[11px] font-semibold text-orange-600">중복 인력</span>
-                  </div>
+                  </div>}
                 </div>
               </div>
 
@@ -2295,8 +2297,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                       );
                     })}
 
-                    {/* ── 유휴 인력 행 ── */}
-                    <div className="border-t-2 border-slate-300 relative bg-slate-50/70"
+                    {/* ── 유휴 인력 행 — writer일 때 숨김 ── */}
+                    {!isWriter && <div className="border-t-2 border-slate-300 relative bg-slate-50/70"
                       style={{ height: ROW_H }}>
                       {columns.map((col, ci) => {
                         const rowData = idleRowData[ci];
@@ -2349,10 +2351,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                         }
                         return null;
                       })}
-                    </div>
+                    </div>}
 
-                    {/* ── 중복 인력 행 ── */}
-                    <div className="border-t border-slate-200 relative bg-orange-50/40"
+                    {/* ── 중복 인력 행 — writer일 때 숨김 ── */}
+                    {!isWriter && <div className="border-t border-slate-200 relative bg-orange-50/40"
                       style={{ height: ROW_H }}>
                       {columns.map((col, ci) => {
                         const rowData = overlapRowData[ci];
@@ -2403,7 +2405,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                         }
                         return null;
                       })}
-                    </div>
+                    </div>}
 
                   </div>{/* 바디 끝 */}
                 </div>{/* 타임라인 너비 끝 */}
@@ -2413,8 +2415,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         </CardContent>
       </Card>
 
-      {/* 유휴 인력 팝오버 — 검색·가나다 정렬·투입 가능 일수 */}
-      {idlePopover && (() => {
+      {/* 유휴 인력 팝오버 — writer일 때 숨김 */}
+      {!isWriter && idlePopover && (() => {
         const filtered = idlePopover.people.filter((p) =>
           p.person_name.includes(idlePopover.search) ||
           (p.team || '').includes(idlePopover.search) ||
@@ -2475,8 +2477,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         );
       })()}
 
-      {/* 중복 인력 팝오버 */}
-      {overlapPopover && (() => {
+      {/* 중복 인력 팝오버 — writer일 때 숨김 */}
+      {!isWriter && overlapPopover && (() => {
         const filtered = overlapPopover.items.filter((item) =>
           item.personName.includes(overlapPopover.search) ||
           (item.team || '').includes(overlapPopover.search) ||
@@ -2674,6 +2676,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
           onClose={() => setEditTarget(null)}
           onSave={handleSave}
           readOnly={readOnlyMode}
+          hideStaffing={isWriter}
         />
       )}
 
