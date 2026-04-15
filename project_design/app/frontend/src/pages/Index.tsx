@@ -71,6 +71,7 @@ function validateAuditLine(line: string): string | null {
   if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
   if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
   const maxMd = countBusinessDays(fmt8(start), fmt8(end));
+  const overList: string[] = [];
   for (const p of parts.slice(3)) {
     if (!p) continue;
     const cp = p.split(':');
@@ -82,9 +83,10 @@ function validateAuditLine(line: string): string | null {
     if (mdStr) {
       if (!/^\d+$/.test(mdStr)) return `MD 오류: "${p}" → MD는 숫자여야 합니다`;
       const md = parseInt(mdStr, 10);
-      if (md > maxMd) return `MD 초과: "${p}" → ${md}일은 영업일(${maxMd}일)을 초과합니다`;
+      if (md > maxMd) overList.push(`${cp[0].trim()}:${md}일`);
     }
   }
+  if (overList.length > 0) return `MD 초과 (영업일 ${maxMd}일): ${overList.join(', ')}`;
   return null;
 }
 
@@ -98,6 +100,7 @@ function validateProposalScheduleLine(line: string): string | null {
   if (!/^\d{8}$/.test(end))   return `종료일 형식 오류: "${end}" → YYYYMMDD 8자리`;
   if (start > end)            return `날짜 오류: 시작일(${start})이 종료일(${end})보다 늦습니다`;
   const maxMd = countBusinessDays(fmt8(start), fmt8(end));
+  const overList2: string[] = [];
   for (const p of parts.slice(3)) {
     if (!p) continue;
     const cp = p.split(':');
@@ -110,8 +113,9 @@ function validateProposalScheduleLine(line: string): string | null {
     if (cp.length === 2) mdVal = parseInt(cp[1], 10);
     else if (cp.length >= 3) mdVal = parseInt(cp[2], 10);
     if (mdVal !== null && !isNaN(mdVal) && mdVal > maxMd)
-      return `MD 초과: "${p}" → ${mdVal}일은 영업일(${maxMd}일)을 초과합니다`;
+      overList2.push(`${cp[0].trim()}:${mdVal}일`);
   }
+  if (overList2.length > 0) return `MD 초과 (영업일 ${maxMd}일): ${overList2.join(', ')}`;
   return null;
 }
 
