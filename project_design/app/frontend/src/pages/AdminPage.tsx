@@ -588,7 +588,10 @@ export default function AdminPage() {
   const fetchLogs = async (filter = logFilter) => {
     setLoading(true);
     try {
-      const params = filter !== 'all' ? { action: filter, limit: 200 } : { limit: 200 };
+      // 최근 60일치만 조회 (오래된 API 로그에 묻히지 않도록)
+      const since60d = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const params: Record<string, string | number> = { limit: 500, since: since60d };
+      if (filter !== 'all') params.action = filter;
       setLogs(await client.admin.getLogs(params));
     } catch { toast.error('로그 로드 실패'); }
     finally { setLoading(false); }

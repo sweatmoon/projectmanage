@@ -199,7 +199,8 @@ async def get_access_logs(
     _: Request = Depends(require_admin),
     action: Optional[str] = Query(None, description="login / logout / api"),
     user_id: Optional[str] = Query(None),
-    limit: int = Query(100, le=500),
+    since: Optional[str] = Query(None, description="ISO 날짜 (예: 2026-04-01), 이 날짜 이후 로그만 조회"),
+    limit: int = Query(200, le=1000),
     offset: int = Query(0),
 ):
     query = select(AccessLog).order_by(desc(AccessLog.timestamp))
@@ -207,11 +208,68 @@ async def get_access_logs(
         query = query.where(AccessLog.action == action)
     if user_id:
         query = query.where(AccessLog.user_id == user_id)
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+            query = query.where(AccessLog.timestamp >= since_dt)
+        except ValueError:
+            pass
     query = query.limit(limit).offset(offset)
 
     result = await db.execute(query)
     logs = result.scalars().all()
     return logs
+
+
+# ── 2-1. 접속 로그 진단 (DB 상태 확인) ─────────────────────
+@router.get("/logs/diagnose")
+async def diagnose_access_logs(
+    db: AsyncSession = Depends(get_db),
+    _: Request = Depends(require_admin),
+):
+    """access_logs 테이블 상태 진단 — 최신/최구 레코드, 총 건수, 날짜별 집계"""
+    try:
+        total = (await db.execute(select(func.count(AccessLog.id)))).scalar() or 0
+        latest = (await db.execute(
+            select(AccessLog).order_by(desc(AccessLog.timestamp)).limit(1)
+        )).scalar_one_or_none()
+        oldest = (await db.execute(
+            select(AccessLog).order_by(AccessLog.timestamp).limit(1)
+        )).scalar_one_or_none()
+
+        # 로그인 전용 최신 10건
+        login_result = await db.execute(
+            select(AccessLog)
+            .where(AccessLog.action == "login")
+            .order_by(desc(AccessLog.timestamp))
+            .limit(10)
+        )
+        recent_logins = login_result.scalars().all()
+
+        return {
+            "total_count": total,
+            "latest_record": {
+                "id": latest.id,
+                "timestamp": latest.timestamp.isoformat() if latest else None,
+                "action": latest.action if latest else None,
+                "user_name": latest.user_name if latest else None,
+            } if latest else None,
+            "oldest_record": {
+                "id": oldest.id,
+                "timestamp": oldest.timestamp.isoformat() if oldest else None,
+            } if oldest else None,
+            "recent_logins": [
+                {
+                    "id": l.id,
+                    "timestamp": l.timestamp.isoformat(),
+                    "user_name": l.user_name,
+                    "user_email": l.user_email,
+                }
+                for l in recent_logins
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e), "total_count": -1}
 
 
 # ── 3. 사용자 목록 ─────────────────────────────────────────
