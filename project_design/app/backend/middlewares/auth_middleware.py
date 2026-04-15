@@ -251,7 +251,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     duration_ms=duration_ms,
                 )
             except Exception as e:
-                logger.warning(f"Access log write failed: {e}")
+                logger.error(f"[ACCESS_LOG] 미들웨어 기록 실패: {type(e).__name__}: {e}", exc_info=True)
 
         return response
 
@@ -266,6 +266,7 @@ async def _write_access_log(
         from core.database import db_manager
         from models.auth import AccessLog
         if db_manager.async_session_maker is None:
+            logger.error("[ACCESS_LOG] async_session_maker is None — DB 초기화 안 됨, 로그 기록 불가")
             return
         async with db_manager.async_session_maker() as session:
             log = AccessLog(
@@ -283,4 +284,4 @@ async def _write_access_log(
             session.add(log)
             await session.commit()
     except Exception as e:
-        logger.warning(f"Failed to write access log to DB: {e}")
+        logger.error(f"[ACCESS_LOG] DB 기록 실패: {type(e).__name__}: {e}", exc_info=True)

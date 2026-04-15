@@ -475,7 +475,7 @@ async def callback(
             )
             await db.commit()
         except Exception as e:
-            logger.warning(f"Audit log write failed: {e}")
+            logger.error(f"[LOGIN_LOG] 감사 로그 실패: {type(e).__name__}: {e}", exc_info=True)
 
         try:
             from models.auth import AccessLog
@@ -494,7 +494,7 @@ async def callback(
             db.add(log)
             await db.commit()
         except Exception as e:
-            logger.warning(f"Login log write failed: {e}")
+            logger.error(f"[LOGIN_LOG] 접속 로그 실패: {type(e).__name__}: {e}", exc_info=True)
 
     # 앱용 JWT 생성 (role 포함)
     app_token = create_app_jwt(user_id, email, name, cfg, role=role)
