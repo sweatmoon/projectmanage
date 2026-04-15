@@ -15,6 +15,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -25,20 +26,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'staffing_hat',
-        sa.Column('id',                 sa.Integer(),                    autoincrement=True, nullable=False),
-        sa.Column('staffing_id',        sa.Integer(),                    nullable=False),
-        sa.Column('actual_person_id',   sa.Integer(),                    nullable=True),
-        sa.Column('actual_person_name', sa.String(),                     nullable=False),
-        sa.Column('created_at',         sa.DateTime(timezone=True),      nullable=True),
-        sa.Column('updated_at',         sa.DateTime(timezone=True),      nullable=True),
-        sa.Column('deleted_at',         sa.DateTime(timezone=True),      nullable=True),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index(op.f('ix_staffing_hat_id'),          'staffing_hat', ['id'],          unique=False)
-    op.create_index(op.f('ix_staffing_hat_staffing_id'), 'staffing_hat', ['staffing_id'], unique=False)
-    op.create_index(op.f('ix_staffing_hat_deleted_at'),  'staffing_hat', ['deleted_at'],  unique=False)
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if 'staffing_hat' not in inspector.get_table_names():
+        op.create_table(
+            'staffing_hat',
+            sa.Column('id',                 sa.Integer(),                    autoincrement=True, nullable=False),
+            sa.Column('staffing_id',        sa.Integer(),                    nullable=False),
+            sa.Column('actual_person_id',   sa.Integer(),                    nullable=True),
+            sa.Column('actual_person_name', sa.String(),                     nullable=False),
+            sa.Column('created_at',         sa.DateTime(timezone=True),      nullable=True),
+            sa.Column('updated_at',         sa.DateTime(timezone=True),      nullable=True),
+            sa.Column('deleted_at',         sa.DateTime(timezone=True),      nullable=True),
+            sa.PrimaryKeyConstraint('id'),
+        )
+        existing_indexes = [idx['name'] for idx in inspector.get_indexes('staffing_hat')] if 'staffing_hat' in inspector.get_table_names() else []
+        for idx_name, col in [
+            ('ix_staffing_hat_id',          'id'),
+            ('ix_staffing_hat_staffing_id', 'staffing_id'),
+            ('ix_staffing_hat_deleted_at',  'deleted_at'),
+        ]:
+            if idx_name not in existing_indexes:
+                op.create_index(op.f(idx_name), 'staffing_hat', [col], unique=False)
 
 
 def downgrade() -> None:

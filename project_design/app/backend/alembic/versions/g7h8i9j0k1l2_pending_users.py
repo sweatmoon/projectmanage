@@ -11,6 +11,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision: str = 'g7h8i9j0k1l2'
@@ -20,19 +21,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'pending_users',
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column('user_id', sa.String(255), unique=True, nullable=False, index=True),
-        sa.Column('email', sa.String(255), nullable=False),
-        sa.Column('name', sa.String(255), nullable=True),
-        sa.Column('status', sa.String(50), nullable=False, server_default='pending'),
-        sa.Column('requested_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('reviewed_by', sa.String(255), nullable=True),
-        sa.Column('note', sa.String(500), nullable=True),
-        sa.Column('reject_reason', sa.String(500), nullable=True),
-    )
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if 'pending_users' not in inspector.get_table_names():
+        op.create_table(
+            'pending_users',
+            sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
+            sa.Column('user_id', sa.String(255), unique=True, nullable=False, index=True),
+            sa.Column('email', sa.String(255), nullable=False),
+            sa.Column('name', sa.String(255), nullable=True),
+            sa.Column('status', sa.String(50), nullable=False, server_default='pending'),
+            sa.Column('requested_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+            sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('reviewed_by', sa.String(255), nullable=True),
+            sa.Column('note', sa.String(500), nullable=True),
+            sa.Column('reject_reason', sa.String(500), nullable=True),
+        )
 
 
 def downgrade() -> None:
