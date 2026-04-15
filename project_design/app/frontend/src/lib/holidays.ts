@@ -372,25 +372,33 @@ export function getHolidayName(dateStr: string): string | null {
 let _dynamicCache: ReadonlySet<string> | null = null;
 let _dynamicNames: Record<string, string> = {};
 
-/** DB API에서 공휴일을 가져와 캐시에 저장. 앱 초기화 시 1회 호출 */
+/** DB API에서 공휴일을 가져와 캐시에 저장. 앱 초기화 시 1회 호출
+ *  DB 목록 + 하드코딩 목록을 합산하여 캐시를 구성합니다.
+ *  (DB에 일부만 있어도 기존 하드코딩 공휴일은 유지됩니다)
+ */
 export async function fetchAndCacheHolidays(): Promise<void> {
   try {
-    // api.ts 의 client.holidays.list() 를 직접 호출하면 순환 참조 위험 → axios 직접 호출
     const res = await fetch('/api/v1/holidays');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const list: { date: string; name: string }[] = data?.holidays ?? [];
-    if (list.length > 0) {
-      _dynamicCache = new Set(list.map((h) => h.date));
-      _dynamicNames = Object.fromEntries(list.map((h) => [h.date, h.name]));
-      console.info(`[holidays] DB 캐시 로드: ${list.length}건`);
+
+    // 하드코딩 목록 + DB 추가분을 합산
+    const mergedSet = new Set<string>(KOREAN_HOLIDAYS);
+    const mergedNames: Record<string, string> = { ...HOLIDAY_NAMES };
+    for (const h of list) {
+      mergedSet.add(h.date);
+      mergedNames[h.date] = h.name;
     }
+    _dynamicCache = mergedSet;
+    _dynamicNames = mergedNames;
+    console.info(`[holidays] 공휴일 캐시 로드: 하드코딩 ${KOREAN_HOLIDAYS.size}건 + DB ${list.length}건 = 합계 ${mergedSet.size}건`);
   } catch (e) {
     console.warn('[holidays] DB 로드 실패, 하드코딩 폴백 사용:', e);
   }
 }
 
-/** 현재 활성 공휴일 Set (DB 캐시 우선, 없으면 하드코딩) */
+/** 현재 활성 공휴일 Set (DB+하드코딩 합산, 로드 전이면 하드코딩만) */
 export function getActiveHolidaySet(): ReadonlySet<string> {
   return _dynamicCache ?? KOREAN_HOLIDAYS;
 }
