@@ -397,7 +397,7 @@ export function getHolidayVersion(): number {
  */
 export async function fetchAndCacheHolidays(): Promise<void> {
   try {
-    const res = await fetch('/api/v1/holidays');
+    const res = await fetch('/api/v1/holidays', { credentials: 'include' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const list: { date: string; name: string }[] = data?.holidays ?? [];

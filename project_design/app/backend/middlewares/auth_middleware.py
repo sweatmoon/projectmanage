@@ -19,6 +19,7 @@ PUBLIC_PATHS = {
     "/health",
     "/api/config",
     "/api/v1/proposal-risk/debug",
+    "/api/v1/holidays",          # 공휴일 목록 (프론트엔드 캐시용, 인증 불필요)
     "/auth/login",
     "/auth/callback",
     "/auth/logout",
