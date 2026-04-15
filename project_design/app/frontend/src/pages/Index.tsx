@@ -468,12 +468,13 @@ export default function IndexPage() {
             const name = colonParts[0].trim();
             if (name) mdMap[name] = extractMd(colonParts);
           }
-          // 섹션 전체 인력(allSectionNames) + 일정 텍스트에만 있는 인력을 합산하여 정렬
-          // 일정 텍스트에 없는 섹션 인력도 포함 (MD 없음 = 전체기간)
-          const textOnlyNames = Object.keys(mdMap).filter(n => !nameInfo[n]);
+          // 해당 줄 일정 텍스트에 등장한 인력만 포함 (섹션 전체 인력 주입 금지)
+          // 섹션(nameInfo)은 분야·category 정보 lookup 용도로만 사용
+          // 입력 순서 유지: 섹션에 있는 인력은 섹션 order 기준, 없는 인력은 입력 순서 유지
+          const lineNames = Object.keys(mdMap); // 해당 줄에 등장한 인력 (입력 순서)
           const orderedNames = [
-            ...allSectionNames,
-            ...textOnlyNames, // 섹션에 없지만 일정 텍스트에 있는 인력은 맨 뒤
+            ...lineNames.filter(n => nameInfo[n]).sort((a, b) => nameInfo[a].order - nameInfo[b].order),
+            ...lineNames.filter(n => !nameInfo[n]), // 섹션에 없는 인력은 뒤에 입력 순서대로
           ];
           const people = orderedNames.map(name => {
             const mdStr = mdMap[name] || '';
