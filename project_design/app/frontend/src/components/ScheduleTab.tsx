@@ -393,7 +393,14 @@ interface UnifiedPerson {
   region?: string;       // 거주지역
   isExternal: boolean;
   can_travel?: boolean;  // 지방 출장 가능 여부
+  staffingId?: number;   // TBD 외부인력 개별 식별용
 }
+
+/** TBD 여부 판별 (대소문자 무관) */
+const isTBD = (name: string) => name.trim().toLowerCase() === 'tbd';
+/** 외부인력 personKey 생성: TBD는 staffingId 기반 개별 키, 그 외는 이름 기반 */
+const extPersonKey = (name: string, staffingId: number) =>
+  isTBD(name) ? `ext_tbd_${staffingId}` : `ext_${name.trim()}`;
 
 /* ───────── MD Expand Dialog ───────── */
 interface MdExpandDialogProps {
@@ -2179,7 +2186,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (s.person_id) {
         staffingPersonKey.set(s.id, s.person_id);
       } else if (s.person_name_text) {
-        staffingPersonKey.set(s.id, `ext_${s.person_name_text.trim()}`);
+        staffingPersonKey.set(s.id, extPersonKey(s.person_name_text, s.id));
       }
     }
     entryMap.forEach((e) => {
@@ -2327,7 +2334,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       for (const s of localStaffing) {
         if (!s.person_id && s.person_name_text) {
           const extName = s.person_name_text.trim();
-          if (extName && !seenExtNames.has(extName)) {
+          if (!extName) continue;
+          if (isTBD(extName)) {
+            // TBD는 staffing 건별로 개별 인원 표시
+            result.push({ id: extPersonKey(extName, s.id), name: extName, isExternal: true, staffingId: s.id });
+          } else if (!seenExtNames.has(extName)) {
             seenExtNames.add(extName);
             result.push({ id: `ext_${extName}`, name: extName, isExternal: true });
           }
@@ -2352,9 +2363,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       }
       if (!s.person_id && s.person_name_text) {
         const extName = s.person_name_text.trim();
-        if (extName && !seenExtNames.has(extName)) {
-          seenExtNames.add(extName);
-          result.push({ id: `ext_${extName}`, name: extName, isExternal: true });
+        if (extName) {
+          if (isTBD(extName)) {
+            // TBD는 staffing 건별로 개별 인원 표시
+            result.push({ id: extPersonKey(extName, s.id), name: extName, isExternal: true, staffingId: s.id });
+          } else if (!seenExtNames.has(extName)) {
+            seenExtNames.add(extName);
+            result.push({ id: `ext_${extName}`, name: extName, isExternal: true });
+          }
         }
       }
 
@@ -2380,7 +2396,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (!checkedProjectIds.has(s.project_id)) continue;
       const ph = phaseMapLocal.get(s.phase_id);
       if (!ph || !phaseOverlapsMonth(ph, year, month)) continue;
-      const personKey = s.person_id ? s.person_id : (s.person_name_text ? `ext_${s.person_name_text.trim()}` : null);
+      const personKey = s.person_id ? s.person_id : (s.person_name_text ? extPersonKey(s.person_name_text, s.id) : null);
       if (personKey) personIds.add(personKey);
       // hat 실제 투입자도 포함
       const hatRecord = hatMap.get(s.id);
@@ -2422,7 +2438,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (!ph) continue;
       const teamInfo = resolveTeamInfo(s.field, s.category);
       const key = teamInfo.sortGroup * 1000 + teamInfo.sortOrder * 100 + ph.sort_order;
-      const personKey = s.person_id ? s.person_id : `ext_${(s.person_name_text || '').trim()}`;
+      const personKey = s.person_id ? s.person_id : extPersonKey(s.person_name_text || '', s.id);
       const existing = personSortKey.get(personKey);
       if (existing === undefined || key < existing) {
         personSortKey.set(personKey, key);
@@ -2495,7 +2511,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const items: StaffingWithBadge[] = [];
       for (const s of localStaffing) {
         const matches = person.isExternal
-          ? (!s.person_id && s.person_name_text?.trim() === person.name)
+          ? (!s.person_id && (
+              person.staffingId != null
+                ? s.id === person.staffingId  // TBD: staffingId로 1:1 매칭
+                : s.person_name_text?.trim() === person.name
+            ))
           : (s.person_id === person.id);
         if (!matches) continue;
         let badge = badgeByPhase.get(s.phase_id);
