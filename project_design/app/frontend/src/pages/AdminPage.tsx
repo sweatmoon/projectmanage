@@ -960,49 +960,52 @@ export default function AdminPage() {
 
   // ── 렌더링 ────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-7xl mx-auto">
       {/* 헤더 */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
         <button
           onClick={() => navigate('/')}
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 transition-colors mr-2"
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 transition-colors mr-1 sm:mr-2"
           title="홈으로"
         >
           <ChevronLeft className="w-5 h-5" />
           홈
         </button>
-        <Shield className="w-6 h-6 text-purple-600" />
-        <h1 className="text-2xl font-bold text-gray-900">관리자 페이지</h1>
+        <Shield className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
+        <h1 className="text-lg sm:text-2xl font-bold text-gray-900">관리자 페이지</h1>
       </div>
 
-      {/* 탭 */}
-      <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {([
-          { key: 'stats', label: '대시보드', icon: Activity },
-          { key: 'audit', label: '감사 로그', icon: FileText },
-          { key: 'logs',  label: '접속 로그', icon: LogIn },
-          { key: 'users', label: '사용자 관리', icon: Users },
-          { key: 'pending',   label: '권한 신청', icon: UserPlus },
-          { key: 'holidays',  label: '휴일 관리', icon: CalendarDays },
-        ] as { key: TabType; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === key
-                ? 'border-purple-600 text-purple-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <Icon className="w-4 h-4" />
-            {label}
-            {key === 'pending' && pendingCount > 0 && (
-              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* 탭 - 모바일: 가로 스크롤, 아이콘+짧은 라벨 */}
+      <div className="overflow-x-auto -mx-3 sm:mx-0 mb-4 sm:mb-6" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="flex gap-0.5 sm:gap-1 border-b border-gray-200 min-w-max sm:min-w-0 px-3 sm:px-0">
+          {([
+            { key: 'stats',    label: '대시보드',   short: '대시보드', icon: Activity },
+            { key: 'audit',    label: '감사 로그',   short: '감사',    icon: FileText },
+            { key: 'logs',     label: '접속 로그',   short: '접속',    icon: LogIn },
+            { key: 'users',    label: '사용자 관리', short: '사용자',  icon: Users },
+            { key: 'pending',  label: '권한 신청',   short: '권한',    icon: UserPlus },
+            { key: 'holidays', label: '휴일 관리',   short: '휴일',    icon: CalendarDays },
+          ] as { key: TabType; label: string; short: string; icon: any }[]).map(({ key, label, short, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                activeTab === key
+                  ? 'border-purple-600 text-purple-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+              <span className="sm:hidden">{short}</span>
+              <span className="hidden sm:inline">{label}</span>
+              {key === 'pending' && pendingCount > 0 && (
+                <span className="min-w-[16px] h-4 sm:min-w-[18px] sm:h-[18px] flex items-center justify-center bg-red-500 text-white text-[9px] sm:text-[10px] font-bold rounded-full px-0.5 sm:px-1">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── 대시보드 탭 ── */}
@@ -1014,19 +1017,19 @@ export default function AdminPage() {
             </button>
           </div>
           {stats ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               {[
                 { label: '전체 사용자',      value: stats.total_users,           color: 'bg-blue-50 text-blue-700',   icon: Users },
                 { label: '오늘 로그인',      value: stats.total_logins_today,    color: 'bg-green-50 text-green-700', icon: LogIn },
                 { label: '오늘 API 호출',    value: stats.total_api_calls_today, color: 'bg-yellow-50 text-yellow-700', icon: Activity },
                 { label: '7일 활성 사용자',  value: stats.active_users_7days,    color: 'bg-purple-50 text-purple-700', icon: Clock },
               ].map(({ label, value, color, icon: Icon }) => (
-                <div key={label} className={`rounded-xl p-5 ${color}`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon className="w-5 h-5 opacity-70" />
-                    <span className="text-sm font-medium opacity-80">{label}</span>
+                <div key={label} className={`rounded-xl p-3 sm:p-5 ${color}`}>
+                  <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+                    <Icon className="w-4 h-4 sm:w-5 sm:h-5 opacity-70 flex-shrink-0" />
+                    <span className="text-xs sm:text-sm font-medium opacity-80 leading-tight">{label}</span>
                   </div>
-                  <div className="text-3xl font-bold">{(value ?? 0).toLocaleString()}</div>
+                  <div className="text-2xl sm:text-3xl font-bold">{(value ?? 0).toLocaleString()}</div>
                 </div>
               ))}
             </div>
@@ -1035,15 +1038,15 @@ export default function AdminPage() {
           )}
 
           {/* ── 공휴일 동기화 섹션 ── */}
-          <div className="mt-8 p-5 bg-blue-50 rounded-xl border border-blue-200">
-            <div className="flex items-center justify-between mb-3">
+          <div className="mt-6 sm:mt-8 p-3 sm:p-5 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3">
               <div>
                 <h3 className="text-sm font-semibold text-blue-800">🗓️ 공휴일 정보 동기화</h3>
                 <p className="text-xs text-blue-600 mt-0.5">
                   공공데이터포털 한국천문연구원 API 기반 · 매주 월요일 새벽 2시 자동 실행
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0">
                 <button
                   onClick={fetchHolidayStatus}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-xs font-medium hover:bg-blue-200"
