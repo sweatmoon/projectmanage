@@ -2135,6 +2135,8 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                               const geo = getBarGeometry(phase.start_date, phase.end_date);
                               if (!geo) return null;
                               const staffCount = localStaffing.filter((s) => s.phase_id === phase.id).length;
+                              const phaseStaffingIds = localStaffing.filter((s) => s.phase_id === phase.id).map((s) => s.id);
+                              const actualMd = phaseStaffingIds.reduce((sum, sid) => sum + (staffingEntryDates.get(sid)?.size ?? 0), 0);
                               return (
                                 <button
                                   key={phase.id}
@@ -2155,10 +2157,11 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                     overflow: 'hidden',
                                   }}
                                   onClick={() => handleCollapsedProjectClick(project)}
-                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n인력: ${staffCount}명${isWon ? '\n👑 수주 완료' : ''}`}
+                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n인력: ${staffCount}명 | 실제투입: ${actualMd}MD${isWon ? '\n👑 수주 완료' : ''}`}
                                 >
                                   <span className="text-[9px] font-semibold truncate" style={{ color: isWon ? '#fff' : color.text }}>
                                     {isWon ? '👑 ' : ''}{phase.phase_name}
+                                    {actualMd > 0 && geo.w > 60 && <span className="ml-1 opacity-70">{actualMd}MD</span>}
                                   </span>
                                 </button>
                               );
@@ -2219,6 +2222,9 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                             const geo = getBarGeometry(phase.start_date, phase.end_date);
                             const staffCount = localStaffing.filter((s) => s.phase_id === phase.id).length;
                             const bizDays = phase.start_date && phase.end_date ? calcBizDaysHoliday(phase.start_date, phase.end_date) : null;
+                            // 실제 선택된 공수 합산 (staffingEntryDates 기준)
+                            const phaseStaffingIds = localStaffing.filter((s) => s.phase_id === phase.id).map((s) => s.id);
+                            const actualMd = phaseStaffingIds.reduce((sum, sid) => sum + (staffingEntryDates.get(sid)?.size ?? 0), 0);
                             return (
                               <div key={phase.id} className="border-b border-gray-100 relative bg-white"
                                 style={{ height: ROW_H }}>
@@ -2236,7 +2242,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                       border: isWon ? '2px solid rgba(255,255,255,0.6)' : undefined,
                                     }}
                                     onClick={() => handleBadgeClick(project, phase)}
-                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일 | 인력: ${staffCount}명\n클릭하여 수정${isWon ? '\n👑 수주 완료' : ''}`}
+                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일 | 인력: ${staffCount}명 | 실제투입: ${actualMd}MD\n클릭하여 수정${isWon ? '\n👑 수주 완료' : ''}`}
                                   >
                                     {/* 공휴일/주말 패턴 렌더 (won이 아닐 때만) */}
                                     {!isWon && (
@@ -2269,7 +2275,11 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                     <div className="absolute inset-0 flex items-center px-2 overflow-hidden" style={{ zIndex: 2 }}>
                                       <span className="text-[9px] font-semibold truncate select-none" style={{ color: isWon ? '#fff' : color.text }}>
                                         {isWon ? '👑 ' : ''}{phase.phase_name}
-                                        {bizDays && geo.w > 60 && <span className="ml-1 opacity-70">({bizDays}일)</span>}
+                                        {geo.w > 60 && (
+                                          <span className="ml-1 opacity-70">
+                                            {actualMd > 0 ? `${actualMd}MD` : (bizDays ? `${bizDays}일` : '')}
+                                          </span>
+                                        )}
                                       </span>
                                     </div>
                                     {/* hover 오버레이 */}
