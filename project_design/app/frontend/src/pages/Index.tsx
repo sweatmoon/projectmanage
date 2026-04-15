@@ -583,84 +583,89 @@ export default function IndexPage() {
 
       {/* Main Content */}
       {(activeTab !== 'home' || isWriter) && (
-      <main className={`mx-auto px-4 py-6 ${
+      <main className={`mx-auto px-2 sm:px-4 py-3 sm:py-6 ${
         (activeTab === 'schedule' || activeTab === 'gantt') && wideMode
           ? 'max-w-full'
           : 'max-w-7xl'
       }`}>
         <Tabs value={isWriter && activeTab === 'home' ? 'proposal-risk' : activeTab} onValueChange={handleTabChange}>
-          <div className="flex items-center justify-between mb-4">
-            <TabsList>
-              {/* writer 역할: proposal-risk 탭만 표시 */}
-              {!isWriter && (
-                <TabsTrigger value="home" className="flex items-center gap-1.5">
-                  <Home className="h-4 w-4" />
-                  홈
+          {/* 탭 네비게이션 + 액션 버튼 */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 sm:mb-4">
+            {/* 탭 목록: 모바일에서 가로 스크롤 */}
+            <div className="overflow-x-auto -mx-2 px-2 pb-1 sm:pb-0 sm:overflow-visible sm:mx-0 sm:px-0">
+              <TabsList className="h-9 sm:h-10 inline-flex w-max sm:w-auto">
+                {/* writer 역할: proposal-risk 탭만 표시 */}
+                {!isWriter && (
+                  <TabsTrigger value="home" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                    <Home className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                    <span className="hidden xs:inline sm:inline">홈</span>
+                  </TabsTrigger>
+                )}
+                {!isWriter && (
+                  <TabsTrigger value="projects" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                    <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                    <span className="hidden sm:inline">프로젝트</span>
+                  </TabsTrigger>
+                )}
+                {!isWriter && (
+                  <TabsTrigger value="people" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                    <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                    <span className="hidden sm:inline">인력</span>
+                  </TabsTrigger>
+                )}
+                {!isWriter && (
+                  <TabsTrigger value="schedule" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                    <CalendarDays className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                    <span className="hidden sm:inline">인력별 일정</span>
+                  </TabsTrigger>
+                )}
+                {/* writer도 사업별 일정 탭 허용 */}
+                <TabsTrigger value="gantt" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                  <GanttChart className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                  <span className="hidden sm:inline">사업별 일정</span>
                 </TabsTrigger>
-              )}
-              {!isWriter && (
-                <TabsTrigger value="projects" className="flex items-center gap-1.5">
-                  <FolderOpen className="h-4 w-4" />
-                  프로젝트
+                {!isWriter && (
+                  <TabsTrigger value="reports" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                    <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                    <span className="hidden sm:inline">리포트</span>
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="proposal-risk" className="flex items-center gap-1 px-2 sm:px-3 text-xs sm:text-sm">
+                  <ShieldAlert className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                  <span className="hidden sm:inline">제안 리스크</span>
                 </TabsTrigger>
-              )}
-              {!isWriter && (
-              <TabsTrigger value="people" className="flex items-center gap-1.5">
-                <Users className="h-4 w-4" />
-                인력
-              </TabsTrigger>
-              )}
-              {!isWriter && (
-                <TabsTrigger value="schedule" className="flex items-center gap-1.5">
-                  <CalendarDays className="h-4 w-4" />
-                  인력별 일정
-                </TabsTrigger>
-              )}
-              {/* writer도 사업별 일정 탭 허용 (인력 정보 숨김 읽기 전용) */}
-              <TabsTrigger value="gantt" className="flex items-center gap-1.5">
-                <GanttChart className="h-4 w-4" />
-                사업별 일정
-              </TabsTrigger>
-              {!isWriter && (
-                <TabsTrigger value="reports" className="flex items-center gap-1.5">
-                  <BarChart3 className="h-4 w-4" />
-                  리포트
-                </TabsTrigger>
-              )}
-              <TabsTrigger value="proposal-risk" className="flex items-center gap-1.5">
-                <ShieldAlert className="h-4 w-4" />
-                제안 리스크
-              </TabsTrigger>
-            </TabsList>
+              </TabsList>
+            </div>
 
-            <div className="flex gap-2 items-center">
+            {/* 액션 버튼 영역 */}
+            <div className="flex gap-2 items-center flex-shrink-0">
               {/* 너비 확장 버튼 - 인력별/사업별 일정에서만 표시 */}
               {(activeTab === 'schedule' || activeTab === 'gantt') && (
                 <button
                   onClick={toggleWideMode}
                   title={wideMode ? '기본 너비로 줄이기' : '전체 너비로 확장'}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
+                  className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium border transition-colors ${
                     wideMode
                       ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                       : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                   }`}
                 >
-                  {wideMode ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                  {wideMode ? '기본 너비' : '전체 너비'}
+                  {wideMode ? <Minimize2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <Maximize2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+                  <span className="hidden sm:inline">{wideMode ? '기본 너비' : '전체 너비'}</span>
                 </button>
               )}
               {activeTab === 'projects' && !isWriter && (
                 <Button size="sm" onClick={() => setShowNewProject(true)} disabled={!canWrite}
                   title={isViewer ? '조회 전용 계정입니다' : undefined}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  프로젝트 추가
+                  <Plus className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">프로젝트 추가</span>
                 </Button>
               )}
               {activeTab === 'people' && !isWriter && (
                 <Button size="sm" onClick={() => setShowNewPerson(true)} disabled={!canWrite}
                   title={isViewer ? '조회 전용 계정입니다' : undefined}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  인력 추가
+                  <Plus className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">인력 추가</span>
                 </Button>
               )}
             </div>

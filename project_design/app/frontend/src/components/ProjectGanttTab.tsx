@@ -2029,6 +2029,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
               {/* ── 오른쪽: 타임라인 패널 ── */}
               <div className="flex-1 overflow-auto" id="gantt-timeline-scroll"
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onScroll={(e) => {
                   const labelEl = document.getElementById('gantt-label-scroll');
                   if (labelEl) labelEl.scrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
