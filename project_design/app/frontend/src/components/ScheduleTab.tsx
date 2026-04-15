@@ -396,8 +396,8 @@ interface UnifiedPerson {
   staffingId?: number;   // TBD 외부인력 개별 식별용
 }
 
-/** TBD 여부 판별 (대소문자 무관) */
-const isTBD = (name: string) => name.trim().toLowerCase() === 'tbd';
+/** TBD 여부 판별 (대소문자 무관, 'TBD(단계 감리원)' 같은 형태도 포함) */
+const isTBD = (name: string) => name.trim().toLowerCase().includes('tbd');
 /** 외부인력 personKey 생성: TBD는 staffingId 기반 개별 키, 그 외는 이름 기반 */
 const extPersonKey = (name: string, staffingId: number) =>
   isTBD(name) ? `ext_tbd_${staffingId}` : `ext_${name.trim()}`;
