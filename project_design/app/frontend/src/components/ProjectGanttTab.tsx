@@ -1787,7 +1787,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
   // ── 간트차트 레이아웃 상수 ──
   const COL_WIDTH = scale === 'day' ? 28 : 70;   // 기존 table 용 (편집 팝업에서 참조)
-  const LABEL_WIDTH = 320;   // 왼쪽 레이블 패널 너비
+  // 모바일에서 레이블 패널을 화면의 ~45%로 줄여 타임라인 가시성 확보
+  const LABEL_WIDTH = typeof window !== 'undefined' && window.innerWidth < 640
+    ? Math.floor(window.innerWidth * 0.45)
+    : 320;
   const ROW_H = 36;          // 행 높이
   const HEADER_H = 52;       // 헤더 높이 (월 24 + 일/주 28)
   const BAR_H = 20;          // bar 높이
@@ -1856,31 +1859,33 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
       {/* won-gantt rainbow CSS */}
       <style>{wonGanttStyle}</style>
       {/* ── 컨트롤 바 ── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={prevPeriod}><ChevronLeft className="h-4 w-4" /></Button>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+          {/* 날짜 네비게이션 */}
+          <Button variant="outline" size="sm" onClick={prevPeriod} className="h-8 w-8 p-0"><ChevronLeft className="h-4 w-4" /></Button>
           <Select value={String(viewYear)} onValueChange={(v) => setViewYear(parseInt(v))}>
-            <SelectTrigger className="w-[90px] h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[78px] sm:w-[90px] h-8 text-xs sm:text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>{yearOptions.map((y) => <SelectItem key={y} value={String(y)}>{y}년</SelectItem>)}</SelectContent>
           </Select>
           <Select value={String(viewMonth)} onValueChange={(v) => setViewMonth(parseInt(v))}>
-            <SelectTrigger className="w-[70px] h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[60px] sm:w-[70px] h-8 text-xs sm:text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>{monthOptions.map((m) => <SelectItem key={m} value={String(m)}>{m}월</SelectItem>)}</SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={nextPeriod}><ChevronRight className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" onClick={nextPeriod} className="h-8 w-8 p-0"><ChevronRight className="h-4 w-4" /></Button>
 
           {/* Scale toggle */}
-          <div className="flex items-center border rounded-md overflow-hidden ml-1">
+          <div className="flex items-center border rounded-md overflow-hidden">
             {(['day','week'] as ScaleMode[]).map((s) => (
               <button key={s} type="button"
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${scale === s ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
+                className={`px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-colors ${scale === s ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
                 onClick={() => setScale(s)}
               >{s === 'day' ? '일' : '주'}</button>
             ))}
           </div>
 
+          {/* 기간 선택 */}
           <Select value={String(periodMonths)} onValueChange={(v) => setPeriodMonths(parseInt(v))}>
-            <SelectTrigger className="w-[85px] h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[72px] sm:w-[85px] h-8 text-xs sm:text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="3">3개월</SelectItem>
               <SelectItem value="6">6개월</SelectItem>
@@ -1888,20 +1893,22 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
             </SelectContent>
           </Select>
 
-          <Button variant="outline" size="sm" onClick={() => { setViewYear(now.getFullYear()); setViewMonth(now.getMonth() + 1); }} className="text-xs font-semibold">오늘</Button>
+          <Button variant="outline" size="sm" onClick={() => { setViewYear(now.getFullYear()); setViewMonth(now.getMonth() + 1); }} className="text-xs font-semibold h-8">오늘</Button>
 
-          <div className="flex items-center gap-3 ml-2 pl-3 border-l border-gray-200">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <Checkbox checked={showA} onCheckedChange={(v) => setShowA(!!v)} className="h-4 w-4 border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" />
-              <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">A 감리</span>
+          {/* A/P 필터 */}
+          <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <Checkbox checked={showA} onCheckedChange={(v) => setShowA(!!v)} className="h-3.5 w-3.5 sm:h-4 sm:w-4 border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" />
+              <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-1 sm:px-1.5 py-0.5 rounded">A 감리</span>
             </label>
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <Checkbox checked={showP} onCheckedChange={(v) => setShowP(!!v)} className="h-4 w-4 border-purple-400 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600" />
-              <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">P 제안</span>
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <Checkbox checked={showP} onCheckedChange={(v) => setShowP(!!v)} className="h-3.5 w-3.5 sm:h-4 sm:w-4 border-purple-400 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600" />
+              <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-1 sm:px-1.5 py-0.5 rounded">P 제안</span>
             </label>
           </div>
         </div>
-        <div className="text-[10px] text-muted-foreground">💡 바 클릭 → 수정 | ▶ 클릭 → 단계 펼치기</div>
+        {/* 가이드 텍스트: 모바일에서 숨김 */}
+        <div className="hidden sm:block text-[10px] text-muted-foreground">💡 바 클릭 → 수정 | ▶ 클릭 → 단계 펼치기</div>
       </div>
 
       {/* ── 간트차트 본체 ── */}
