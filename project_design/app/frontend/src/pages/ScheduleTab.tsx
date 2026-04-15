@@ -6,7 +6,7 @@ import {
   type Project, type Person, type Phase, type Staffing, type CalendarEntry
 } from '../api'
 import { authStore } from '@/lib/api'
-import { KOREAN_HOLIDAYS, isNonWorkdayStr as isNonWorkdayStrHoliday } from '../lib/holidays'
+import { isNonWorkdayStrDynamic as isNonWorkdayStrHoliday, isHolidayDynamic as _isHolidayDynamic, getActiveHolidaySet } from '../lib/holidays'
 
 function isBusinessDay(dateS: string): boolean { return !isNonWorkdayStrHoliday(dateS) }
 
@@ -48,7 +48,7 @@ function dateStr(y: number, m: number, d: number) { return `${y}-${pad2(m)}-${pa
 function getDaysInMonth(year: number, month: number) { return new Date(year, month, 0).getDate() }
 function getDayOfWeek(dateS: string) { return new Date(dateS).getDay() }
 function isWeekend(dateS: string) { const d = getDayOfWeek(dateS); return d === 0 || d === 6 }
-function isHoliday(dateS: string) { return KOREAN_HOLIDAYS.has(dateS) }
+function isHoliday(dateS: string) { return getActiveHolidaySet().has(dateS) }
 function isToday(dateS: string) { return dateS === new Date().toISOString().slice(0, 10) }
 
 const DOW_KR = ['일', '월', '화', '수', '목', '금', '토']

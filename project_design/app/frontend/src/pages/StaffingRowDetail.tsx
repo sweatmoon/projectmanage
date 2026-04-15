@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { client } from '@/lib/api';
-import { countBusinessDays as countBusinessDaysHoliday } from '@/lib/holidays';
+import { countBusinessDaysDynamic as countBusinessDaysHoliday } from '@/lib/holidays';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';

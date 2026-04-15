@@ -234,6 +234,14 @@ export function isNonWorkdayStr(dateStr: string): boolean {
   return KOREAN_HOLIDAYS.has(dateStr);
 }
 
+/** 동적 캐시 기반 주말/공휴일 여부 (string 버전) */
+export function isNonWorkdayStrDynamic(dateStr: string): boolean {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return true;
+  return getActiveHolidaySet().has(dateStr);
+}
+
 /** 두 날짜 사이의 영업일 수 계산 (주말 + 공휴일 제외, 양 끝 포함) */
 export function countBusinessDays(startStr: string, endStr: string): number {
   if (!startStr || !endStr) return 0;
@@ -408,4 +416,22 @@ export function isNonWorkdayDynamic(year: number, month: number, day: number): b
 /** 동적 캐시 기반 공휴일 이름 반환 */
 export function getHolidayNameDynamic(dateStr: string): string | null {
   return getActiveHolidayNames()[dateStr] ?? null;
+}
+
+/** 동적 캐시 기반 영업일 수 계산 */
+export function countBusinessDaysDynamic(startStr: string, endStr: string): number {
+  if (!startStr || !endStr) return 0;
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return 0;
+  const holidays = getActiveHolidaySet();
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    const ds = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+    if (dow !== 0 && dow !== 6 && !holidays.has(ds)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
 }

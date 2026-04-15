@@ -55,7 +55,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { countBusinessDays } from '@/lib/holidays';
+import { countBusinessDaysDynamic as countBusinessDays } from '@/lib/holidays';
 import { useUserRole } from '@/hooks/useUserRole';
 
 // ── 입력 유효성 검증 헬퍼 ──────────────────────────────────────────

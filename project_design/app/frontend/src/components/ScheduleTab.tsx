@@ -50,7 +50,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock, HardHat, ArrowLeftRight } from 'lucide-react';
 import { client, StaffingChangeRecord } from '@/lib/api';
 import { toast } from 'sonner';
-import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
+import { isNonWorkdayDynamic as isNonWorkday, getHolidayNameDynamic as getHolidayName, countBusinessDaysDynamic as calcBizDaysHoliday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
 import { useUserRole } from '@/hooks/useUserRole';

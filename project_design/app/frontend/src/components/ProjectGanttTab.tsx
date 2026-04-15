@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { client, StaffingChangeRecord } from '@/lib/api';
 import { toast } from 'sonner';
 import { useUserRole } from '@/hooks/useUserRole';
-import { isNonWorkday, getHolidayName, countBusinessDays as calcBizDaysHoliday } from '@/lib/holidays';
+import { isNonWorkdayDynamic as isNonWorkday, getHolidayNameDynamic as getHolidayName, countBusinessDaysDynamic as calcBizDaysHoliday } from '@/lib/holidays';
 
 
 /* ───────── Rainbow animation CSS (won projects) ───────── */

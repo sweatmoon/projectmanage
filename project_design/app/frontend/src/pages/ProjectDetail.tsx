@@ -14,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { ArrowLeft, Save, Plus, Trash2, Lock, Pencil, FileText, Copy, Download, RefreshCw, CalendarDays, ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, UserCheck, HardHat, ArrowLeftRight } from 'lucide-react';
 import { StaffingChangeRecord } from '@/lib/api';
-import { countBusinessDays as countBizDaysHoliday, isNonWorkday } from '@/lib/holidays';
+import { countBusinessDaysDynamic as countBizDaysHoliday, isNonWorkdayDynamic as isNonWorkday } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
 import { useUserRole } from '@/hooks/useUserRole';

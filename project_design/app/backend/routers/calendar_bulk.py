@@ -12,8 +12,26 @@ from models.calendar_entries import Calendar_entries
 from models.staffing import Staffing
 from models.phases import Phases
 from models.projects import Projects
-from utils.holidays import is_business_day, get_consecutive_business_days
+from utils.holidays import is_business_day, get_consecutive_business_days, get_db_holidays
 from services.audit_service import write_audit_log, EventType, EntityType
+
+
+def _is_biz(d: date, holidays: frozenset) -> bool:
+    """주말 및 공휴일(DB 기반) 제외 영업일 여부"""
+    if d.weekday() >= 5:
+        return False
+    return d.strftime("%Y-%m-%d") not in holidays
+
+
+def _get_biz_days(start: date, end: date, num_days: int, holidays: frozenset) -> list:
+    """start~end 범위에서 공휴일/주말 제외 연속 영업일 num_days개 반환 (DB 기반)"""
+    result: list = []
+    cur = start
+    while len(result) < num_days and cur <= end:
+        if _is_biz(cur, holidays):
+            result.append(cur)
+        cur += timedelta(days=1)
+    return result
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +67,12 @@ async def bulk_toggle_cells(
     """Bulk upsert/delete calendar entries. If status is None or empty, delete the entry."""
     results = []
     try:
+        # DB 기반 공휴일 set 로드 (한 번만)
+        holidays = await get_db_holidays(db)
+
         for cell in request.cells:
             # Skip inserting entries on holidays/weekends (allow delete even on holidays)
-            if cell.status and not is_business_day(cell.entry_date):
+            if cell.status and not _is_biz(cell.entry_date, holidays):
                 results.append(CellResponse(
                     id=None,
                     staffing_id=cell.staffing_id,
@@ -247,6 +268,9 @@ async def cleanup_holiday_entries(
     - phase 종료일이 연장된 경우 DB의 phases 테이블도 함께 업데이트합니다.
     """
     try:
+        # DB 기반 공휴일 set 로드 (한 번만)
+        holidays = await get_db_holidays(db)
+
         # 1단계: 공휴일/주말에 있는 모든 엔트리 삭제
         stmt = select(Calendar_entries).order_by(Calendar_entries.staffing_id, Calendar_entries.entry_date)
         result = await db.execute(stmt)
@@ -254,7 +278,7 @@ async def cleanup_holiday_entries(
 
         deleted_holiday = 0
         for entry in all_entries:
-            if not is_business_day(entry.entry_date):
+            if not _is_biz(entry.entry_date, holidays):
                 await db.delete(entry)
                 deleted_holiday += 1
 
@@ -307,14 +331,14 @@ async def cleanup_holiday_entries(
 
             # 현재 범위에서 부족분 채울 수 있는지 확인
             search_start = phase.start_date
-            all_biz_in_range = get_consecutive_business_days(search_start, effective_end, staffing.md)
+            all_biz_in_range = _get_biz_days(search_start, effective_end, staffing.md, holidays)
             available_new = [d for d in all_biz_in_range if d not in existing_dates]
 
             # 범위 내 영업일이 부족하면 end_date를 하루씩 늘려 필요한 영업일 확보
             extra_end = effective_end
             while len(available_new) < needed:
                 extra_end = extra_end + timedelta(days=1)
-                if is_business_day(extra_end) and extra_end not in existing_dates:
+                if _is_biz(extra_end, holidays) and extra_end not in existing_dates:
                     available_new.append(extra_end)
                 # 무한루프 방지: 최대 365일 연장
                 if extra_end > effective_end + timedelta(days=365):
