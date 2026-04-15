@@ -1,6 +1,6 @@
 import logging
 from typing import List, Optional
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -240,6 +240,11 @@ async def cleanup_holiday_entries(
     """
     DB에 잘못 저장된 공휴일/주말 캘린더 엔트리를 삭제하고,
     각 staffing의 캘린더를 MD에 맞게 영업일로 재생성합니다.
+
+    [변경된 동작]
+    - 공휴일 삭제 후 phase 범위 내 영업일이 MD보다 부족하면
+      공수(MD)를 줄이는 대신 phase.end_date를 하루씩 늘려 MD를 맞춥니다.
+    - phase 종료일이 연장된 경우 DB의 phases 테이블도 함께 업데이트합니다.
     """
     try:
         # 1단계: 공휴일/주말에 있는 모든 엔트리 삭제
@@ -262,6 +267,8 @@ async def cleanup_holiday_entries(
         all_staffings = staffing_result.scalars().all()
 
         regenerated_count = 0
+        extended_phases: dict[int, date] = {}  # phase_id → 연장된 end_date
+
         for staffing in all_staffings:
             if not staffing.md or staffing.md <= 0:
                 continue
@@ -291,30 +298,68 @@ async def cleanup_holiday_entries(
             # 현재 이미 있는 날짜 수집
             existing_dates = {e.entry_date for e in cur_entries}
 
-            # MD 만큼의 연속 영업일 목록 생성
-            needed = staffing.md
-            all_biz_days = get_consecutive_business_days(phase.start_date, phase.end_date, needed)
+            # 부족한 영업일 수
+            needed = staffing.md - cur_count
 
-            # 없는 날짜만 추가
+            # phase.end_date 기준으로 영업일 탐색 시작점 결정
+            # (이미 다른 staffing이 이 phase의 end_date를 연장했을 수 있음)
+            effective_end = extended_phases.get(phase.id, phase.end_date)
+
+            # 현재 범위에서 부족분 채울 수 있는지 확인
+            search_start = phase.start_date
+            all_biz_in_range = get_consecutive_business_days(search_start, effective_end, staffing.md)
+            available_new = [d for d in all_biz_in_range if d not in existing_dates]
+
+            # 범위 내 영업일이 부족하면 end_date를 하루씩 늘려 필요한 영업일 확보
+            extra_end = effective_end
+            while len(available_new) < needed:
+                extra_end = extra_end + timedelta(days=1)
+                if is_business_day(extra_end) and extra_end not in existing_dates:
+                    available_new.append(extra_end)
+                # 무한루프 방지: 최대 365일 연장
+                if extra_end > effective_end + timedelta(days=365):
+                    logger.warning(f"[cleanup_holidays] staffing {staffing.id}: 365일 이내 영업일 확보 실패, 스킵")
+                    break
+
+            # phase.end_date 연장이 필요한 경우 기록
+            if extra_end > effective_end:
+                extended_phases[phase.id] = extra_end
+                logger.info(f"[cleanup_holidays] phase {phase.id} end_date 연장: {phase.end_date} → {extra_end}")
+
+            # 부족분만큼 새 엔트리 추가
             added = 0
-            for bd in all_biz_days:
-                if bd not in existing_dates:
-                    new_entry = Calendar_entries(
-                        staffing_id=staffing.id,
-                        entry_date=bd,
-                        status=calendar_status,
-                    )
-                    db.add(new_entry)
-                    added += 1
+            for bd in available_new[:needed]:
+                new_entry = Calendar_entries(
+                    staffing_id=staffing.id,
+                    entry_date=bd,
+                    status=calendar_status,
+                )
+                db.add(new_entry)
+                added += 1
 
             if added > 0:
-                regenerated_count += staffing.id
+                regenerated_count += 1
+
+        # 3단계: 연장된 phase의 end_date DB 업데이트
+        extended_phase_count = 0
+        for phase_id, new_end in extended_phases.items():
+            phase_result = await db.execute(select(Phases).where(Phases.id == phase_id))
+            phase = phase_result.scalar_one_or_none()
+            if phase and phase.end_date < new_end:
+                logger.info(f"[cleanup_holidays] phases 테이블 end_date 업데이트: id={phase_id}, {phase.end_date} → {new_end}")
+                phase.end_date = new_end
+                extended_phase_count += 1
 
         await db.commit()
         return {
             "deleted_holiday_entries": deleted_holiday,
             "staffings_regenerated": regenerated_count,
-            "message": f"공휴일/주말 엔트리 {deleted_holiday}개 삭제, 재생성 완료"
+            "extended_phases": extended_phase_count,
+            "message": (
+                f"공휴일/주말 엔트리 {deleted_holiday}개 삭제, "
+                f"재생성 완료"
+                + (f", 단계 종료일 {extended_phase_count}개 연장" if extended_phase_count else "")
+            )
         }
     except Exception as e:
         await db.rollback()
@@ -329,6 +374,11 @@ async def rebuild_all_calendars(
     """
     모든 staffing의 캘린더를 공휴일/주말을 제외한 영업일로 완전히 재생성합니다.
     기존 엔트리를 모두 삭제하고 MD 기준으로 다시 만듭니다.
+
+    [동작]
+    - phase 범위 내 영업일이 MD보다 부족하면 공수(MD)를 줄이지 않고
+      phase.end_date를 하루씩 늘려 필요한 영업일을 확보합니다.
+    - 연장된 phase의 end_date는 phases 테이블에도 반영됩니다.
     """
     try:
         staffing_result = await db.execute(
@@ -339,6 +389,7 @@ async def rebuild_all_calendars(
         total_deleted = 0
         total_created = 0
         skipped = 0
+        extended_phases: dict[int, date] = {}  # phase_id → 연장된 end_date
 
         for staffing in all_staffings:
             # 기존 엔트리 삭제
@@ -366,8 +417,34 @@ async def rebuild_all_calendars(
             proj = proj_result.scalar_one_or_none()
             calendar_status = "P" if (proj and proj.status == "제안") else "A"
 
+            # 이미 연장된 end_date가 있으면 사용
+            effective_end = extended_phases.get(phase.id, phase.end_date)
+
             # MD 만큼의 연속 영업일 목록 생성 (공휴일/주말 제외)
-            biz_days = get_consecutive_business_days(phase.start_date, phase.end_date, staffing.md)
+            biz_days = get_consecutive_business_days(phase.start_date, effective_end, staffing.md)
+
+            # 범위 내 영업일이 부족하면 end_date를 하루씩 늘려 필요한 영업일 확보
+            if len(biz_days) < staffing.md:
+                extra_end = effective_end
+                while len(biz_days) < staffing.md:
+                    extra_end = extra_end + timedelta(days=1)
+                    if is_business_day(extra_end):
+                        biz_days.append(extra_end)
+                    # 무한루프 방지: 최대 365일 연장
+                    if extra_end > effective_end + timedelta(days=365):
+                        logger.warning(
+                            f"[rebuild_all_calendars] staffing {staffing.id}: "
+                            f"365일 이내 영업일 확보 실패, 스킵"
+                        )
+                        break
+
+                if extra_end > effective_end:
+                    extended_phases[phase.id] = extra_end
+                    logger.info(
+                        f"[rebuild_all_calendars] phase {phase.id} end_date 연장: "
+                        f"{phase.end_date} → {extra_end}"
+                    )
+
             for bd in biz_days:
                 new_entry = Calendar_entries(
                     staffing_id=staffing.id,
@@ -378,13 +455,31 @@ async def rebuild_all_calendars(
             total_created += len(biz_days)
 
         await db.flush()
+
+        # 연장된 phase의 end_date DB 업데이트
+        extended_phase_count = 0
+        for phase_id, new_end in extended_phases.items():
+            phase_result = await db.execute(select(Phases).where(Phases.id == phase_id))
+            phase = phase_result.scalar_one_or_none()
+            if phase and phase.end_date < new_end:
+                logger.info(
+                    f"[rebuild_all_calendars] phases 테이블 end_date 업데이트: "
+                    f"id={phase_id}, {phase.end_date} → {new_end}"
+                )
+                phase.end_date = new_end
+                extended_phase_count += 1
+
         await db.commit()
 
         return {
             "total_deleted": total_deleted,
             "total_created": total_created,
             "skipped_staffings": skipped,
-            "message": f"전체 캘린더 재생성 완료: {total_deleted}개 삭제 → {total_created}개 생성 (공휴일/주말 제외)"
+            "extended_phases": extended_phase_count,
+            "message": (
+                f"전체 캘린더 재생성 완료: {total_deleted}개 삭제 → {total_created}개 생성 (공휴일/주말 제외)"
+                + (f", 단계 종료일 {extended_phase_count}개 연장" if extended_phase_count else "")
+            )
         }
     except Exception as e:
         await db.rollback()

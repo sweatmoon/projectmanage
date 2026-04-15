@@ -2979,7 +2979,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [rebuildingCalendar, setRebuildingCalendar] = useState(false);
 
   const handleRebuildCalendar = async () => {
-    if (!confirm('모든 투입일정을 공휴일/주말 제외 영업일 기준으로 재생성합니다.\n기존 수동 수정 내역이 모두 초기화됩니다. 계속하시겠습니까?')) return;
+    if (!confirm('모든 투입일정을 공휴일/주말 제외 영업일 기준으로 재생성합니다.\n- 공휴일로 인해 영업일이 부족하면 투입공수(MD)를 줄이지 않고 단계 종료일을 늘립니다.\n- 기존 수동 수정 내역이 모두 초기화됩니다.\n계속하시겠습니까?')) return;
     setRebuildingCalendar(true);
     try {
       const res = await client.apiCall.invoke({
@@ -2987,8 +2987,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         method: 'POST',
         data: {},
       });
-      const data = res as { total_deleted: number; total_created: number; message: string };
-      toast.success(`재생성 완료: ${data.total_deleted}개 삭제 → ${data.total_created}개 생성`);
+      const data = res as { total_deleted: number; total_created: number; extended_phases?: number; message: string };
+      const extMsg = data.extended_phases ? `, 단계 종료일 ${data.extended_phases}개 연장` : '';
+      toast.success(`재생성 완료: ${data.total_deleted}개 삭제 → ${data.total_created}개 생성${extMsg}`);
       // 현재 월 데이터 새로고침
       await fetchCalendarEntries();
     } catch (e) {
