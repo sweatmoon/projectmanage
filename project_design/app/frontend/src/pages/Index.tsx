@@ -616,12 +616,11 @@ export default function IndexPage() {
                   인력별 일정
                 </TabsTrigger>
               )}
-              {!isWriter && (
+              {/* writer도 사업별 일정 탭 허용 (인력 정보 숨김 읽기 전용) */}
               <TabsTrigger value="gantt" className="flex items-center gap-1.5">
                 <GanttChart className="h-4 w-4" />
                 사업별 일정
               </TabsTrigger>
-              )}
               {!isWriter && (
                 <TabsTrigger value="reports" className="flex items-center gap-1.5">
                   <BarChart3 className="h-4 w-4" />

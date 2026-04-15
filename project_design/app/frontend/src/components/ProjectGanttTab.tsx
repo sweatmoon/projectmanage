@@ -2002,7 +2002,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                 <div className="text-[11px] font-medium truncate text-gray-700">{phase.phase_name}</div>
                                 <div className="text-[9px] text-gray-400">
                                   {phase.start_date?.slice(5)} ~ {phase.end_date?.slice(5)}
-                                  {staffCount > 0 && <span className="ml-1 text-blue-400">{staffCount}명</span>}
+                                  {!isWriter && staffCount > 0 && <span className="ml-1 text-blue-400">{staffCount}명</span>}
                                 </div>
                               </div>
                             </div>
@@ -2157,7 +2157,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                     overflow: 'hidden',
                                   }}
                                   onClick={() => handleCollapsedProjectClick(project)}
-                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n인력: ${staffCount}명 | 실제투입: ${actualMd}MD${isWon ? '\n👑 수주 완료' : ''}`}
+                                  title={`${project.project_name} - ${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}${!isWriter ? `\n인력: ${staffCount}명 | 실제투입: ${actualMd}MD` : ''}${isWon ? '\n👑 수주 완료' : ''}`}
                                 >
                                   <span className="text-[9px] font-semibold truncate" style={{ color: isWon ? '#fff' : color.text }}>
                                     {isWon ? '👑 ' : ''}{phase.phase_name}
@@ -2242,7 +2242,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                       border: isWon ? '2px solid rgba(255,255,255,0.6)' : undefined,
                                     }}
                                     onClick={() => handleBadgeClick(project, phase)}
-                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일 | 인력: ${staffCount}명 | 실제투입: ${actualMd}MD\n클릭하여 수정${isWon ? '\n👑 수주 완료' : ''}`}
+                                    title={`${phase.phase_name}\n${phase.start_date} ~ ${phase.end_date}\n영업일: ${bizDays}일${!isWriter ? ` | 인력: ${staffCount}명 | 실제투입: ${actualMd}MD` : ''}\n클릭하여 조회${isWon ? '\n👑 수주 완료' : ''}`}
                                   >
                                     {/* 공휴일/주말 패턴 렌더 (won이 아닐 때만) */}
                                     {!isWon && (
@@ -2640,7 +2640,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                           <div className="font-medium truncate">{ph.phase_name}</div>
                           <div className="text-muted-foreground text-[10px]">{ph.start_date?.slice(5)} ~ {ph.end_date?.slice(5)}{bizDays ? ` (${bizDays}일)` : ''}</div>
                         </div>
-                        <div className="text-[10px] text-gray-500 flex-shrink-0">{staffCount}명</div>
+                        {!isWriter && <div className="text-[10px] text-gray-500 flex-shrink-0">{staffCount}명</div>}
                       </div>
                     );
                   })}
@@ -2649,7 +2649,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
               </div>
               <div className="px-5 py-3 border-t flex gap-2 justify-end">
                 <Button size="sm" variant="outline" onClick={() => { setProjectInfoTarget(null); toggleProjectExpand(proj.id); }}>단계 펼치기</Button>
-                {!isViewer && (
+                {!isViewer && !isWriter && (
                   <Button size="sm" onClick={() => { if (projPhaseList.length > 0) { setProjectInfoTarget(null); setEditTarget({ project: { ...proj }, phase: { ...projPhaseList[0] } }); } }} disabled={projPhaseList.length === 0}>단계 수정</Button>
                 )}
               </div>
