@@ -21,14 +21,13 @@ const wonGanttStyle = `
   100% { background-position: 0% 50%; }
 }
 @keyframes ganttShimmer {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
+  0%   { transform: translateX(-150%) rotate(25deg); }
+  100% { transform: translateX(250%) rotate(25deg); }
 }
 .won-gantt-bar {
-  background: linear-gradient(90deg,
-    #ff6b6b, #ff9f43, #feca57,
-    #48dbfb, #ff6b81, #a29bfe, #6c5ce7,
-    #fd79a8, #ff6b6b) !important;
+  background: linear-gradient(270deg,
+    #ff6b6b, #ffa94d, #ffe066, #69db7c,
+    #4dabf7, #cc5de8, #ff6b6b) !important;
   background-size: 300% 300% !important;
   animation: ganttRainbow 3s ease infinite !important;
   overflow: hidden;
@@ -38,7 +37,7 @@ const wonGanttStyle = `
   position: absolute;
   top: 0; left: 0; bottom: 0;
   width: 40%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
   animation: ganttShimmer 2s ease-in-out infinite;
   pointer-events: none;
 }
