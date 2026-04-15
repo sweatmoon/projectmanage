@@ -367,10 +367,29 @@ export function getHolidayName(dateStr: string): string | null {
 
 // ── DB 기반 동적 공휴일 캐시 ──────────────────────────────────────────────────
 // 앱 시작 시 fetchAndCacheHolidays() 를 호출하면 DB 값으로 캐시를 채운다.
-// 이후 isHoliday() / isNonWorkday() 등은 캐시(DB 우선, 폴백: 하드코딩) 를 사용한다.
+// React useSyncExternalStore 패턴으로 캐시 변경 시 구독 컴포넌트가 리렌더됩니다.
 
 let _dynamicCache: ReadonlySet<string> | null = null;
 let _dynamicNames: Record<string, string> = {};
+let _holidayVersion = 0; // 캐시 변경 버전 카운터
+const _listeners = new Set<() => void>(); // 변경 구독자
+
+/** 캐시가 변경됐음을 모든 구독자에게 알림 */
+function _notifyListeners() {
+  _holidayVersion++;
+  _listeners.forEach(fn => fn());
+}
+
+/** 구독 함수 (useSyncExternalStore용) */
+export function subscribeHolidayCache(cb: () => void): () => void {
+  _listeners.add(cb);
+  return () => _listeners.delete(cb);
+}
+
+/** 현재 버전 스냅샷 반환 (useSyncExternalStore용) */
+export function getHolidayVersion(): number {
+  return _holidayVersion;
+}
 
 /** DB API에서 공휴일을 가져와 캐시에 저장. 앱 초기화 시 1회 호출
  *  DB 목록 + 하드코딩 목록을 합산하여 캐시를 구성합니다.
@@ -393,6 +412,7 @@ export async function fetchAndCacheHolidays(): Promise<void> {
     _dynamicCache = mergedSet;
     _dynamicNames = mergedNames;
     console.info(`[holidays] 공휴일 캐시 로드: 하드코딩 ${KOREAN_HOLIDAYS.size}건 + DB ${list.length}건 = 합계 ${mergedSet.size}건`);
+    _notifyListeners(); // ← React에 변경 알림
   } catch (e) {
     console.warn('[holidays] DB 로드 실패, 하드코딩 폴백 사용:', e);
   }

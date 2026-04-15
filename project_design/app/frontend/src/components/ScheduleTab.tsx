@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 
 /* ── 수주 완료 셀 무지개 애니메이션 (전역 style 주입) ── */
 const WON_CELL_STYLE = `
@@ -50,7 +50,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ChevronLeft, ChevronRight, CalendarDays, X, Loader2, Lock, HardHat, ArrowLeftRight } from 'lucide-react';
 import { client, StaffingChangeRecord } from '@/lib/api';
 import { toast } from 'sonner';
-import { isNonWorkdayDynamic as isNonWorkday, getHolidayNameDynamic as getHolidayName, countBusinessDaysDynamic as calcBizDaysHoliday } from '@/lib/holidays';
+import { isNonWorkdayDynamic as isNonWorkday, getHolidayNameDynamic as getHolidayName, countBusinessDaysDynamic as calcBizDaysHoliday, subscribeHolidayCache, getHolidayVersion } from '@/lib/holidays';
 import { usePresence } from '@/hooks/usePresence';
 import { PresenceBadges, PresenceWarningBanner } from '@/components/PresenceBadges';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -1878,6 +1878,9 @@ const DayRow = React.memo(function DayRow({
 
 /* ───────── Main Component ───────── */
 export default function ScheduleTab({ projects, phases, staffing, people, onRefresh }: ScheduleTabProps) {
+  // 공휴일 캐시 변경 구독 → cellDataCache useMemo 재계산 트리거
+  const holidayVersion = useSyncExternalStore(subscribeHolidayCache, getHolidayVersion);
+
   const now = new Date();
   const saved = getSavedMonth();
   const { canWrite, isViewer, isWriter } = useUserRole();
@@ -2758,7 +2761,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       }
     }
     return cache;
-  }, [allPeople, personStaffings, personSubCols, daysInMonth, year, month, entryMap]);
+  }, [allPeople, personStaffings, personSubCols, daysInMonth, year, month, entryMap, holidayVersion]);
 
   const getPersonDayCellData = useCallback(
     (personId: number | string, day: number, subColIdx: number) =>
