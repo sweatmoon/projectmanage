@@ -112,19 +112,36 @@ def setup_logging():
 
     # Configure log format
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    formatter = logging.Formatter(log_format)
 
-    # Configure the root logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format=log_format,
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
-    )
+    # Configure the root logger directly (basicConfig is a no-op if handlers
+    # already exist, which happens when uvicorn pre-configures the root logger
+    # via its dictConfig before main.py is imported).
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
 
-    logging.getLogger("uvicorn").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.INFO)
+    # Remove any handlers that uvicorn or other libraries may have added so
+    # we can install our own with the correct format and level.
+    root_logger.handlers.clear()
+
+    # File handler (persistent log on disk)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # Stream handler (stdout → visible in Railway log viewer)
+    import sys
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    # Keep uvicorn / fastapi loggers at INFO and let them propagate to root
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.INFO)
+        lg.propagate = True
 
     logger = logging.getLogger(__name__)
     logger.info("=== Logging system initialized ===")
