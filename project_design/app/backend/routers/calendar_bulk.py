@@ -12,7 +12,7 @@ from models.calendar_entries import Calendar_entries
 from models.staffing import Staffing
 from models.phases import Phases
 from models.projects import Projects
-from utils.holidays import is_business_day, get_consecutive_business_days, get_db_holidays
+from utils.holidays import get_db_holidays
 from services.audit_service import write_audit_log, EventType, EntityType
 
 
@@ -403,8 +403,12 @@ async def rebuild_all_calendars(
     - phase 범위 내 영업일이 MD보다 부족하면 공수(MD)를 줄이지 않고
       phase.end_date를 하루씩 늘려 필요한 영업일을 확보합니다.
     - 연장된 phase의 end_date는 phases 테이블에도 반영됩니다.
+    - DB에 직접 추가한 공휴일도 포함하여 영업일을 판단합니다.
     """
     try:
+        # DB 공휴일 목록을 한 번만 조회 (하드코딩 + DB 추가 공휴일 모두 포함)
+        holidays = await get_db_holidays(db)
+
         staffing_result = await db.execute(
             select(Staffing).where(Staffing.deleted_at.is_(None))
         )
@@ -444,15 +448,15 @@ async def rebuild_all_calendars(
             # 이미 연장된 end_date가 있으면 사용
             effective_end = extended_phases.get(phase.id, phase.end_date)
 
-            # MD 만큼의 연속 영업일 목록 생성 (공휴일/주말 제외)
-            biz_days = get_consecutive_business_days(phase.start_date, effective_end, staffing.md)
+            # MD 만큼의 연속 영업일 목록 생성 (DB 공휴일 + 주말 제외)
+            biz_days = _get_biz_days(phase.start_date, effective_end, staffing.md, holidays)
 
             # 범위 내 영업일이 부족하면 end_date를 하루씩 늘려 필요한 영업일 확보
             if len(biz_days) < staffing.md:
                 extra_end = effective_end
                 while len(biz_days) < staffing.md:
                     extra_end = extra_end + timedelta(days=1)
-                    if is_business_day(extra_end):
+                    if _is_biz(extra_end, holidays):
                         biz_days.append(extra_end)
                     # 무한루프 방지: 최대 365일 연장
                     if extra_end > effective_end + timedelta(days=365):
