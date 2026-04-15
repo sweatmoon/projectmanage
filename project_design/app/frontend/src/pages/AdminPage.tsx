@@ -7,6 +7,7 @@ import {
   FileText, Filter, X, ChevronLeft, ChevronRight,
   Trash2, RotateCcw,
   UserPlus, CheckCircle2, XCircle, Bell, HelpCircle,
+  CalendarDays, Plus, Pencil, Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -72,7 +73,7 @@ interface AuditLogListResponse {
   has_more: boolean;
 }
 
-type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'pending';
+type TabType = 'stats' | 'logs' | 'users' | 'audit' | 'pending' | 'holidays';
 
 interface PendingUserItem {
   id: number;
@@ -685,6 +686,7 @@ export default function AdminPage() {
     if (activeTab === 'stats')     fetchStats();
     if (activeTab === 'audit')     fetchAuditLogs(0);
     if (activeTab === 'pending')   { fetchPendingUsers(); fetchPendingCount(); }
+    if (activeTab === 'holidays')  fetchHolidayList();
   }, [activeTab]);
 
   // ── 사용자 삭제 ────────────────────────────────────────────
@@ -741,6 +743,72 @@ export default function AdminPage() {
   // ── 공휴일 동기화 ──────────────────────────────────────────
   const [holidaySyncing, setHolidaySyncing] = useState(false);
   const [holidayStatus, setHolidayStatus] = useState<{total:number;last_sync:string|null;by_year:Record<string,number>;db_active:boolean}|null>(null);
+
+  // ── 공휴일 관리 탭 상태 ──────────────────────────────────────
+  type HolidayRow = { id: number; date: string; name: string; source: string; updated_at: string | null };
+  const [holidayList, setHolidayList] = useState<HolidayRow[]>([]);
+  const [holidayLoading, setHolidayLoading] = useState(false);
+  const [holidayForm, setHolidayForm] = useState({ date: '', name: '' });
+  const [holidayFormErr, setHolidayFormErr] = useState('');
+  const [holidaySubmitting, setHolidaySubmitting] = useState(false);
+  const [editingHoliday, setEditingHoliday] = useState<HolidayRow | null>(null);
+  const [editForm, setEditForm] = useState({ date: '', name: '' });
+  const [holidaySearch, setHolidaySearch] = useState('');
+
+  const fetchHolidayList = async () => {
+    setHolidayLoading(true);
+    try {
+      const list = await client.holidays.adminList();
+      setHolidayList(list);
+    } catch (e: any) {
+      toast.error('공휴일 목록 조회 실패');
+    } finally {
+      setHolidayLoading(false);
+    }
+  };
+
+  const handleHolidayCreate = async () => {
+    setHolidayFormErr('');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(holidayForm.date)) { setHolidayFormErr('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)'); return; }
+    if (!holidayForm.name.trim()) { setHolidayFormErr('공휴일 명칭을 입력해주세요'); return; }
+    setHolidaySubmitting(true);
+    try {
+      await client.holidays.create(holidayForm.date, holidayForm.name.trim());
+      toast.success(`${holidayForm.date} (${holidayForm.name}) 추가 완료`);
+      setHolidayForm({ date: '', name: '' });
+      await fetchHolidayList();
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail ?? '추가 실패';
+      setHolidayFormErr(msg);
+    } finally {
+      setHolidaySubmitting(false);
+    }
+  };
+
+  const handleHolidayDelete = async (row: HolidayRow) => {
+    if (!confirm(`${row.date} (${row.name})을 삭제하시겠습니까?`)) return;
+    try {
+      await client.holidays.remove(row.id);
+      toast.success(`${row.date} 삭제 완료`);
+      setHolidayList((prev) => prev.filter((h) => h.id !== row.id));
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '삭제 실패');
+    }
+  };
+
+  const handleHolidayEditSave = async () => {
+    if (!editingHoliday) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editForm.date)) { toast.error('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)'); return; }
+    if (!editForm.name.trim()) { toast.error('공휴일 명칭을 입력해주세요'); return; }
+    try {
+      await client.holidays.update(editingHoliday.id, { date_str: editForm.date, date_name: editForm.name.trim() });
+      toast.success('수정 완료');
+      setEditingHoliday(null);
+      await fetchHolidayList();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? '수정 실패');
+    }
+  };
 
   const fetchHolidayStatus = async () => {
     try {
@@ -915,6 +983,7 @@ export default function AdminPage() {
           { key: 'logs',  label: '접속 로그', icon: LogIn },
           { key: 'users', label: '사용자 관리', icon: Users },
           { key: 'pending',   label: '권한 신청', icon: UserPlus },
+          { key: 'holidays',  label: '휴일 관리', icon: CalendarDays },
         ] as { key: TabType; label: string; icon: any }[]).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -1723,6 +1792,175 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── 휴일 관리 탭 ── */}
+      {activeTab === 'holidays' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold">휴일 관리</h2>
+              <p className="text-xs text-gray-500 mt-0.5">공휴일을 직접 추가·수정·삭제하거나 공공데이터포털 API로 동기화합니다.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={fetchHolidayList}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-medium hover:bg-gray-200"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+              </button>
+              <button
+                onClick={handleHolidaySync}
+                disabled={holidaySyncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {holidaySyncing ? '동기화 중...' : '🔄 API 동기화'}
+              </button>
+            </div>
+          </div>
+
+          {/* 공휴일 추가 폼 */}
+          <div className="p-4 bg-green-50 rounded-xl border border-green-200 mb-5">
+            <h3 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-1.5">
+              <Plus className="w-4 h-4" /> 공휴일 수동 추가
+            </h3>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">날짜 (YYYY-MM-DD)</label>
+                <input
+                  type="date"
+                  value={holidayForm.date}
+                  onChange={(e) => setHolidayForm((p) => ({ ...p, date: e.target.value }))}
+                  className="border rounded-md px-2 py-1.5 text-sm w-40 focus:outline-none focus:ring-1 focus:ring-green-400"
+                />
+              </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-xs text-gray-600 block mb-1">공휴일 명칭</label>
+                <input
+                  type="text"
+                  placeholder="예: 근로자의 날"
+                  value={holidayForm.name}
+                  onChange={(e) => setHolidayForm((p) => ({ ...p, name: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleHolidayCreate(); }}
+                  className="border rounded-md px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-1 focus:ring-green-400"
+                />
+              </div>
+              <button
+                onClick={handleHolidayCreate}
+                disabled={holidaySubmitting}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />
+                {holidaySubmitting ? '추가 중...' : '추가'}
+              </button>
+            </div>
+            {holidayFormErr && <p className="text-xs text-red-600 mt-2">{holidayFormErr}</p>}
+          </div>
+
+          {/* 검색 + 목록 */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <Search className="w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="날짜 또는 명칭으로 검색..."
+                value={holidaySearch}
+                onChange={(e) => setHolidaySearch(e.target.value)}
+                className="flex-1 text-sm bg-transparent focus:outline-none"
+              />
+              <span className="text-xs text-gray-400">
+                {holidayList.filter((h) =>
+                  !holidaySearch || h.date.includes(holidaySearch) || h.name.includes(holidaySearch)
+                ).length}건
+              </span>
+            </div>
+
+            {holidayLoading ? (
+              <div className="text-center text-gray-400 py-10 text-sm">로딩 중...</div>
+            ) : holidayList.length === 0 ? (
+              <div className="text-center text-gray-400 py-10 text-sm">
+                등록된 공휴일이 없습니다.<br />
+                <span className="text-xs">'API 동기화' 버튼으로 공공데이터포털 공휴일을 불러오거나, 위 폼으로 직접 추가하세요.</span>
+              </div>
+            ) : (
+              <div className="overflow-auto max-h-[560px]">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs text-gray-500 font-semibold w-36">날짜</th>
+                      <th className="px-4 py-2 text-left text-xs text-gray-500 font-semibold">명칭</th>
+                      <th className="px-4 py-2 text-center text-xs text-gray-500 font-semibold w-20">출처</th>
+                      <th className="px-4 py-2 text-center text-xs text-gray-500 font-semibold w-28">조작</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {holidayList
+                      .filter((h) => !holidaySearch || h.date.includes(holidaySearch) || h.name.includes(holidaySearch))
+                      .map((row) => (
+                        <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          {editingHoliday?.id === row.id ? (
+                            <>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="date"
+                                  value={editForm.date}
+                                  onChange={(e) => setEditForm((p) => ({ ...p, date: e.target.value }))}
+                                  className="border rounded px-1.5 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="text"
+                                  value={editForm.name}
+                                  onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') handleHolidayEditSave(); if (e.key === 'Escape') setEditingHoliday(null); }}
+                                  className="border rounded px-1.5 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  autoFocus
+                                />
+                              </td>
+                              <td className="px-3 py-1.5 text-center">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${row.source === 'manual' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {row.source === 'manual' ? '직접' : 'API'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={handleHolidayEditSave} className="p-1 rounded hover:bg-blue-50 text-blue-600" title="저장"><Save className="w-3.5 h-3.5" /></button>
+                                  <button onClick={() => setEditingHoliday(null)} className="p-1 rounded hover:bg-gray-100 text-gray-400" title="취소"><X className="w-3.5 h-3.5" /></button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-2 font-mono text-xs text-gray-700">{row.date}</td>
+                              <td className="px-4 py-2 text-gray-800">{row.name}</td>
+                              <td className="px-4 py-2 text-center">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${row.source === 'manual' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {row.source === 'manual' ? '직접' : 'API'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={() => { setEditingHoliday(row); setEditForm({ date: row.date, name: row.name }); }} className="p-1 rounded hover:bg-blue-50 text-blue-500" title="수정"><Pencil className="w-3.5 h-3.5" /></button>
+                                  <button onClick={() => handleHolidayDelete(row)} className="p-1 rounded hover:bg-red-50 text-red-400" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* 안내 문구 */}
+          <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-700">
+            <strong>⚠️ 적용 안내:</strong> DB에 공휴일이 1건 이상 등록되면 하드코딩 목록 대신 DB 데이터가 자동으로 사용됩니다.
+            여기서 추가/수정/삭제한 내용은 <strong>즉시 스케줄 계산 및 간트 차트에 반영</strong>됩니다. (페이지 새로고침 없이 적용됨)
+          </div>
         </div>
       )}
     </div>

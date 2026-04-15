@@ -293,6 +293,11 @@ export const client = {
         return [];
       }
     },
+    /** 어드민 관리용 전체 목록 (id, source 포함) */
+    async adminList(): Promise<{ id: number; date: string; name: string; source: string; updated_at: string | null }[]> {
+      const res = await http.get('/api/v1/holidays/admin/list');
+      return res.data?.holidays ?? [];
+    },
     /** 동기화 상태 조회 (어드민용) */
     async status() {
       const res = await http.get('/api/v1/holidays/status');
@@ -301,6 +306,21 @@ export const client = {
     /** 수동 동기화 트리거 (어드민 전용) */
     async sync() {
       const res = await http.post('/api/v1/holidays/sync');
+      return res.data;
+    },
+    /** 공휴일 수동 추가 */
+    async create(date_str: string, date_name: string) {
+      const res = await http.post('/api/v1/holidays', { date_str, date_name });
+      return res.data;
+    },
+    /** 공휴일 수정 */
+    async update(id: number, data: { date_str?: string; date_name?: string }) {
+      const res = await http.put(`/api/v1/holidays/${id}`, data);
+      return res.data;
+    },
+    /** 공휴일 삭제 */
+    async remove(id: number) {
+      const res = await http.delete(`/api/v1/holidays/${id}`);
       return res.data;
     },
   },
