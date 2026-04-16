@@ -54,9 +54,14 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
   const { canWrite, isViewer } = useUserRole();
 
   const filtered = projects.filter(
-    (p) =>
-      p.project_name?.toLowerCase().includes(search.toLowerCase()) ||
-      p.organization?.toLowerCase().includes(search.toLowerCase())
+    (p) => {
+      const q = search.toLowerCase();
+      return (
+        p.project_name?.toLowerCase().includes(q) ||
+        p.organization?.toLowerCase().includes(q) ||
+        p.notes?.toLowerCase().includes(q)
+      );
+    }
   );
 
   // 그룹 분류
@@ -251,7 +256,7 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="사업명 또는 기관명으로 검색..."
+            placeholder="사업명, 기관명, 비고로 검색..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
