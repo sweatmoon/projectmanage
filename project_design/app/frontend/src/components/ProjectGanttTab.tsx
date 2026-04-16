@@ -1980,7 +1980,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     return (
                       <React.Fragment key={project.id}>
                         {/* 프로젝트 헤더 */}
-                        <div className="flex items-center px-2 border-b border-gray-300 bg-slate-100 sticky"
+                        <div className="flex items-center px-2 border-b border-gray-300 bg-slate-100"
                           style={{ height: ROW_H }}>
                           <button type="button"
                             className="p-0.5 mr-1 hover:bg-gray-200 rounded flex-shrink-0"
@@ -2037,8 +2037,11 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
               <div className="flex-1 overflow-auto" id="gantt-timeline-scroll"
                 style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onScroll={(e) => {
-                  const labelEl = document.getElementById('gantt-label-scroll');
-                  if (labelEl) labelEl.scrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
+                  const scrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
+                  requestAnimationFrame(() => {
+                    const labelEl = document.getElementById('gantt-label-scroll');
+                    if (labelEl) labelEl.scrollTop = scrollTop;
+                  });
                 }}
               >
                 <div style={{ width: timelineWidth, position: 'relative' }}>
