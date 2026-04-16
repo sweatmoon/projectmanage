@@ -1919,186 +1919,73 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
               프로젝트가 없습니다.
             </div>
           ) : (
-            <div className="flex" style={{ maxHeight: '78vh', overflow: 'hidden' }}>
-
-              {/* ── 왼쪽: 레이블 패널 ── */}
-              <div
-                className="flex-shrink-0 border-r border-gray-300 bg-white z-20"
-                style={{ width: LABEL_WIDTH, overflowY: 'hidden' }}
-              >
-                {/* 헤더 자리 */}
-                <div className="border-b border-gray-300 bg-slate-100 flex items-end px-3 pb-1"
-                  style={{ height: HEADER_H }}>
-                  <span className="text-[11px] font-semibold text-gray-600">사업 / 단계</span>
-                </div>
-
-                {/* 레이블 스크롤 영역 */}
-                <div className="overflow-y-auto" style={{ maxHeight: `calc(78vh - ${HEADER_H}px)` }} id="gantt-label-scroll">
-                  {projectRows.map(({ project, phases: projPhases }) => {
-                    const color = projectColorMap.get(project.id) || PROJECT_COLORS[0];
-                    const isExpanded = expandedProjectIds.has(project.id);
-                    const statusLabel = project.status === '제안' ? 'P' : project.status === '완료' ? '완' : project.status === '대기' ? '대' : 'A';
-                    const statusColors: Record<string,string> = { '감리':'#3b82f6','제안':'#f59e0b','완료':'#10b981','대기':'#6b7280' };
-
-                    if (projPhases.length === 0) {
-                      return (
-                        <div key={project.id} className="flex items-center px-3 border-b border-gray-100 bg-white"
-                          style={{ height: ROW_H }}>
-                          <span className="text-xs font-semibold truncate flex-1">{project.project_name}</span>
-                          <span className="text-[9px] text-gray-400 ml-1">단계없음</span>
-                        </div>
-                      );
-                    }
-
-                    if (!isExpanded) {
-                      // 접힌 상태: 프로젝트 한 행
-                      return (
-                        <div key={project.id}
-                          className="flex items-center px-2 border-b border-gray-200 bg-slate-50 hover:bg-slate-100 cursor-pointer group"
-                          style={{ height: ROW_H }}
-                          onClick={() => handleCollapsedProjectClick(project)}
-                        >
-                          <button type="button"
-                            className="p-0.5 mr-1 hover:bg-gray-200 rounded flex-shrink-0"
-                            onClick={(e) => { e.stopPropagation(); toggleProjectExpand(project.id); }}
-                            title="단계 펼치기"
-                          >
-                            <ChevronRight className="h-3.5 w-3.5 text-gray-500" />
-                          </button>
-                          <div className="w-2 h-2 rounded-sm flex-shrink-0 mr-1.5" style={{ backgroundColor: color.border }} />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold truncate">{project.project_name}</div>
-                            <div className="text-[9px] text-gray-400 truncate">{project.organization}</div>
-                          </div>
-                          <span className="text-[9px] font-bold rounded px-1 py-0.5 text-white flex-shrink-0 ml-1"
-                            style={{ backgroundColor: statusColors[project.status] || '#6b7280' }}>{statusLabel}</span>
-                        </div>
-                      );
-                    }
-
-                    // 펼친 상태: 프로젝트 헤더 행 + 각 phase 행
-                    return (
-                      <React.Fragment key={project.id}>
-                        {/* 프로젝트 헤더 */}
-                        <div className="flex items-center px-2 border-b border-gray-300 bg-slate-100"
-                          style={{ height: ROW_H }}>
-                          <button type="button"
-                            className="p-0.5 mr-1 hover:bg-gray-200 rounded flex-shrink-0"
-                            onClick={() => toggleProjectExpand(project.id)}
-                            title="단계 접기"
-                          >
-                            <ChevronDown className="h-3.5 w-3.5 text-gray-500" />
-                          </button>
-                          <div className="w-2 h-2 rounded-sm flex-shrink-0 mr-1.5" style={{ backgroundColor: color.border }} />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold truncate">{project.project_name}</div>
-                            <div className="text-[9px] text-gray-500 truncate">{project.organization}</div>
-                          </div>
-                          <span className="text-[9px] font-bold rounded px-1 py-0.5 text-white flex-shrink-0 ml-1"
-                            style={{ backgroundColor: statusColors[project.status] || '#6b7280' }}>{statusLabel}</span>
-                        </div>
-                        {/* 각 단계 */}
-                        {projPhases.map((phase) => {
-                          const staffCount = localStaffing.filter((s) => s.phase_id === phase.id).length;
-                          return (
-                            <div key={phase.id}
-                              className="flex items-center pl-8 pr-2 border-b border-gray-100 bg-white hover:bg-blue-50/30 cursor-pointer group"
-                              style={{ height: ROW_H }}
-                              onClick={() => handleBadgeClick(project, phase)}
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[11px] font-medium truncate text-gray-700">{phase.phase_name}</div>
-                                <div className="text-[9px] text-gray-400">
-                                  {phase.start_date?.slice(5)} ~ {phase.end_date?.slice(5)}
-                                  {!isWriter && staffCount > 0 && <span className="ml-1 text-blue-400">{staffCount}명</span>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
-
-                  {/* 유휴 인력 행 — writer일 때 숨김 */}
-                  {!isWriter && <div className="flex items-center px-3 border-t-2 border-slate-300 bg-slate-50"
-                    style={{ height: ROW_H }}>
-                    <span className="text-[11px] font-semibold text-slate-500">유휴 인력</span>
-                  </div>}
-                  {/* 중복 인력 행 — writer일 때 숨김 */}
-                  {!isWriter && <div className="flex items-center px-3 border-t border-slate-200 bg-orange-50"
-                    style={{ height: ROW_H }}>
-                    <span className="text-[11px] font-semibold text-orange-600">중복 인력</span>
-                  </div>}
-                </div>
-              </div>
-
-              {/* ── 오른쪽: 타임라인 패널 ── */}
-              <div className="flex-1 overflow-auto" id="gantt-timeline-scroll"
-                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
-                onScroll={(e) => {
-                  const scrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
-                  requestAnimationFrame(() => {
-                    const labelEl = document.getElementById('gantt-label-scroll');
-                    if (labelEl) labelEl.scrollTop = scrollTop;
-                  });
-                }}
-              >
-                <div style={{ width: timelineWidth, position: 'relative' }}>
+            /* ── 단일 스크롤 컨테이너: 레이블(sticky left) + 타임라인 ── */
+            <div className="overflow-auto" id="gantt-timeline-scroll"
+              style={{ maxHeight: '78vh', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+            >
+                <div style={{ width: LABEL_WIDTH + timelineWidth, minWidth: LABEL_WIDTH + timelineWidth, position: 'relative' }}>
 
                   {/* ── 헤더 (sticky top) ── */}
-                  <div className="sticky top-0 z-30 bg-white border-b border-gray-300" style={{ height: HEADER_H }}>
-                    {/* 월 행 */}
-                    <div className="flex border-b border-gray-200 bg-slate-200" style={{ height: 24 }}>
-                      {monthGroups.map((mg) => (
-                        <div key={mg.label}
-                          className="text-[10px] font-bold text-gray-700 flex items-center justify-center border-r border-gray-300 flex-shrink-0"
-                          style={{ width: mg.count * COL_WIDTH }}
-                        >
-                          {mg.label}
-                        </div>
-                      ))}
+                  <div className="sticky top-0 z-30 bg-white border-b border-gray-300 flex" style={{ height: HEADER_H }}>
+                    {/* 레이블 헤더 셀 (sticky left) */}
+                    <div className="sticky left-0 z-40 bg-slate-100 border-r border-gray-300 flex items-end px-3 pb-1 flex-shrink-0"
+                      style={{ width: LABEL_WIDTH }}>
+                      <span className="text-[11px] font-semibold text-gray-600">사업 / 단계</span>
                     </div>
-                    {/* 일/주 행 */}
-                    <div className="flex bg-slate-50" style={{ height: 28 }}>
-                      {columns.map((col, i) => {
-                        if (col.type === 'day') {
-                          const dc = col as DayColumn;
-                          return (
-                            <div key={i}
-                              className={`flex-shrink-0 flex items-center justify-center border-r border-gray-200 text-[9px] font-medium
-                                ${dc.isToday ? 'bg-blue-200 text-blue-800 font-bold'
-                                : dc.isHoliday ? 'bg-red-100 text-red-500'
-                                : dc.isWeekend ? 'bg-gray-200 text-gray-400'
-                                : 'text-gray-600'}`}
-                              style={{ width: COL_WIDTH }}
-                              title={dc.isHoliday ? `${dc.dateStr} (${dc.holidayName})` : dc.dateStr}
-                            >
-                              {dc.label}
-                            </div>
-                          );
-                        } else {
-                          const wc = col as WeekColumn;
-                          return (
-                            <div key={i}
-                              className={`flex-shrink-0 flex items-center justify-center border-r border-gray-200 text-[9px] font-medium
-                                ${wc.isCurrentWeek ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-600'}`}
-                              style={{ width: COL_WIDTH }}
-                              title={`${wc.startDate} ~ ${wc.endDate}`}
-                            >
-                              {wc.label}
-                            </div>
-                          );
-                        }
-                      })}
+                    {/* 타임라인 헤더 */}
+                    <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
+                      {/* 월 행 */}
+                      <div className="flex border-b border-gray-200 bg-slate-200" style={{ height: 24 }}>
+                        {monthGroups.map((mg) => (
+                          <div key={mg.label}
+                            className="text-[10px] font-bold text-gray-700 flex items-center justify-center border-r border-gray-300 flex-shrink-0"
+                            style={{ width: mg.count * COL_WIDTH }}
+                          >
+                            {mg.label}
+                          </div>
+                        ))}
+                      </div>
+                      {/* 일/주 행 */}
+                      <div className="flex bg-slate-50" style={{ height: 28 }}>
+                        {columns.map((col, i) => {
+                          if (col.type === 'day') {
+                            const dc = col as DayColumn;
+                            return (
+                              <div key={i}
+                                className={`flex-shrink-0 flex items-center justify-center border-r border-gray-200 text-[9px] font-medium
+                                  ${dc.isToday ? 'bg-blue-200 text-blue-800 font-bold'
+                                  : dc.isHoliday ? 'bg-red-100 text-red-500'
+                                  : dc.isWeekend ? 'bg-gray-200 text-gray-400'
+                                  : 'text-gray-600'}`}
+                                style={{ width: COL_WIDTH }}
+                                title={dc.isHoliday ? `${dc.dateStr} (${dc.holidayName})` : dc.dateStr}
+                              >
+                                {dc.label}
+                              </div>
+                            );
+                          } else {
+                            const wc = col as WeekColumn;
+                            return (
+                              <div key={i}
+                                className={`flex-shrink-0 flex items-center justify-center border-r border-gray-200 text-[9px] font-medium
+                                  ${wc.isCurrentWeek ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-600'}`}
+                                style={{ width: COL_WIDTH }}
+                                title={`${wc.startDate} ~ ${wc.endDate}`}
+                              >
+                                {wc.label}
+                              </div>
+                            );
+                          }
+                        })}
+                      </div>
                     </div>
                   </div>
 
                   {/* ── 바디 (행들) ── */}
                   <div style={{ position: 'relative' }}>
 
-                    {/* 배경 격자선 + 주말/공휴일 음영 */}
-                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
+                    {/* 배경 격자선 + 주말/공휴일 음영 (타임라인 영역에만, LABEL_WIDTH 오프셋) */}
+                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0, left: LABEL_WIDTH }}>
                       {columns.map((col, i) => {
                         if (col.type !== 'day') return null;
                         const dc = col as DayColumn;
@@ -2119,19 +2006,28 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
                     {/* 오늘 세로선 */}
                     {todayX !== undefined && (
-                      <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: todayX + COL_WIDTH / 2, width: 2, backgroundColor: '#ef4444', zIndex: 10, opacity: 0.8 }} />
+                      <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: LABEL_WIDTH + todayX + COL_WIDTH / 2, width: 2, backgroundColor: '#ef4444', zIndex: 10, opacity: 0.8 }} />
                     )}
 
                     {/* 프로젝트/단계 행 */}
                     {projectRows.map(({ project, phases: projPhases }) => {
                       const color = projectColorMap.get(project.id) || PROJECT_COLORS[0];
                       const isExpanded = expandedProjectIds.has(project.id);
+                      const statusLabel = project.status === '제안' ? 'P' : project.status === '완료' ? '완' : project.status === '대기' ? '대' : 'A';
+                      const statusColors: Record<string,string> = { '감리':'#3b82f6','제안':'#f59e0b','완료':'#10b981','대기':'#6b7280' };
 
                       if (projPhases.length === 0) {
                         return (
-                          <div key={project.id} className="border-b border-gray-100 relative"
+                          <div key={project.id} className="border-b border-gray-100 relative flex"
                             style={{ height: ROW_H }}>
-                            {/* 빈 행 */}
+                            {/* 레이블 셀 */}
+                            <div className="sticky left-0 z-20 flex items-center px-3 bg-white border-r border-gray-200 flex-shrink-0"
+                              style={{ width: LABEL_WIDTH }}>
+                              <span className="text-xs font-semibold truncate flex-1">{project.project_name}</span>
+                              <span className="text-[9px] text-gray-400 ml-1">단계없음</span>
+                            </div>
+                            {/* 타임라인 셀 */}
+                            <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }} />
                           </div>
                         );
                       }
@@ -2141,8 +2037,30 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                       if (!isExpanded) {
                         // 접힌 상태: 모든 phase bar를 한 행에 표시
                         return (
-                          <div key={project.id} className="border-b border-gray-200 relative bg-slate-50/50"
+                          <div key={project.id} className="border-b border-gray-200 relative flex bg-slate-50/50"
                             style={{ height: ROW_H }}>
+                            {/* 레이블 셀 (sticky left) */}
+                            <div className="sticky left-0 z-20 flex items-center px-2 bg-slate-50 border-r border-gray-200 flex-shrink-0 hover:bg-slate-100 cursor-pointer"
+                              style={{ width: LABEL_WIDTH }}
+                              onClick={() => handleCollapsedProjectClick(project)}
+                            >
+                              <button type="button"
+                                className="p-0.5 mr-1 hover:bg-gray-200 rounded flex-shrink-0"
+                                onClick={(e) => { e.stopPropagation(); toggleProjectExpand(project.id); }}
+                                title="단계 펼치기"
+                              >
+                                <ChevronRight className="h-3.5 w-3.5 text-gray-500" />
+                              </button>
+                              <div className="w-2 h-2 rounded-sm flex-shrink-0 mr-1.5" style={{ backgroundColor: color.border }} />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold truncate">{project.project_name}</div>
+                                <div className="text-[9px] text-gray-400 truncate">{project.organization}</div>
+                              </div>
+                              <span className="text-[9px] font-bold rounded px-1 py-0.5 text-white flex-shrink-0 ml-1"
+                                style={{ backgroundColor: statusColors[project.status] || '#6b7280' }}>{statusLabel}</span>
+                            </div>
+                            {/* 타임라인 셀 */}
+                            <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
                             {projPhases.map((phase) => {
                               const geo = getBarGeometry(phase.start_date, phase.end_date);
                               if (!geo) return null;
@@ -2178,6 +2096,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                 </button>
                               );
                             })}
+                            </div>
                           </div>
                         );
                       }
@@ -2186,8 +2105,28 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                       return (
                         <React.Fragment key={project.id}>
                           {/* 프로젝트 헤더 행: 전체 span bar */}
-                          <div className="border-b border-gray-300 relative bg-slate-100/70"
+                          <div className="border-b border-gray-300 relative flex bg-slate-100/70"
                             style={{ height: ROW_H }}>
+                            {/* 레이블 셀 (sticky left) */}
+                            <div className="sticky left-0 z-20 flex items-center px-2 bg-slate-100 border-r border-gray-300 flex-shrink-0"
+                              style={{ width: LABEL_WIDTH }}>
+                              <button type="button"
+                                className="p-0.5 mr-1 hover:bg-gray-200 rounded flex-shrink-0"
+                                onClick={() => toggleProjectExpand(project.id)}
+                                title="단계 접기"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 text-gray-500" />
+                              </button>
+                              <div className="w-2 h-2 rounded-sm flex-shrink-0 mr-1.5" style={{ backgroundColor: color.border }} />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold truncate">{project.project_name}</div>
+                                <div className="text-[9px] text-gray-500 truncate">{project.organization}</div>
+                              </div>
+                              <span className="text-[9px] font-bold rounded px-1 py-0.5 text-white flex-shrink-0 ml-1"
+                                style={{ backgroundColor: statusColors[project.status] || '#6b7280' }}>{statusLabel}</span>
+                            </div>
+                            {/* 타임라인 셀 */}
+                            <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
                             {(() => {
                               const projStart = projPhases.map(p => p.start_date || '').filter(Boolean).sort()[0];
                               const projEnd = projPhases.map(p => p.end_date || '').filter(Boolean).sort().reverse()[0];
@@ -2227,6 +2166,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                 />
                               );
                             })}
+                            </div>{/* 타임라인 셀 끝 */}
                           </div>
 
                           {/* 각 단계 행 */}
@@ -2234,12 +2174,26 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                             const geo = getBarGeometry(phase.start_date, phase.end_date);
                             const staffCount = localStaffing.filter((s) => s.phase_id === phase.id).length;
                             const bizDays = phase.start_date && phase.end_date ? calcBizDaysHoliday(phase.start_date, phase.end_date) : null;
-                            // 실제 선택된 공수 합산 (staffingEntryDates 기준)
                             const phaseStaffingIds = localStaffing.filter((s) => s.phase_id === phase.id).map((s) => s.id);
                             const actualMd = phaseStaffingIds.reduce((sum, sid) => sum + (staffingEntryDates.get(sid)?.size ?? 0), 0);
                             return (
-                              <div key={phase.id} className="border-b border-gray-100 relative bg-white"
+                              <div key={phase.id} className="border-b border-gray-100 relative flex bg-white"
                                 style={{ height: ROW_H }}>
+                                {/* 레이블 셀 (sticky left) */}
+                                <div className="sticky left-0 z-20 flex items-center pl-8 pr-2 bg-white border-r border-gray-100 flex-shrink-0 hover:bg-blue-50/30 cursor-pointer"
+                                  style={{ width: LABEL_WIDTH }}
+                                  onClick={() => handleBadgeClick(project, phase)}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] font-medium truncate text-gray-700">{phase.phase_name}</div>
+                                    <div className="text-[9px] text-gray-400">
+                                      {phase.start_date?.slice(5)} ~ {phase.end_date?.slice(5)}
+                                      {!isWriter && staffCount > 0 && <span className="ml-1 text-blue-400">{staffCount}명</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* 타임라인 셀 */}
+                                <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
                                 {geo && (
                                   <button
                                     type="button"
@@ -2300,6 +2254,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                                     />
                                   </button>
                                 )}
+                                </div>{/* 타임라인 셀 끝 */}
                               </div>
                             );
                           })}
@@ -2308,8 +2263,15 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                     })}
 
                     {/* ── 유휴 인력 행 — writer일 때 숨김 ── */}
-                    {!isWriter && <div className="border-t-2 border-slate-300 relative bg-slate-50/70"
+                    {!isWriter && <div className="border-t-2 border-slate-300 relative flex bg-slate-50/70"
                       style={{ height: ROW_H }}>
+                      {/* 레이블 셀 */}
+                      <div className="sticky left-0 z-20 flex items-center px-3 bg-slate-50 border-r border-slate-300 flex-shrink-0"
+                        style={{ width: LABEL_WIDTH }}>
+                        <span className="text-[11px] font-semibold text-slate-500">유휴 인력</span>
+                      </div>
+                      {/* 타임라인 셀 */}
+                      <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
                       {columns.map((col, ci) => {
                         const rowData = idleRowData[ci];
                         if (!rowData) return null;
@@ -2361,11 +2323,19 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                         }
                         return null;
                       })}
+                      </div>{/* 타임라인 셀 끝 */}
                     </div>}
 
                     {/* ── 중복 인력 행 — writer일 때 숨김 ── */}
-                    {!isWriter && <div className="border-t border-slate-200 relative bg-orange-50/40"
+                    {!isWriter && <div className="border-t border-slate-200 relative flex bg-orange-50/40"
                       style={{ height: ROW_H }}>
+                      {/* 레이블 셀 */}
+                      <div className="sticky left-0 z-20 flex items-center px-3 bg-orange-50 border-r border-slate-200 flex-shrink-0"
+                        style={{ width: LABEL_WIDTH }}>
+                        <span className="text-[11px] font-semibold text-orange-600">중복 인력</span>
+                      </div>
+                      {/* 타임라인 셀 */}
+                      <div style={{ width: timelineWidth, flexShrink: 0, position: 'relative' }}>
                       {columns.map((col, ci) => {
                         const rowData = overlapRowData[ci];
                         if (!rowData) return null;
@@ -2415,11 +2385,11 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
                         }
                         return null;
                       })}
+                      </div>{/* 타임라인 셀 끝 */}
                     </div>}
 
                   </div>{/* 바디 끝 */}
-                </div>{/* 타임라인 너비 끝 */}
-              </div>{/* 오른쪽 패널 끝 */}
+                </div>{/* 전체 너비 끝 */}
             </div>
           )}
         </CardContent>
