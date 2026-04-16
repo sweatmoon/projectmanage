@@ -162,7 +162,7 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
         <span className="flex items-center gap-1.5 flex-shrink-0 ml-2">
           {/* 비고 */}
           {project.notes && (
-            <span className="text-[10px] text-slate-400 max-w-[80px] truncate hidden sm:block" title={project.notes}>
+            <span className="text-[10px] text-slate-400 max-w-[100px] truncate hidden sm:block" title={project.notes}>
               {project.notes}
             </span>
           )}
@@ -175,10 +175,10 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
             </span>
           )}
 
-          {/* 기관명 */}
-          <span className="flex items-center gap-1 text-xs text-slate-400 max-w-[140px] truncate" title={project.organization}>
+          {/* 기관명 - max-w 제거, 사업명(flex-1)이 공간 양보 */}
+          <span className="flex items-center gap-1 text-xs text-slate-400 whitespace-nowrap" title={project.organization}>
             <Building2 className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">{project.organization}</span>
+            {project.organization}
           </span>
         </span>
       </div>
