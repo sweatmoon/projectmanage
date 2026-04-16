@@ -153,31 +153,34 @@ export default function ProjectTab({ projects, loading, onSelectProject, onRefre
         {/* 폴더 아이콘 */}
         <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" style={{ color: accentColor }} />
 
-        {/* 사업명 */}
+        {/* 사업명 - 남은 공간 모두 차지, 우측 영역 침범 안 함 */}
         <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate">
           {project.project_name}
         </span>
 
-        {/* 기관명 */}
-        <span className="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0 max-w-[120px] truncate">
-          <Building2 className="h-3 w-3 flex-shrink-0" />
-          {project.organization}
+        {/* 우측 고정 영역: 기관명 + 수주 배지 + 비고 */}
+        <span className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+          {/* 비고 */}
+          {project.notes && (
+            <span className="text-[10px] text-slate-400 max-w-[80px] truncate hidden sm:block" title={project.notes}>
+              {project.notes}
+            </span>
+          )}
+
+          {/* 수주 배지 */}
+          {isWon && (
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 whitespace-nowrap">
+              <Crown className="h-2.5 w-2.5" />
+              수주
+            </span>
+          )}
+
+          {/* 기관명 */}
+          <span className="flex items-center gap-1 text-xs text-slate-400 max-w-[140px] truncate" title={project.organization}>
+            <Building2 className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{project.organization}</span>
+          </span>
         </span>
-
-        {/* 수주 배지 */}
-        {isWon && (
-          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 flex-shrink-0">
-            <Crown className="h-2.5 w-2.5" />
-            수주
-          </span>
-        )}
-
-        {/* 비고 */}
-        {project.notes && (
-          <span className="text-[10px] text-slate-400 flex-shrink-0 max-w-[100px] truncate hidden sm:block" title={project.notes}>
-            {project.notes}
-          </span>
-        )}
       </div>
     );
   };
