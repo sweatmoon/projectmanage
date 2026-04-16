@@ -1489,13 +1489,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
   useEffect(() => {
     if (!idlePopover && !overlapPopover) return;
     const closeAll = () => { setIdlePopover(null); setOverlapPopover(null); };
-    const timelineEl  = document.getElementById('gantt-timeline-scroll');
-    const labelEl     = document.getElementById('gantt-label-scroll');
+    const timelineEl = document.getElementById('gantt-timeline-scroll');
     timelineEl?.addEventListener('scroll', closeAll);
-    labelEl?.addEventListener('scroll', closeAll);
     return () => {
       timelineEl?.removeEventListener('scroll', closeAll);
-      labelEl?.removeEventListener('scroll', closeAll);
     };
   }, [idlePopover, overlapPopover]);
 
@@ -1595,9 +1592,13 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
         if (overlapDates.size === 0) continue;
         const person = people.find((p) => p.id === personId);
+        // people 목록에 없는 경우 staffing의 person_name_text로 fallback
+        const fallbackName = person?.person_name
+          ?? localStaffing.find((s) => s.person_id === personId)?.person_name_text
+          ?? `ID:${personId}`;
         items.push({
           personId,
-          personName: person?.person_name ?? '(미상)',
+          personName: fallbackName,
           grade: person?.grade,
           team:  person?.team,
           overlapDays: overlapDates.size,
