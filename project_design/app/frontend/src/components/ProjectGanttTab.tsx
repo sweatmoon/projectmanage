@@ -1226,18 +1226,19 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         const staffingMeta = new Map<number, { personId: number; projectId: number }>();
         for (const s of localStaffing) {
           if (!s.person_id) continue;
-          const ph = localPhases.find((p) => p.id === s.phase_id);
+          const ph = localPhases.find((p) => Number(p.id) === Number(s.phase_id));
           if (!ph) continue;
-          staffingMeta.set(s.id, { personId: s.person_id, projectId: ph.project_id });
+          staffingMeta.set(Number(s.id), { personId: Number(s.person_id), projectId: Number(ph.project_id) });
         }
 
         for (const e of (res.entries || [])) {
           if (!e.status) continue;  // 선택되지 않은 엔트리 제외
+          const staffingId = Number(e.staffing_id);
           // 1) staffing별 날짜 맵
-          if (!entryMap.has(e.staffing_id)) entryMap.set(e.staffing_id, new Set());
-          entryMap.get(e.staffing_id)!.add(e.entry_date);
+          if (!entryMap.has(staffingId)) entryMap.set(staffingId, new Set());
+          entryMap.get(staffingId)!.add(e.entry_date);
           // 2) project별 person별 날짜 맵
-          const meta = staffingMeta.get(e.staffing_id);
+          const meta = staffingMeta.get(staffingId);
           if (!meta) continue;
           if (!byProject.has(meta.projectId)) byProject.set(meta.projectId, new Map());
           const projMap = byProject.get(meta.projectId)!;
@@ -1521,7 +1522,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
       for (const s of localStaffing) {
         if (!s.person_id) continue;
-        const ph = localPhases.find((p) => p.id === s.phase_id);
+        const ph = localPhases.find((p) => Number(p.id) === Number(s.phase_id));
         if (!ph) continue;
 
         // 이 staffing의 실제 선택된 날짜 중 컬럼 기간과 겹치는 날짜만
@@ -1543,7 +1544,7 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
 
         for (const dateStr of entryDates) {
           if (dateStr < colStart || dateStr > colEnd) continue;
-          const personId = s.person_id;
+          const personId = Number(s.person_id);
           if (!personDateStaffings.has(personId)) personDateStaffings.set(personId, new Map());
           const dateMap = personDateStaffings.get(personId)!;
           if (!dateMap.has(dateStr)) dateMap.set(dateStr, []);
@@ -1591,10 +1592,10 @@ export default function ProjectGanttTab({ projects, phases, staffing, people, on
         }
 
         if (overlapDates.size === 0) continue;
-        const person = people.find((p) => p.id === personId);
+        const person = people.find((p) => Number(p.id) === personId);
         // people 목록에 없는 경우 staffing의 person_name_text로 fallback
         const fallbackName = person?.person_name
-          ?? localStaffing.find((s) => s.person_id === personId)?.person_name_text
+          ?? localStaffing.find((s) => Number(s.person_id) === personId)?.person_name_text
           ?? `ID:${personId}`;
         items.push({
           personId,
