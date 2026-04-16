@@ -276,7 +276,7 @@ export default function IndexPage() {
   const fetchProjects = useCallback(async () => {
     setLoadingProjects(true);
     try {
-      const res = await client.entities.projects.query({ query: {}, limit: 200, sort: 'id' });
+      const res = await client.entities.projects.query({ query: {}, limit: 1000, sort: 'id' });
       setProjects(res?.data?.items || []);
     } catch (err) {
       console.error('Failed to fetch projects:', err);
@@ -288,7 +288,7 @@ export default function IndexPage() {
   const fetchPeople = useCallback(async () => {
     setLoadingPeople(true);
     try {
-      const res = await client.entities.people.query({ query: {}, limit: 200 });
+      const res = await client.entities.people.query({ query: {}, limit: 1000 });
       setPeople(res?.data?.items || []);
     } catch (err) {
       console.error('Failed to fetch people:', err);
