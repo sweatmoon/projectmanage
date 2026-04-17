@@ -1530,6 +1530,7 @@ interface DayRowProps {
   togglingCell: string | null;
   focusedPersonId: number | string | null;
   checkedProjectPeople: Set<number | string>;
+  hoveredStaffingIds: Set<number>;
   hoveredBadgePhaseId: number | null;
   hatMap: Map<number, HatRecord>;
   changeMap: Map<number, StaffingChangeRecord[]>;
@@ -1555,7 +1556,7 @@ interface DayRowProps {
 const DayRow = React.memo(function DayRow({
   d, year, month, todayStr, weekInfo, isFirstDayOfWeek, isWeekStart,
   allPeople, personSubCols, cellDataCache, togglingCell, focusedPersonId,
-  checkedProjectPeople, hoveredBadgePhaseId, hatMap, changeMap,
+  checkedProjectPeople, hoveredStaffingIds, hoveredBadgePhaseId, hatMap, changeMap,
   staffingTooltipInfo, colWidth, rowHeight, badgeColW, stickyLeftForDate,
   stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
   handleCellClick, handleSubColContextMenu, toggleProjectCheck,
@@ -1750,6 +1751,7 @@ const DayRow = React.memo(function DayRow({
           const changeRecord = changeRecords.length > 0 ? changeRecords[changeRecords.length - 1] : undefined;
           const isHatCell = !!hatRecord && !cellData?.isHatItem;
           const isHatActualCell = !!cellData?.isHatItem;
+          const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
 
           const changeTooltipSuffix = changeRecords.length > 0
             ? '\n' + changeRecords.map((cr, idx) =>
@@ -1765,7 +1767,9 @@ const DayRow = React.memo(function DayRow({
                 : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${changeTooltipSuffix}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
             : undefined;
 
-          const focusBg = isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
+          const focusBg = isHoveredBadgeCell
+            ? (cellData?.badge.color.available || 'rgba(253,230,138,0.5)')
+            : isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
 
           const borderStyle: React.CSSProperties = {
             borderLeft: isFirstSub ? '2px solid #64748b' : '1px solid #e5e7eb',
@@ -1789,7 +1793,7 @@ const DayRow = React.memo(function DayRow({
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''} ${isWonCell && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
                 data-phase-id={cellData.badge.phaseId}
                 style={{
                   position: 'relative', zIndex: 0,
@@ -1807,7 +1811,9 @@ const DayRow = React.memo(function DayRow({
                     ? { opacity: 0.75 }
                     : isNonWorkSelected
                       ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
-                      : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
+                      : isHoveredBadgeCell && !isWonCell
+                        ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
+                        : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
@@ -1827,11 +1833,12 @@ const DayRow = React.memo(function DayRow({
           }
 
           if (cellData && cellData.isAvailable && !cellData.isSelected) {
+            const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
             const isWonAvail = cellData.badge.is_won === true;
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all phase-avail-cell ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
+                className={`text-center select-none transition-all phase-avail-cell ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'} ${isWonAvail && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
                 data-phase-id={cellData.badge.phaseId}
                 data-border-color={cellData.badge.color.border}
                 data-bg-color={cellData.badge.color.bg}
@@ -1839,18 +1846,18 @@ const DayRow = React.memo(function DayRow({
                   position: 'relative', zIndex: 0,
                   backgroundColor: isHatCell
                     ? (cellData.badge.color.available || '#f9fafb')
-                    : (focusBg || cellData.badge.color.available),
+                    : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
                   backgroundImage: cellData.badge.pattern,
                   backgroundSize: cellData.badge.patternSize,
                   width: colWidth, height: rowHeight, padding: 0,
                   borderTop: borderStyle.borderTop,
                   borderBottom: borderStyle.borderBottom,
-                  borderLeft: isFirstSub ? '2px solid #64748b' : `1px dashed ${cellData.badge.color.border}`,
+                  borderLeft: isFirstSub ? '2px solid #64748b' : `1px ${dashedBorder} ${cellData.badge.color.border}`,
                   borderRight: (() => {
                     const baseRight = borderStyle.borderRight as string;
                     if (isLastSub && (isLastCheckedPerson || isLastPerson)) return baseRight;
                     if (isLastSub) return baseRight;
-                    return `1px dashed ${cellData.badge.color.border}`;
+                    return `1px ${dashedBorder} ${cellData.badge.color.border}`;
                   })(),
                   ...(isHatCell ? { opacity: 0.6 } : {}),
                 }}
@@ -3492,6 +3499,16 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const totalPersonCols = allPeople.reduce((sum, p) => sum + (personSubCols.get(p.id) || MIN_SUB_COLS), 0);
   const tableMinWidth = badgeColW + dateColW + dowColW + totalPersonCols * colWidth;
 
+  // 현재 hover 중인 배지 단계에 속한 staffing ID 집합 → 셀 강조에 사용
+  const hoveredStaffingIds = useMemo(() => {
+    if (!hoveredBadgePhaseId) return new Set<number>();
+    const ids = new Set<number>();
+    for (const s of localStaffing) {
+      if (s.phase_id === hoveredBadgePhaseId) ids.add(s.id);
+    }
+    return ids;
+  }, [hoveredBadgePhaseId, localStaffing]);
+
   const handlePersonHeaderClick = (personId: number | string) => {
     setFocusedPersonId((prev) => (prev === personId ? null : personId));
   };
@@ -3867,6 +3884,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         togglingCell={togglingCell}
                         focusedPersonId={focusedPersonId}
                         checkedProjectPeople={checkedProjectPeople}
+                        hoveredStaffingIds={hoveredStaffingIds}
                         hoveredBadgePhaseId={hoveredBadgePhaseId}
                         hatMap={hatMap}
                         changeMap={changeMap}
