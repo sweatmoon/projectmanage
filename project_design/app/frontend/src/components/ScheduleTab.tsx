@@ -3429,7 +3429,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return Math.max(max, 1);
   }, [weekInfos]);
 
-  const badgeColW = Math.max(160, maxBadgesInWeek * 26);
+  // 2열 그리드 기준: 카드 1개 약 110px, 2열로 배치되므로 ceil(badges/2)행 * 높이가 아닌 너비 고정
+  // 최소 230px (카드 2열이 들어갈 최소 너비), 3개 이상 시 열 수는 항상 2이므로 너비는 고정
+  const badgeColW = maxBadgesInWeek <= 1 ? 160 : Math.max(230, Math.min(maxBadgesInWeek, 2) * 115);
   const dateColW = 32;
   const dowColW = 26;
   const stickyLeftForDate = badgeColW;
