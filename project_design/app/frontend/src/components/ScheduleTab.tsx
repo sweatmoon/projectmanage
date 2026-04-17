@@ -249,7 +249,7 @@ function hueToProjectColor(hue: number): typeof PROJECT_COLORS[0] {
 }
 
 const MIN_SUB_COLS = 3;
-const DEFAULT_COL_WIDTH = 23;
+const DEFAULT_COL_WIDTH = 29;
 const DEFAULT_ROW_HEIGHT = 23;
 const SCHEDULE_COL_WIDTH_KEY = 'schedule_col_width';
 const SCHEDULE_ROW_HEIGHT_KEY = 'schedule_row_height';
