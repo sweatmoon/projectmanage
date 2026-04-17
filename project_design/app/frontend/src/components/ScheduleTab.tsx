@@ -2053,6 +2053,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [frozenPeopleOrder, setFrozenPeopleOrder] = useState<Array<number | string> | null>(null);
   // 인력 표시 범위: false = 해당 월 투입인력만(디폴트), true = 전체인력
   const [showAllPeople, setShowAllPeople] = useState(false);
+  const [peoplePageSize, setPeoplePageSize] = useState<20|40|60|null>(20);
 
   // Badge hover highlight
   // hoveredBadgePhaseId는 ref 기반으로 교체됨 (리렌더 방지)
@@ -2551,6 +2552,13 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
     return [...checked, ...unchecked];
   }, [allPeopleBase, checkedProjectIds, checkedProjectPeople, localStaffing, phaseMapLocal, frozenPeopleOrder, hatMap, people]);
+
+  // 체크된 인력이 있으면 전체 표시, 없으면 peoplePageSize 만큼만 슬라이싱
+  const displayPeople = useMemo(() => {
+    if (checkedProjectIds.size > 0) return allPeople; // 체크 시 전원 표시
+    if (peoplePageSize === null) return allPeople;     // 전체 선택 시 전원 표시
+    return allPeople.slice(0, peoplePageSize);
+  }, [allPeople, checkedProjectIds, peoplePageSize]);
 
   // 체크박스 변경 직후 (frozenPeopleOrder === null) allPeople 순서를 고정
   // 이후 셀 클릭으로 calendarEntries가 바뀌어도 순서가 유지됨
@@ -3489,7 +3497,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const stickyLeftForDow = badgeColW + dateColW;
 
   // Compute explicit table min-width to prevent column compression
-  const totalPersonCols = allPeople.reduce((sum, p) => sum + (personSubCols.get(p.id) || MIN_SUB_COLS), 0);
+  const totalPersonCols = displayPeople.reduce((sum, p) => sum + (personSubCols.get(p.id) || MIN_SUB_COLS), 0);
   const tableMinWidth = badgeColW + dateColW + dowColW + totalPersonCols * colWidth;
 
   // 현재 hover 중인 배지 단계에 속한 staffing ID 집합 → 셀 강조에 사용
@@ -3698,7 +3706,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {allPeople.length === 0 ? (
+          {allPeople.length === 0 ? (  // 전체 allPeople 기준으로 비어있음 판단
             <div className="text-center py-12 text-muted-foreground">
               <CalendarDays className="h-8 w-8 mx-auto mb-2 opacity-30" />
               배정된 인력이 없습니다.
@@ -3710,7 +3718,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                   <col style={{ width: badgeColW }} />
                   <col style={{ width: dateColW }} />
                   <col style={{ width: dowColW }} />
-                  {allPeople.map((p, pi) => {
+                  {displayPeople.map((p, pi) => {
                     const cols = personSubCols.get(p.id) || MIN_SUB_COLS;
                     return Array.from({ length: cols }).map((_, si) => (
                       <col
@@ -3729,7 +3737,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span>📌 주간별 사업</span>
-                        {/* 인력 표시 범위 토글 */}
+                        {/* 인력 표시 범위 토글: 이번달/전체 */}
                         <div className="flex items-center rounded overflow-hidden border border-slate-300 text-[8px]">
                           <button
                             type="button"
@@ -3748,6 +3756,25 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                             전체
                           </button>
                         </div>
+                        {/* 한 화면 표시 인원 수 선택 (체크 시 무시) */}
+                        {checkedProjectIds.size === 0 && (
+                          <div className="flex items-center rounded overflow-hidden border border-slate-300 text-[8px]">
+                            {([20, 40, 60, null] as (20|40|60|null)[]).map((size) => (
+                              <button
+                                key={size ?? 'all'}
+                                type="button"
+                                onClick={() => setPeoplePageSize(size)}
+                                className={`px-1.5 py-0.5 transition-colors ${peoplePageSize === size ? 'bg-indigo-500 text-white font-bold' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                                title={size ? `${size}명씩 표시` : '전원 표시'}
+                              >
+                                {size ?? '전체'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {checkedProjectIds.size === 0 && peoplePageSize !== null && allPeople.length > peoplePageSize && (
+                          <span className="text-[7px] text-slate-400">{displayPeople.length}/{allPeople.length}명</span>
+                        )}
                       </div>
                     </th>
                     <th
@@ -3764,16 +3791,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     >
                       요일
                     </th>
-                    {allPeople.map((p, pi) => {
+                    {displayPeople.map((p, pi) => {
                       const pStaffings = personStaffings.get(p.id) || [];
                       const totalMd = pStaffings.reduce((sum, ps) => sum + (ps.staffing.md || 0), 0);
                       const usedMd = pStaffings.reduce((sum, ps) => sum + (staffingDayCount.get(ps.staffing.id) || 0), 0);
                       const isFocused = focusedPersonId === p.id;
                       const isInChecked = checkedProjectPeople.has(p.id);
-                      const isLastPerson = pi === allPeople.length - 1;
+                      const isLastPerson = pi === displayPeople.length - 1;
                       const cols = personSubCols.get(p.id) || MIN_SUB_COLS;
-                      // Find boundary between checked and unchecked people
-                      const isLastCheckedPerson = isInChecked && (pi === allPeople.length - 1 || !checkedProjectPeople.has(allPeople[pi + 1]?.id));
+                      const isLastCheckedPerson = isInChecked && (pi === displayPeople.length - 1 || !checkedProjectPeople.has(displayPeople[pi + 1]?.id));
                       return (
                         <th
                           key={String(p.id)}
@@ -3825,15 +3851,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     })}
                   </tr>
                   <tr className="bg-slate-50">
-                    {allPeople.map((p, pi) => {
+                    {displayPeople.map((p, pi) => {
                       const cols = personSubCols.get(p.id) || MIN_SUB_COLS;
                       return Array.from({ length: cols }).map((_, si) => {
                         const isFocused = focusedPersonId === p.id;
                         const isInChecked = checkedProjectPeople.has(p.id);
                         const isFirstSub = si === 0;
-                        const isLastPerson = pi === allPeople.length - 1;
+                        const isLastPerson = pi === displayPeople.length - 1;
                         const isLastSub = si === cols - 1;
-                        const isLastCheckedPerson = isInChecked && (pi === allPeople.length - 1 || !checkedProjectPeople.has(allPeople[pi + 1]?.id));
+                        const isLastCheckedPerson = isInChecked && (pi === displayPeople.length - 1 || !checkedProjectPeople.has(displayPeople[pi + 1]?.id));
                         return (
                           <th
                             key={`${p.id}-sub-${si}`}
@@ -3871,7 +3897,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         weekInfo={weekInfo}
                         isFirstDayOfWeek={isFirstDayOfWeek}
                         isWeekStart={isWeekStart}
-                        allPeople={allPeople}
+                        allPeople={displayPeople}
                         personSubCols={personSubCols}
                         cellDataCache={cellDataCache}
                         entryMap={entryMap}
