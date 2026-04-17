@@ -1609,7 +1609,7 @@ const DayRow = React.memo(function DayRow({
                               className="h-3 w-3 flex-shrink-0"
                             />
                             <button
-                              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0"
+                              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all flex-1 text-left min-w-0 overflow-hidden"
                               style={{
                                 backgroundColor: hoveredBadgePhaseId === badge.phaseId ? badge.color.cell : badge.color.bg,
                                 backgroundImage: badge.pattern,
@@ -1655,7 +1655,7 @@ const DayRow = React.memo(function DayRow({
                               className="h-3 w-3 flex-shrink-0"
                             />
                             <button
-                              className={`flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0 ${isBadgeWon ? 'won-cell' : ''} ${isBadgeWon && hoveredBadgePhaseId === badge.phaseId ? 'won-cell-hovered' : ''}`}
+                              className={`flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all flex-1 text-left min-w-0 overflow-hidden ${isBadgeWon ? 'won-cell' : ''} ${isBadgeWon && hoveredBadgePhaseId === badge.phaseId ? 'won-cell-hovered' : ''}`}
                               style={isBadgeWon ? {
                                 borderLeft: '3px solid rgba(255,255,255,0.6)',
                               } : {
@@ -3429,7 +3429,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return Math.max(max, 1);
   }, [weekInfos]);
 
-  const badgeColW = Math.max(230, maxBadgesInWeek * 26);
+  const badgeColW = Math.max(160, maxBadgesInWeek * 26);
   const dateColW = 32;
   const dowColW = 26;
   const stickyLeftForDate = badgeColW;
