@@ -2208,73 +2208,51 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   // entryLookup = entryMap 그 자체 (alias, 하위 호환)
   const entryLookup = entryMap;
 
-  const staffingDayCount = useMemo(() => {
-    const map = new Map<number, number>();
-    entryMap.forEach((e) => {
-      if (e.status) {
-        map.set(e.staffing_id, (map.get(e.staffing_id) || 0) + 1);
-      }
-    });
-    return map;
-  }, [entryMap]);
-
-  // ── staffing_id → phase_id → project_id 역매핑 (중복 체크용) ──
-  const staffingProjectMap = useMemo(() => {
-    const map = new Map<number, number>(); // staffing_id → project_id
-    for (const s of localStaffing) {
-      const ph = localPhases.find((p) => p.id === s.phase_id);
-      if (ph) map.set(s.id, ph.project_id);
-    }
-    return map;
-  }, [localStaffing, localPhases]);
-
-  // ── person_id별 날짜 Set (전체 calendarEntries 기반, staffing→person 매핑 사용) ──
-  // EditModal의 중복 체크에 사용: 특정 phase의 프로젝트를 제외한 날짜 집합
-  const personDatesByProject = useMemo(() => {
-    // staffing_id → person_id 매핑
-    const staffingPersonMap = new Map<number, number>();
-    for (const s of localStaffing) {
-      if (s.person_id) staffingPersonMap.set(s.id, s.person_id);
-    }
-    // project_id별 person_id별 날짜 Set
-    // 구조: Map<projectId, Map<personId, Set<dateStr>>>
-    const byProject = new Map<number, Map<number, Set<string>>>();
-    entryMap.forEach((e) => {
-      if (!e.status) return;
-      const personId = staffingPersonMap.get(e.staffing_id);
-      if (!personId) return;
-      const projectId = staffingProjectMap.get(e.staffing_id);
-      if (!projectId) return;
-      if (!byProject.has(projectId)) byProject.set(projectId, new Map());
-      const projMap = byProject.get(projectId)!;
-      if (!projMap.has(personId)) projMap.set(personId, new Set());
-      projMap.get(personId)!.add(e.entry_date);
-    });
-    return byProject;
-  }, [entryMap, localStaffing, staffingProjectMap]);
-
-  // ── person별 전체 일정 날짜 Set (중복 제거) ──────────────────
-  // key: person_id (number) 또는 'ext_이름' (외부) → Set<dateStr>
-  // 같은 날 여러 staffing에 배정되어 있어도 날짜는 1개만 카운트
-  const personAllDates = useMemo(() => {
-    const map = new Map<number | string, Set<string>>();
+  // 기존 3번 별도 순회 → 1번으로 줄임 (기능·결과 동일)
+  const { staffingDayCount, personDatesByProject, personAllDates } = useMemo(() => {
+    // localStaffing 기반 선처리 맵
+    const staffingPersonId = new Map<number, number>();
     const staffingPersonKey = new Map<number, number | string>();
     for (const s of localStaffing) {
       if (s.person_id) {
+        staffingPersonId.set(s.id, s.person_id);
         staffingPersonKey.set(s.id, s.person_id);
       } else if (s.person_name_text) {
         staffingPersonKey.set(s.id, extPersonKey(s.person_name_text, s.id));
       }
     }
+
+    const dayCount = new Map<number, number>();
+    const byProject = new Map<number, Map<number, Set<string>>>();
+    const allDates = new Map<number | string, Set<string>>();
+
     entryMap.forEach((e) => {
       if (!e.status) return;
-      const personKey = staffingPersonKey.get(e.staffing_id);
-      if (personKey === undefined) return;
-      if (!map.has(personKey)) map.set(personKey, new Set());
-      map.get(personKey)!.add(e.entry_date);
+      const sid = e.staffing_id;
+
+      // staffingDayCount
+      dayCount.set(sid, (dayCount.get(sid) || 0) + 1);
+
+      // personDatesByProject
+      const personId = staffingPersonId.get(sid);
+      const projectId = staffingProjectMap.get(sid);
+      if (personId && projectId) {
+        if (!byProject.has(projectId)) byProject.set(projectId, new Map());
+        const projMap = byProject.get(projectId)!;
+        if (!projMap.has(personId)) projMap.set(personId, new Set());
+        projMap.get(personId)!.add(e.entry_date);
+      }
+
+      // personAllDates
+      const personKey = staffingPersonKey.get(sid);
+      if (personKey !== undefined) {
+        if (!allDates.has(personKey)) allDates.set(personKey, new Set());
+        allDates.get(personKey)!.add(e.entry_date);
+      }
     });
-    return map;
-  }, [entryMap, localStaffing]);
+
+    return { staffingDayCount: dayCount, personDatesByProject: byProject, personAllDates: allDates };
+  }, [entryMap, localStaffing, staffingProjectMap]);
 
   const projectColorMap = useMemo(() => {
     const map = new Map<number, typeof PROJECT_COLORS[0]>();
@@ -2330,6 +2308,39 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return map;
   }, [localProjects]);
 
+  // staffing_id → phase_id 역매핑 (O(n) 선처리 — visiblePhases/staffingHasEntryThisMonth 공용)
+  const staffingPhaseMap = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const s of localStaffing) m.set(s.id, s.phase_id);
+    return m;
+  }, [localStaffing]);
+
+  // ── staffing_id → project_id 역매핑 (중복 체크용) ──
+  // localPhases.find O(n²) → phaseMapLocal(Map) 활용으로 O(n)
+  const staffingProjectMap = useMemo(() => {
+    const map = new Map<number, number>(); // staffing_id → project_id
+    for (const s of localStaffing) {
+      const ph = phaseMapLocal.get(s.phase_id);
+      if (ph) map.set(s.id, ph.project_id);
+    }
+    return map;
+  }, [localStaffing, phaseMapLocal]);
+
+  // ── entryMap 단일 순회: staffingDayCount / personDatesByProject / personAllDates 동시 계산 ──
+
+  // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
+  // entryMap에서만 의존하므로 personStaffings와 분리해 슬롯 재계산 방지
+  const staffingHasEntryThisMonth = useMemo(() => {
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const s = new Set<number>();
+    entryMap.forEach((entry) => {
+      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
+        s.add(entry.staffing_id);
+      }
+    });
+    return s;
+  }, [entryMap, year, month]);
+
   const visiblePhases = useMemo(() => {
     // 1) 기본: 현재 월과 날짜가 겹치는 phase
     const overlapping = new Set<number>();
@@ -2339,13 +2350,11 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
 
     // 2) 보완: 현재 월에 선택된 calendar entry(status 있음)가 있는 staffing의 phase도 포함
     //    → phase 기간이 이미 지났어도 entries가 남아있으면 셀 표시 보장
+    //    staffingHasEntryThisMonth(Set<staffing_id>) + staffingPhaseMap(Map)으로 O(n) 처리
     const phaseIdsWithEntries = new Set<number>();
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    entryMap.forEach((entry) => {
-      if (!entry.status) return;
-      if (!entry.entry_date.startsWith(yearMonth)) return;
-      const s = localStaffing.find((st) => st.id === entry.staffing_id);
-      if (s) phaseIdsWithEntries.add(s.phase_id);
+    staffingHasEntryThisMonth.forEach((staffingId) => {
+      const phaseId = staffingPhaseMap.get(staffingId);
+      if (phaseId !== undefined) phaseIdsWithEntries.add(phaseId);
     });
 
     return localPhases
@@ -2356,7 +2365,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
         if (aIdx !== bIdx) return aIdx - bIdx;
         return a.sort_order - b.sort_order;
       });
-  }, [localPhases, year, month, projectIndexMap, entryMap, localStaffing]);
+  }, [localPhases, year, month, projectIndexMap, staffingHasEntryThisMonth, staffingPhaseMap]);
 
   const phaseBadges: PhaseBadgeInfo[] = useMemo(() => {
     return visiblePhases.map((ph) => {
@@ -2564,19 +2573,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       setFrozenPeopleOrder(null);
     }
   }, [allPeople, checkedProjectIds, frozenPeopleOrder]);
-
-  // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
-  // entryMap에서만 의존하므로 personStaffings와 분리해 슬롯 재계산 방지
-  const staffingHasEntryThisMonth = useMemo(() => {
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const s = new Set<number>();
-    entryMap.forEach((entry) => {
-      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
-        s.add(entry.staffing_id);
-      }
-    });
-    return s;
-  }, [entryMap, year, month]);
 
   // Person staffings with badge (unified), sorted by project index ascending
   // Also assigns a fixed slotIndex to each item via interval graph coloring:
@@ -3391,6 +3387,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   };
 
   const { personTotals, projectTotals } = useMemo(() => {
+    // people.find O(n²) → Map으로 O(n) 처리
+    const peopleNameMap = new Map<number, string>();
+    for (const p of people) peopleNameMap.set(p.id, p.person_name);
+
     const pMap = new Map<string, number>();
     const prMap = new Map<string, number>();
     entryMap.forEach((entry) => {
@@ -3398,7 +3398,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const s = staffingMap.get(entry.staffing_id);
       if (!s) return;
       const personName = s.person_id
-        ? people.find((p) => p.id === s.person_id)?.person_name || s.person_name_text || '?'
+        ? peopleNameMap.get(s.person_id) || s.person_name_text || '?'
         : s.person_name_text || '?';
       const proj = projectMap.get(s.project_id);
       const projName = proj?.project_name || '미정';
