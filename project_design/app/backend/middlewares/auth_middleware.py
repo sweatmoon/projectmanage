@@ -130,10 +130,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/calendar/entries_by_person_ids",
             "/api/v1/calendar/staffing-total-count",   # 뷰어 달력 MD 카운트 조회
         }
+        # viewer에게도 proposal-risk POST 허용 (simulate/optimize 등 DB 변경 없는 조회 목적)
+        viewer_allowed = (
+            path in VIEWER_ALLOWED_POST_PATHS
+            or path.startswith("/api/v1/proposal-risk/")
+        )
         if (
             request.state.user_role == "viewer"
             and request.method.upper() not in ("GET", "HEAD", "OPTIONS")
-            and path not in VIEWER_ALLOWED_POST_PATHS
+            and not viewer_allowed
         ):
             return JSONResponse(
                 status_code=403,
