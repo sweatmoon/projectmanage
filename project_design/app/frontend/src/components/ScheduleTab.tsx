@@ -1792,6 +1792,8 @@ const DayRow = React.memo(function DayRow({
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               >
                 {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : (
                   changeRecords.length > 0
@@ -1832,6 +1834,8 @@ const DayRow = React.memo(function DayRow({
                 }}
                 title={cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               >
                 {isToggling ? '…' : ''}
               </td>
@@ -1848,6 +1852,8 @@ const DayRow = React.memo(function DayRow({
                   width: colWidth, height: rowHeight, padding: 0, ...borderStyle,
                 }}
                 title={cellData.isHoliday ? (holidayName || '공휴일') : '주말'}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               />
             );
           }
