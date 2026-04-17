@@ -1598,10 +1598,11 @@ const DayRow = React.memo(function DayRow({
                       <div className="text-[7px] font-bold text-blue-600 border-b border-blue-200 pb-0.5 mb-0.5">
                         사업 (A)
                       </div>
+                      <div className="grid grid-cols-2 gap-0.5">
                       {aBadges.map((badge) => {
                         const isChecked = checkedProjectIds.has(badge.projectId);
                         return (
-                          <div key={badge.phaseId} className="flex items-center gap-1">
+                          <div key={badge.phaseId} className="flex items-center gap-0.5 min-w-0">
                             <Checkbox
                               checked={isChecked}
                               onCheckedChange={() => toggleProjectCheck(badge.projectId)}
@@ -1631,6 +1632,7 @@ const DayRow = React.memo(function DayRow({
                           </div>
                         );
                       })}
+                      </div>
                     </div>
                   )}
                   {aBadges.length > 0 && pBadges.length > 0 && (
@@ -1641,11 +1643,12 @@ const DayRow = React.memo(function DayRow({
                       <div className="text-[7px] font-bold text-amber-600 border-b border-amber-200 pb-0.5 mb-0.5">
                         제안 (P)
                       </div>
+                      <div className="grid grid-cols-2 gap-0.5">
                       {pBadges.map((badge) => {
                         const isChecked = checkedProjectIds.has(badge.projectId);
                         const isBadgeWon = badge.is_won === true;
                         return (
-                          <div key={badge.phaseId} className="flex items-center gap-1">
+                          <div key={badge.phaseId} className="flex items-center gap-0.5 min-w-0">
                             <Checkbox
                               checked={isChecked}
                               onCheckedChange={() => toggleProjectCheck(badge.projectId)}
@@ -1677,6 +1680,7 @@ const DayRow = React.memo(function DayRow({
                           </div>
                         );
                       })}
+                      </div>
                     </div>
                   )}
                 </>
@@ -3425,7 +3429,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return Math.max(max, 1);
   }, [weekInfos]);
 
-  const badgeColW = Math.max(160, maxBadgesInWeek * 26);
+  const badgeColW = Math.max(230, maxBadgesInWeek * 26);
   const dateColW = 32;
   const dowColW = 26;
   const stickyLeftForDate = badgeColW;
