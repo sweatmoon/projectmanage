@@ -95,7 +95,7 @@ class PeopleBatchDeleteRequest(BaseModel):
 @router.get("", response_model=PeopleListResponse)
 async def query_peoples(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = PeopleService(db)
@@ -106,7 +106,7 @@ async def query_peoples(
 @router.get("/all", response_model=PeopleListResponse)
 async def query_peoples_all(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = PeopleService(db)
