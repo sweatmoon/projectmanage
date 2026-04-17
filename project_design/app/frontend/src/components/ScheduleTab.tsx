@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
 
 /* ── 수주 완료 셀 무지개 애니메이션 (전역 style 주입) ── */
 const WON_CELL_STYLE = `
@@ -44,6 +43,21 @@ if (typeof document !== 'undefined' && !document.getElementById('won-cell-style'
   const el = document.createElement('style');
   el.id = 'won-cell-style';
   el.textContent = WON_CELL_STYLE;
+  document.head.appendChild(el);
+}
+
+/* ── phase hover 하이라이트 (리렌더 없이 DOM 직접 제어) ── */
+const PHASE_HOVER_STYLE = `
+  [data-phase-id].phase-hovered {
+    filter: brightness(0.88) !important;
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,0.25) !important;
+    border-style: solid !important;
+  }
+`;
+if (typeof document !== 'undefined' && !document.getElementById('phase-hover-style')) {
+  const el = document.createElement('style');
+  el.id = 'phase-hover-style';
+  el.textContent = PHASE_HOVER_STYLE;
   document.head.appendChild(el);
 }
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1516,8 +1530,7 @@ interface DayRowProps {
   togglingCell: string | null;
   focusedPersonId: number | string | null;
   checkedProjectPeople: Set<number | string>;
-  hoveredStaffingIds: Set<number>;
-  hoveredBadgePhaseId: number | null;
+  // hoveredStaffingIds/hoveredBadgePhaseId 제거 → CSS data-phase-id + .phase-hovered 로 처리
   hatMap: Map<number, HatRecord>;
   changeMap: Map<number, StaffingChangeRecord[]>;
   staffingTooltipInfo: Map<number, { label: string; team: string; field: string }>;
@@ -1542,7 +1555,7 @@ interface DayRowProps {
 const DayRow = React.memo(function DayRow({
   d, year, month, todayStr, weekInfo, isFirstDayOfWeek, isWeekStart,
   allPeople, personSubCols, cellDataCache, togglingCell, focusedPersonId,
-  checkedProjectPeople, hoveredStaffingIds, hoveredBadgePhaseId, hatMap, changeMap,
+  checkedProjectPeople, hatMap, changeMap,
   staffingTooltipInfo, colWidth, rowHeight, badgeColW, stickyLeftForDate,
   stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
   handleCellClick, handleSubColContextMenu, toggleProjectCheck,
@@ -1752,10 +1765,7 @@ const DayRow = React.memo(function DayRow({
                 : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${changeTooltipSuffix}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
             : undefined;
 
-          const isHoveredBadgeCell = cellData ? hoveredStaffingIds.has(cellData.staffingId) : false;
-          const focusBg = isHoveredBadgeCell
-            ? (cellData?.badge.color.available || 'rgba(253,230,138,0.5)')
-            : isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
+          const focusBg = isFocused ? 'rgba(254,249,195,0.4)' : isInChecked ? 'rgba(224,231,255,0.35)' : undefined;
 
           const borderStyle: React.CSSProperties = {
             borderLeft: isFirstSub ? '2px solid #64748b' : '1px solid #e5e7eb',
@@ -1779,7 +1789,8 @@ const DayRow = React.memo(function DayRow({
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''} ${isWonCell && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''}`}
+                data-phase-id={cellData.badge.phaseId}
                 style={{
                   position: 'relative', zIndex: 0,
                   backgroundColor: isNonWorkSelected
@@ -1796,15 +1807,12 @@ const DayRow = React.memo(function DayRow({
                     ? { opacity: 0.75 }
                     : isNonWorkSelected
                       ? { boxShadow: 'inset 0 0 0 2px #fca5a5', outline: '1px solid #f87171' }
-                      : isHoveredBadgeCell && !isWonCell
-                        ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
-                        : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
-                  // won-cell-hovered는 className으로 처리
+                      : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
-                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
-                onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
+                onMouseLeave={() => handleHoverPhase(null)}
               >
                 {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : (
                   changeRecords.length > 0
@@ -1819,35 +1827,37 @@ const DayRow = React.memo(function DayRow({
           }
 
           if (cellData && cellData.isAvailable && !cellData.isSelected) {
-            const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
             const isWonAvail = cellData.badge.is_won === true;
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'} ${isWonAvail && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
+                className={`text-center select-none transition-all phase-avail-cell ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
+                data-phase-id={cellData.badge.phaseId}
+                data-border-color={cellData.badge.color.border}
+                data-bg-color={cellData.badge.color.bg}
                 style={{
                   position: 'relative', zIndex: 0,
                   backgroundColor: isHatCell
                     ? (cellData.badge.color.available || '#f9fafb')
-                    : isHoveredBadgeCell ? cellData.badge.color.bg : (focusBg || cellData.badge.color.available),
+                    : (focusBg || cellData.badge.color.available),
                   backgroundImage: cellData.badge.pattern,
                   backgroundSize: cellData.badge.patternSize,
                   width: colWidth, height: rowHeight, padding: 0,
                   borderTop: borderStyle.borderTop,
                   borderBottom: borderStyle.borderBottom,
-                  borderLeft: isFirstSub ? '2px solid #64748b' : `1px ${dashedBorder} ${cellData.badge.color.border}`,
+                  borderLeft: isFirstSub ? '2px solid #64748b' : `1px dashed ${cellData.badge.color.border}`,
                   borderRight: (() => {
                     const baseRight = borderStyle.borderRight as string;
                     if (isLastSub && (isLastCheckedPerson || isLastPerson)) return baseRight;
                     if (isLastSub) return baseRight;
-                    return `1px ${dashedBorder} ${cellData.badge.color.border}`;
+                    return `1px dashed ${cellData.badge.color.border}`;
                   })(),
                   ...(isHatCell ? { opacity: 0.6 } : {}),
                 }}
                 title={cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)}
-                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
-                onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
+                onMouseLeave={() => handleHoverPhase(null)}
               >
                 {isToggling ? '…' : ''}
               </td>
@@ -1863,9 +1873,10 @@ const DayRow = React.memo(function DayRow({
                   backgroundColor: focusBg || (cellData.isHoliday ? '#fef2f2' : '#f1f5f9'),
                   width: colWidth, height: rowHeight, padding: 0, ...borderStyle,
                 }}
+                data-phase-id={cellData.badge.phaseId}
                 title={cellData.isHoliday ? (holidayName || '공휴일') : '주말'}
-                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
-                onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
+                onMouseLeave={() => handleHoverPhase(null)}
               />
             );
           }
@@ -1890,7 +1901,6 @@ const DayRow = React.memo(function DayRow({
   if (prev.togglingCell !== next.togglingCell) return false;
   if (prev.colWidth !== next.colWidth || prev.rowHeight !== next.rowHeight) return false;
   if (prev.focusedPersonId !== next.focusedPersonId) return false;
-  if (prev.hoveredBadgePhaseId !== next.hoveredBadgePhaseId) return false;
   if (prev.allPeople !== next.allPeople) return false;
   if (prev.checkedProjectPeople !== next.checkedProjectPeople) return false;
   if (prev.checkedProjectIds !== next.checkedProjectIds) return false;
@@ -2020,6 +2030,8 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const colWidthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowHeightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
+  // hover 상태를 state 대신 ref+DOM으로 관리 → 마우스 이동 시 리렌더 방지
+  const hoveredPhaseIdRef = useRef<number | null>(null);
 
   // Person column focus
   const [focusedPersonId, setFocusedPersonId] = useState<number | string | null>(null);
@@ -2032,7 +2044,27 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [showAllPeople, setShowAllPeople] = useState(false);
 
   // Badge hover highlight
+  // hoveredBadgePhaseId는 ref 기반으로 교체됨 (리렌더 방지)
+  // DOM에 data-phase-id를 달고 JS로 직접 클래스 토글
   const [hoveredBadgePhaseId, setHoveredBadgePhaseId] = useState<number | null>(null);
+  const handleHoverPhase = useCallback((phaseId: number | null) => {
+    const prev = hoveredPhaseIdRef.current;
+    if (prev === phaseId) return;
+    // 이전 hover 제거
+    if (prev !== null) {
+      document.querySelectorAll(`[data-phase-id="${prev}"]`).forEach((el) => {
+        (el as HTMLElement).classList.remove('phase-hovered');
+      });
+    }
+    // 새 hover 적용
+    if (phaseId !== null) {
+      document.querySelectorAll(`[data-phase-id="${phaseId}"]`).forEach((el) => {
+        (el as HTMLElement).classList.add('phase-hovered');
+      });
+    }
+    hoveredPhaseIdRef.current = phaseId;
+    setHoveredBadgePhaseId(phaseId);
+  }, []);
 
   // Badge context menu: right-click to show project phases
   const [badgeContextMenu, setBadgeContextMenu] = useState<{
@@ -2508,19 +2540,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [allPeople, checkedProjectIds, frozenPeopleOrder]);
 
   // Person staffings with badge (unified), sorted by project index ascending
-  // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
-  // entryMap 의존성을 personStaffings useMemo 밖으로 분리 → 셀 클릭 시 personStaffings 재계산 방지
-  const staffingHasEntryThisMonth = useMemo(() => {
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const s = new Set<number>();
-    entryMap.forEach((entry) => {
-      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
-        s.add(entry.staffing_id);
-      }
-    });
-    return s;
-  }, [entryMap, year, month]);
-
   // Also assigns a fixed slotIndex to each item via interval graph coloring:
   //   - overlapping items get different slots
   //   - non-overlapping items reuse the same slot
@@ -2529,6 +2548,15 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const map = new Map<number | string, StaffingWithBadge[]>();
     const badgeByPhase = new Map<number, PhaseBadgeInfo>();
     phaseBadges.forEach((b) => badgeByPhase.set(b.phaseId, b));
+
+    // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const staffingHasEntryThisMonth = new Set<number>();
+    entryMap.forEach((entry) => {
+      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
+        staffingHasEntryThisMonth.add(entry.staffing_id);
+      }
+    });
 
     for (const person of allPeople) {
       const items: StaffingWithBadge[] = [];
@@ -2661,7 +2689,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
 
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, staffingHasEntryThisMonth, year, month, projectMap, projectColorMap, hatMap]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, entryMap, year, month, projectMap, projectColorMap, hatMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
@@ -3068,16 +3096,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return boundaries;
   }, [year, month, daysInMonth]);
 
-  // ── 행 가상화: 월간 일수(최대 31행)를 가상 스크롤로 렌더 ──
-  const rowVirtualizer = useVirtualizer({
-    count: days.length,
-    getScrollElement: () => tableScrollRef.current,
-    estimateSize: () => rowHeight,
-    overscan: 5,
-  });
-  const virtualRows = rowVirtualizer.getVirtualItems();
-  const totalVirtualHeight = rowVirtualizer.getTotalSize();
-
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
     if (readOnlyMode) {
       // 뷰어/작성자: 읽기전용 모달로 투입인력 조회 허용
@@ -3457,16 +3475,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const totalPersonCols = allPeople.reduce((sum, p) => sum + (personSubCols.get(p.id) || MIN_SUB_COLS), 0);
   const tableMinWidth = badgeColW + dateColW + dowColW + totalPersonCols * colWidth;
 
-  // Staffing IDs belonging to the hovered badge phase
-  const hoveredStaffingIds = useMemo(() => {
-    if (!hoveredBadgePhaseId) return new Set<number>();
-    const ids = new Set<number>();
-    for (const s of localStaffing) {
-      if (s.phase_id === hoveredBadgePhaseId) ids.add(s.id);
-    }
-    return ids;
-  }, [hoveredBadgePhaseId, localStaffing]);
-
   const handlePersonHeaderClick = (personId: number | string) => {
     setFocusedPersonId((prev) => (prev === personId ? null : personId));
   };
@@ -3669,7 +3677,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               배정된 인력이 없습니다.
             </div>
           ) : (
-            <div ref={tableScrollRef} className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }} onScroll={() => setBadgeContextMenu(null)}>
+            <div className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }} onScroll={() => setBadgeContextMenu(null)}>
               <table className="text-xs" style={{ tableLayout: 'fixed', minWidth: tableMinWidth, borderCollapse: 'separate', borderSpacing: 0 }}>
                 <colgroup>
                   <col style={{ width: badgeColW }} />
@@ -3822,12 +3830,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                   </tr>
                 </thead>
                 <tbody>
-                  {/* 상단 스페이서 행 */}
-                  {virtualRows.length > 0 && virtualRows[0].start > 0 && (
-                    <tr><td colSpan={9999} style={{ height: virtualRows[0].start, padding: 0, border: 'none' }} /></tr>
-                  )}
-                  {virtualRows.map((vRow) => {
-                    const d = days[vRow.index];
+                  {days.map((d) => {
                     const weekInfo = dayToWeek.get(d);
                     const isFirstDayOfWeek = weekInfo ? d === weekInfo.startDay : false;
                     const isWeekStart = weekBoundaries.has(d);
@@ -3847,8 +3850,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         togglingCell={togglingCell}
                         focusedPersonId={focusedPersonId}
                         checkedProjectPeople={checkedProjectPeople}
-                        hoveredStaffingIds={hoveredStaffingIds}
-                        hoveredBadgePhaseId={hoveredBadgePhaseId}
                         hatMap={hatMap}
                         changeMap={changeMap}
                         staffingTooltipInfo={staffingTooltipInfo}
@@ -3870,14 +3871,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                       />
                     );
                   })}
-                  {/* 하단 스페이서 행 */}
-                  {virtualRows.length > 0 && (() => {
-                    const lastRow = virtualRows[virtualRows.length - 1];
-                    const bottomSpace = totalVirtualHeight - (lastRow.start + lastRow.size);
-                    return bottomSpace > 0 ? (
-                      <tr><td colSpan={9999} style={{ height: bottomSpace, padding: 0, border: 'none' }} /></tr>
-                    ) : null;
-                  })()}
                 </tbody>
               </table>
             </div>
