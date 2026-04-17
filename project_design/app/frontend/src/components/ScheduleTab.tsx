@@ -1530,7 +1530,7 @@ interface DayRowProps {
   togglingCell: string | null;
   focusedPersonId: number | string | null;
   checkedProjectPeople: Set<number | string>;
-  // hoveredStaffingIds/hoveredBadgePhaseId 제거 → CSS data-phase-id + .phase-hovered 로 처리
+  hoveredBadgePhaseId: number | null;
   hatMap: Map<number, HatRecord>;
   changeMap: Map<number, StaffingChangeRecord[]>;
   staffingTooltipInfo: Map<number, { label: string; team: string; field: string }>;
@@ -1555,7 +1555,7 @@ interface DayRowProps {
 const DayRow = React.memo(function DayRow({
   d, year, month, todayStr, weekInfo, isFirstDayOfWeek, isWeekStart,
   allPeople, personSubCols, cellDataCache, togglingCell, focusedPersonId,
-  checkedProjectPeople, hatMap, changeMap,
+  checkedProjectPeople, hoveredBadgePhaseId, hatMap, changeMap,
   staffingTooltipInfo, colWidth, rowHeight, badgeColW, stickyLeftForDate,
   stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
   handleCellClick, handleSubColContextMenu, toggleProjectCheck,
@@ -1901,6 +1901,7 @@ const DayRow = React.memo(function DayRow({
   if (prev.togglingCell !== next.togglingCell) return false;
   if (prev.colWidth !== next.colWidth || prev.rowHeight !== next.rowHeight) return false;
   if (prev.focusedPersonId !== next.focusedPersonId) return false;
+  if (prev.hoveredBadgePhaseId !== next.hoveredBadgePhaseId) return false;
   if (prev.allPeople !== next.allPeople) return false;
   if (prev.checkedProjectPeople !== next.checkedProjectPeople) return false;
   if (prev.checkedProjectIds !== next.checkedProjectIds) return false;
@@ -3850,6 +3851,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         togglingCell={togglingCell}
                         focusedPersonId={focusedPersonId}
                         checkedProjectPeople={checkedProjectPeople}
+                        hoveredBadgePhaseId={hoveredBadgePhaseId}
                         hatMap={hatMap}
                         changeMap={changeMap}
                         staffingTooltipInfo={staffingTooltipInfo}
