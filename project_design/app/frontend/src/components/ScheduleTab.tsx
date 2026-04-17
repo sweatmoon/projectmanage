@@ -34,9 +34,9 @@ const WON_CELL_STYLE = `
     pointer-events: none;
   }
   .won-cell-hovered {
-    outline: 3px solid rgba(0,0,0,0.7) !important;
-    outline-offset: -3px !important;
-    filter: brightness(0.88) !important;
+    outline: 1px solid rgba(0,0,0,0.6) !important;
+    outline-offset: -1px !important;
+    filter: brightness(0.85) !important;
   }
 `;
 if (typeof document !== 'undefined' && !document.getElementById('won-cell-style')) {
