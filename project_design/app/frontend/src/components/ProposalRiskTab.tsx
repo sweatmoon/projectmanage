@@ -477,9 +477,6 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
           <span className="text-xs font-bold text-red-600">{person.total_overlap_days}일</span>
         </td>
         <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
-          <span className="text-xs font-semibold text-orange-600">{person.total_overlap_md}MD</span>
-        </td>
-        <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
           <span className="text-xs text-gray-500">{person.conflicts.length}건</span>
         </td>
         <td className="px-3 py-2 text-right" onClick={() => setExpanded(v => !v)}>
@@ -523,10 +520,7 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
             <span className="text-xs font-semibold text-red-600">{c.overlap_days}일</span>
             <div className="text-[10px] text-gray-400">{c.overlap_start}~{c.overlap_end}</div>
           </td>
-          <td className="px-3 py-2 text-center">
-            <span className="text-xs text-orange-600">{c.overlap_md}MD</span>
-          </td>
-          <td className="px-3 py-2" colSpan={2} />
+          <td className="px-3 py-2" colSpan={3} />
         </tr>
       ))}
     </>
@@ -961,7 +955,7 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
           { label: '주의',     cur: orig?.warning,         sim: sim?.warning,         d: delta?.warning,         cls: 'text-amber-500',  bg: 'bg-amber-50 border-amber-200' },
           { label: '중복 인력', cur: orig?.conflict_people, sim: sim?.conflict_people, d: delta?.conflict_people, cls: 'text-orange-500', bg: 'bg-orange-50 border-orange-200' },
           { label: '중복 일수', cur: orig?.overlap_days,    sim: sim?.overlap_days,    d: delta?.overlap_days,    cls: 'text-slate-600',  bg: 'bg-gray-50 border-gray-200' },
-          { label: '중복 MD',  cur: orig?.overlap_md,      sim: sim?.overlap_md,      d: delta?.overlap_md,      cls: 'text-slate-600',  bg: 'bg-gray-50 border-gray-200' },
+
         ].map(item => (
           <div key={item.label}
             className={`rounded-xl border px-2 py-2.5 text-center ${
@@ -1200,7 +1194,6 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                     <th className="text-left px-3 py-2 font-semibold">인력</th>
                     <th className="text-left px-3 py-2 font-semibold">분야</th>
                     <th className="text-center px-2 py-2 font-semibold whitespace-nowrap">중복일</th>
-                    <th className="text-center px-2 py-2 font-semibold whitespace-nowrap">MD</th>
                     <th className="text-left px-2 py-2 font-semibold">교체 인력</th>
                     <th className="w-6" />
                   </tr>
@@ -1417,15 +1410,6 @@ function IntegratedPersonRow({
           )}
         </td>
 
-        {/* MD */}
-        <td className="px-2 py-2 text-center">
-          {person.has_conflict ? (
-            <span className="text-[10px] text-orange-600">{person.total_overlap_md}MD</span>
-          ) : (
-            <span className="text-[10px] text-gray-300">–</span>
-          )}
-        </td>
-
         {/* 교체 드롭다운 */}
         <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
           <PersonReplacePicker
@@ -1474,13 +1458,7 @@ function IntegratedPersonRow({
                 : <span className="text-[9px] text-gray-300">–</span>
               }
             </td>
-            <td className="px-2 py-1.5 text-center">
-              {ph.has_overlap
-                ? <span className="text-[10px] text-orange-600">{ph.overlap_md}MD</span>
-                : <span className="text-[9px] text-gray-300">–</span>
-              }
-            </td>
-            <td colSpan={2} />
+            <td colSpan={3} />
           </tr>
 
           {/* 이 단계와 겹치는 타사업 목록 */}
@@ -1520,10 +1498,7 @@ function IntegratedPersonRow({
               <td className="px-2 py-1 text-center">
                 <span className="text-[10px] font-semibold text-red-600">{op.overlap_days}일</span>
               </td>
-              <td className="px-2 py-1 text-center">
-                <span className="text-[10px] text-orange-600">{op.overlap_md}MD</span>
-              </td>
-              <td colSpan={2} />
+              <td colSpan={3} />
             </tr>
           ))}
         </React.Fragment>
@@ -1593,12 +1568,7 @@ function SchedulePanel({ projectId, projectName, onBack }: {
             <p className="text-[10px] text-gray-500 mt-0.5">총 중복일수</p>
           </CardContent>
         </Card>
-        <Card className={`text-center py-3 ${data.summary.total_overlap_md > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50'}`}>
-          <CardContent className="p-0">
-            <p className="text-xl font-bold text-amber-600">{data.summary.total_overlap_md}</p>
-            <p className="text-[10px] text-gray-500 mt-0.5">총 중복공수</p>
-          </CardContent>
-        </Card>
+
       </div>
 
       {/* 범례 */}
@@ -1659,7 +1629,6 @@ function SchedulePanel({ projectId, projectName, onBack }: {
                 </th>
                 <th className="text-left px-3 py-2.5 font-semibold">본사업 분야</th>
                 <th className="text-center px-3 py-2.5 font-semibold">중복일수</th>
-                <th className="text-center px-3 py-2.5 font-semibold">중복공수</th>
                 <th className="text-center px-3 py-2.5 font-semibold">충돌건수</th>
                 <th className="w-8" />
               </tr>
@@ -1714,7 +1683,7 @@ function RiskCompareTable({
     { label: '주의 건수',  o: original.warning,         s: simulated.warning,         d: delta.warning,         unit: '' },
     { label: '중복 인력',  o: original.conflict_people, s: simulated.conflict_people, d: delta.conflict_people, unit: '명' },
     { label: '중복 일수',  o: original.overlap_days,    s: simulated.overlap_days,    d: delta.overlap_days,    unit: '일' },
-    { label: '중복 공수',  o: original.overlap_md,      s: simulated.overlap_md,      d: delta.overlap_md,      unit: 'MD' },
+
   ];
 
   return (
@@ -2139,7 +2108,7 @@ function SimulationPanel({ projectId }: { projectId: number }) {
                   { label: '주의', val: optimizeResult.current.warning, cls: 'text-amber-500' },
                   { label: '중복 인력', val: `${optimizeResult.current.conflict_people}명`, cls: 'text-orange-500' },
                   { label: '중복 일수', val: `${optimizeResult.current.overlap_days}일`, cls: 'text-slate-600' },
-                  { label: '중복 MD', val: `${optimizeResult.current.overlap_md}MD`, cls: 'text-slate-600' },
+
                 ].map(item => (
                   <div key={item.label} className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-center">
                     <p className="text-[10px] text-gray-400">{item.label}</p>
