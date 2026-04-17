@@ -1634,8 +1634,8 @@ const DayRow = React.memo(function DayRow({
                               }}
                               onClick={() => handleBadgeClick(badge)}
                               onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                              onMouseEnter={() => handleHoverPhase(badge.phaseId)}
-                              onMouseLeave={() => handleHoverPhase(null)}
+                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
+                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
                               title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
                             >
                               <span className="truncate flex-1">{badge.label}</span>
@@ -1682,8 +1682,8 @@ const DayRow = React.memo(function DayRow({
                               }}
                               onClick={() => handleBadgeClick(badge)}
                               onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                              onMouseEnter={() => handleHoverPhase(badge.phaseId)}
-                              onMouseLeave={() => handleHoverPhase(null)}
+                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
+                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
                               title={`${badge.label} (${badge.status}${isBadgeWon ? ' 👑수주완료' : ''})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
                             >
                               <span className="truncate flex-1">{badge.label}</span>
@@ -1811,8 +1811,8 @@ const DayRow = React.memo(function DayRow({
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
-                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
-                onMouseLeave={() => handleHoverPhase(null)}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               >
                 {isToggling ? '…' : isHatCell ? '' : isHatActualCell ? cellData.badge.status : (isNonWorkSelected ? '✕' : (
                   changeRecords.length > 0
@@ -1856,8 +1856,8 @@ const DayRow = React.memo(function DayRow({
                 }}
                 title={cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, false, cellData.badge)}
-                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
-                onMouseLeave={() => handleHoverPhase(null)}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               >
                 {isToggling ? '…' : ''}
               </td>
@@ -1875,8 +1875,8 @@ const DayRow = React.memo(function DayRow({
                 }}
                 data-phase-id={cellData.badge.phaseId}
                 title={cellData.isHoliday ? (holidayName || '공휴일') : '주말'}
-                onMouseEnter={() => handleHoverPhase(cellData.badge.phaseId)}
-                onMouseLeave={() => handleHoverPhase(null)}
+                onMouseEnter={() => setHoveredBadgePhaseId(cellData.badge.phaseId)}
+                onMouseLeave={() => setHoveredBadgePhaseId(null)}
               />
             );
           }
