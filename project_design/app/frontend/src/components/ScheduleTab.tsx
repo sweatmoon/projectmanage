@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 /* ── 수주 완료 셀 무지개 애니메이션 (전역 style 주입) ── */
 const WON_CELL_STYLE = `
@@ -2018,6 +2019,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   const [rowHeightInput, setRowHeightInput] = useState(getSavedRowHeight);
   const colWidthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowHeightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   // Person column focus
   const [focusedPersonId, setFocusedPersonId] = useState<number | string | null>(null);
@@ -2506,6 +2508,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [allPeople, checkedProjectIds, frozenPeopleOrder]);
 
   // Person staffings with badge (unified), sorted by project index ascending
+  // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
+  // entryMap 의존성을 personStaffings useMemo 밖으로 분리 → 셀 클릭 시 personStaffings 재계산 방지
+  const staffingHasEntryThisMonth = useMemo(() => {
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const s = new Set<number>();
+    entryMap.forEach((entry) => {
+      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
+        s.add(entry.staffing_id);
+      }
+    });
+    return s;
+  }, [entryMap, year, month]);
+
   // Also assigns a fixed slotIndex to each item via interval graph coloring:
   //   - overlapping items get different slots
   //   - non-overlapping items reuse the same slot
@@ -2514,15 +2529,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const map = new Map<number | string, StaffingWithBadge[]>();
     const badgeByPhase = new Map<number, PhaseBadgeInfo>();
     phaseBadges.forEach((b) => badgeByPhase.set(b.phaseId, b));
-
-    // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const staffingHasEntryThisMonth = new Set<number>();
-    entryMap.forEach((entry) => {
-      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
-        staffingHasEntryThisMonth.add(entry.staffing_id);
-      }
-    });
 
     for (const person of allPeople) {
       const items: StaffingWithBadge[] = [];
@@ -2655,7 +2661,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
 
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, entryMap, year, month, projectMap, projectColorMap, hatMap]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, staffingHasEntryThisMonth, year, month, projectMap, projectColorMap, hatMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
@@ -3061,6 +3067,16 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
     return boundaries;
   }, [year, month, daysInMonth]);
+
+  // ── 행 가상화: 월간 일수(최대 31행)를 가상 스크롤로 렌더 ──
+  const rowVirtualizer = useVirtualizer({
+    count: days.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 5,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const totalVirtualHeight = rowVirtualizer.getTotalSize();
 
   const handleBadgeClick = (badge: PhaseBadgeInfo) => {
     if (readOnlyMode) {
@@ -3653,7 +3669,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
               배정된 인력이 없습니다.
             </div>
           ) : (
-            <div className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }} onScroll={() => setBadgeContextMenu(null)}>
+            <div ref={tableScrollRef} className="overflow-auto max-h-[75vh] relative" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }} onScroll={() => setBadgeContextMenu(null)}>
               <table className="text-xs" style={{ tableLayout: 'fixed', minWidth: tableMinWidth, borderCollapse: 'separate', borderSpacing: 0 }}>
                 <colgroup>
                   <col style={{ width: badgeColW }} />
@@ -3806,7 +3822,12 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                   </tr>
                 </thead>
                 <tbody>
-                  {days.map((d) => {
+                  {/* 상단 스페이서 행 */}
+                  {virtualRows.length > 0 && virtualRows[0].start > 0 && (
+                    <tr><td colSpan={9999} style={{ height: virtualRows[0].start, padding: 0, border: 'none' }} /></tr>
+                  )}
+                  {virtualRows.map((vRow) => {
+                    const d = days[vRow.index];
                     const weekInfo = dayToWeek.get(d);
                     const isFirstDayOfWeek = weekInfo ? d === weekInfo.startDay : false;
                     const isWeekStart = weekBoundaries.has(d);
@@ -3849,6 +3870,14 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                       />
                     );
                   })}
+                  {/* 하단 스페이서 행 */}
+                  {virtualRows.length > 0 && (() => {
+                    const lastRow = virtualRows[virtualRows.length - 1];
+                    const bottomSpace = totalVirtualHeight - (lastRow.start + lastRow.size);
+                    return bottomSpace > 0 ? (
+                      <tr><td colSpan={9999} style={{ height: bottomSpace, padding: 0, border: 'none' }} /></tr>
+                    ) : null;
+                  })()}
                 </tbody>
               </table>
             </div>
