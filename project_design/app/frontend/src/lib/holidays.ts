@@ -392,8 +392,8 @@ export function getHolidayVersion(): number {
 }
 
 /** DB API에서 공휴일을 가져와 캐시에 저장. 앱 초기화 시 1회 호출
- *  DB 목록 + 하드코딩 목록을 합산하여 캐시를 구성합니다.
- *  (DB에 일부만 있어도 기존 하드코딩 공휴일은 유지됩니다)
+ *  DB에 데이터가 있으면 DB만 사용 (하드코딩 무시).
+ *  DB가 비어있거나 오류 시에만 하드코딩 폴백 사용.
  */
 export async function fetchAndCacheHolidays(): Promise<void> {
   try {
@@ -402,16 +402,23 @@ export async function fetchAndCacheHolidays(): Promise<void> {
     const data = await res.json();
     const list: { date: string; name: string }[] = data?.holidays ?? [];
 
-    // 하드코딩 목록 + DB 추가분을 합산
-    const mergedSet = new Set<string>(KOREAN_HOLIDAYS);
-    const mergedNames: Record<string, string> = { ...HOLIDAY_NAMES };
-    for (const h of list) {
-      mergedSet.add(h.date);
-      mergedNames[h.date] = h.name;
+    if (list.length > 0) {
+      // DB에 데이터가 있으면 DB만 사용 (하드코딩 무시)
+      const dbSet = new Set<string>();
+      const dbNames: Record<string, string> = {};
+      for (const h of list) {
+        dbSet.add(h.date);
+        dbNames[h.date] = h.name;
+      }
+      _dynamicCache = dbSet;
+      _dynamicNames = dbNames;
+      console.info(`[holidays] 공휴일 캐시 로드: DB ${list.length}건만 사용 (하드코딩 무시)`);
+    } else {
+      // DB가 비어있으면 하드코딩 폴백
+      _dynamicCache = KOREAN_HOLIDAYS;
+      _dynamicNames = { ...HOLIDAY_NAMES };
+      console.info(`[holidays] DB 비어있음, 하드코딩 폴백 사용: ${KOREAN_HOLIDAYS.size}건`);
     }
-    _dynamicCache = mergedSet;
-    _dynamicNames = mergedNames;
-    console.info(`[holidays] 공휴일 캐시 로드: 하드코딩 ${KOREAN_HOLIDAYS.size}건 + DB ${list.length}건 = 합계 ${mergedSet.size}건`);
     _notifyListeners(); // ← React에 변경 알림
   } catch (e) {
     console.warn('[holidays] DB 로드 실패, 하드코딩 폴백 사용:', e);
