@@ -16,7 +16,7 @@ from models.people import People
 from models.calendar_entries import Calendar_entries
 from models.staffing_hat import StaffingHat
 from models.staffing_change import StaffingChange
-from utils.holidays import count_business_days, get_consecutive_business_days
+from utils.holidays import count_business_days, get_consecutive_business_days, count_business_days_async, get_consecutive_business_days_async
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,11 @@ class ProjectExportResponse(BaseModel):
 def get_first_n_business_days(start_date: date, end_date: date, n: int) -> List[date]:
     """Get first N business days (holidays excluded) from start_date within the range."""
     return get_consecutive_business_days(start_date, end_date, n)
+
+
+async def get_first_n_business_days_async(start_date: date, end_date: date, n: int, db) -> List[date]:
+    """Get first N business days using DB holiday calendar."""
+    return await get_consecutive_business_days_async(start_date, end_date, n, db)
 
 
 # 단계감리팀으로 분류되는 field 패턴 (프론트 getTeamInfo 함수와 동일 기준)
@@ -121,8 +126,8 @@ async def _import_phases_logic(
             logger.warning(f"Invalid date format in line: {line}")
             continue
 
-        # Calculate total business days in phase
-        total_biz_days = count_business_days(start_date, end_date)
+        # Calculate total business days in phase (DB 공휴일 기준)
+        total_biz_days = await count_business_days_async(start_date, end_date, db)
 
         # Create phase
         new_phase = Phases(
@@ -191,8 +196,8 @@ async def _import_phases_logic(
             await db.refresh(new_staffing)
             staffing_created += 1
 
-            # Create default calendar entries (first N business days)
-            default_days = get_first_n_business_days(start_date, end_date, md_value)
+            # Create default calendar entries (first N business days, DB 공휴일 기준)
+            default_days = await get_first_n_business_days_async(start_date, end_date, md_value, db)
             status = 'P' if project.status == '제안' else 'A'
 
             for day in default_days:
@@ -499,10 +504,10 @@ async def export_project_to_text(
             start_str = phase.start_date.strftime('%Y%m%d') if phase.start_date else ''
             end_str = phase.end_date.strftime('%Y%m%d') if phase.end_date else ''
 
-            # Calculate total business days for this phase
+            # Calculate total business days for this phase (DB 공휴일 기준)
             total_biz_days = 0
             if phase.start_date and phase.end_date:
-                total_biz_days = count_business_days(phase.start_date, phase.end_date)
+                total_biz_days = await count_business_days_async(phase.start_date, phase.end_date, db)
 
             phase_staffing = staffing_by_phase.get(phase.id, [])
             person_entries = []
@@ -572,7 +577,7 @@ async def export_project_to_text(
             end_str = phase.end_date.strftime('%Y%m%d') if phase.end_date else ''
             total_biz_days = 0
             if phase.start_date and phase.end_date:
-                total_biz_days = count_business_days(phase.start_date, phase.end_date)
+                total_biz_days = await count_business_days_async(phase.start_date, phase.end_date, db)
 
             phase_staffing = staffing_by_phase.get(phase.id, [])
             person_entries = []
@@ -600,7 +605,7 @@ async def export_project_to_text(
             end_str = phase.end_date.strftime('%Y%m%d') if phase.end_date else ''
             total_biz_days = 0
             if phase.start_date and phase.end_date:
-                total_biz_days = count_business_days(phase.start_date, phase.end_date)
+                total_biz_days = await count_business_days_async(phase.start_date, phase.end_date, db)
 
             phase_staffing = staffing_by_phase.get(phase.id, [])
             person_entries = []
