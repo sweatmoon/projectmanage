@@ -2208,52 +2208,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   // entryLookup = entryMap 그 자체 (alias, 하위 호환)
   const entryLookup = entryMap;
 
-  // 기존 3번 별도 순회 → 1번으로 줄임 (기능·결과 동일)
-  const { staffingDayCount, personDatesByProject, personAllDates } = useMemo(() => {
-    // localStaffing 기반 선처리 맵
-    const staffingPersonId = new Map<number, number>();
-    const staffingPersonKey = new Map<number, number | string>();
-    for (const s of localStaffing) {
-      if (s.person_id) {
-        staffingPersonId.set(s.id, s.person_id);
-        staffingPersonKey.set(s.id, s.person_id);
-      } else if (s.person_name_text) {
-        staffingPersonKey.set(s.id, extPersonKey(s.person_name_text, s.id));
-      }
-    }
-
-    const dayCount = new Map<number, number>();
-    const byProject = new Map<number, Map<number, Set<string>>>();
-    const allDates = new Map<number | string, Set<string>>();
-
-    entryMap.forEach((e) => {
-      if (!e.status) return;
-      const sid = e.staffing_id;
-
-      // staffingDayCount
-      dayCount.set(sid, (dayCount.get(sid) || 0) + 1);
-
-      // personDatesByProject
-      const personId = staffingPersonId.get(sid);
-      const projectId = staffingProjectMap.get(sid);
-      if (personId && projectId) {
-        if (!byProject.has(projectId)) byProject.set(projectId, new Map());
-        const projMap = byProject.get(projectId)!;
-        if (!projMap.has(personId)) projMap.set(personId, new Set());
-        projMap.get(personId)!.add(e.entry_date);
-      }
-
-      // personAllDates
-      const personKey = staffingPersonKey.get(sid);
-      if (personKey !== undefined) {
-        if (!allDates.has(personKey)) allDates.set(personKey, new Set());
-        allDates.get(personKey)!.add(e.entry_date);
-      }
-    });
-
-    return { staffingDayCount: dayCount, personDatesByProject: byProject, personAllDates: allDates };
-  }, [entryMap, localStaffing, staffingProjectMap]);
-
   const projectColorMap = useMemo(() => {
     const map = new Map<number, typeof PROJECT_COLORS[0]>();
     const uniqueIds = [...new Set(localProjects.map((p) => p.id))];
@@ -2327,6 +2281,41 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
   }, [localStaffing, phaseMapLocal]);
 
   // ── entryMap 단일 순회: staffingDayCount / personDatesByProject / personAllDates 동시 계산 ──
+  // staffingProjectMap 선언 이후에 위치해야 TDZ 오류 없음
+  const { staffingDayCount, personDatesByProject, personAllDates } = useMemo(() => {
+    const staffingPersonId = new Map<number, number>();
+    const staffingPersonKey = new Map<number, number | string>();
+    for (const s of localStaffing) {
+      if (s.person_id) {
+        staffingPersonId.set(s.id, s.person_id);
+        staffingPersonKey.set(s.id, s.person_id);
+      } else if (s.person_name_text) {
+        staffingPersonKey.set(s.id, extPersonKey(s.person_name_text, s.id));
+      }
+    }
+    const dayCount = new Map<number, number>();
+    const byProject = new Map<number, Map<number, Set<string>>>();
+    const allDates = new Map<number | string, Set<string>>();
+    entryMap.forEach((e) => {
+      if (!e.status) return;
+      const sid = e.staffing_id;
+      dayCount.set(sid, (dayCount.get(sid) || 0) + 1);
+      const personId = staffingPersonId.get(sid);
+      const projectId = staffingProjectMap.get(sid);
+      if (personId && projectId) {
+        if (!byProject.has(projectId)) byProject.set(projectId, new Map());
+        const projMap = byProject.get(projectId)!;
+        if (!projMap.has(personId)) projMap.set(personId, new Set());
+        projMap.get(personId)!.add(e.entry_date);
+      }
+      const personKey = staffingPersonKey.get(sid);
+      if (personKey !== undefined) {
+        if (!allDates.has(personKey)) allDates.set(personKey, new Set());
+        allDates.get(personKey)!.add(e.entry_date);
+      }
+    });
+    return { staffingDayCount: dayCount, personDatesByProject: byProject, personAllDates: allDates };
+  }, [entryMap, localStaffing, staffingProjectMap]);
 
   // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
   // entryMap에서만 의존하므로 personStaffings와 분리해 슬롯 재계산 방지
