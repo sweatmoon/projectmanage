@@ -33,6 +33,16 @@ const WON_CELL_STYLE = `
     animation: won-shimmer 2s ease-in-out infinite;
     pointer-events: none;
   }
+  .won-cell-hovered {
+    outline: 3px solid rgba(255,255,255,0.95) !important;
+    outline-offset: -3px !important;
+    filter: brightness(1.15) saturate(1.3) !important;
+    animation: won-rainbow-shift 3s ease infinite, won-hovered-pulse 0.6s ease-in-out infinite alternate !important;
+  }
+  @keyframes won-hovered-pulse {
+    0%   { box-shadow: 0 0 0 3px rgba(255,255,255,0.8), 0 0 12px 4px rgba(255,200,50,0.9) !important; }
+    100% { box-shadow: 0 0 0 3px rgba(255,255,255,0.5), 0 0 20px 8px rgba(255,100,200,0.9) !important; }
+  }
 `;
 if (typeof document !== 'undefined' && !document.getElementById('won-cell-style')) {
   const el = document.createElement('style');
@@ -1769,7 +1779,7 @@ const DayRow = React.memo(function DayRow({
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${isLockedCell ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-90'} ${isWonCell ? 'won-cell' : ''} ${isWonCell && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
                 style={{
                   position: 'relative', zIndex: 0,
                   backgroundColor: isNonWorkSelected
@@ -1789,6 +1799,7 @@ const DayRow = React.memo(function DayRow({
                       : isHoveredBadgeCell && !isWonCell
                         ? { boxShadow: `inset 0 0 0 2px ${cellData.badge.color.border}`, filter: 'brightness(0.92)' }
                         : isFocused && !isWonCell ? { boxShadow: 'inset 0 0 0 1px rgba(234,179,8,0.5)' } : {}),
+                  // won-cell-hovered는 className으로 처리
                 }}
                 title={isNonWorkSelected ? `⚠️ ${cellData.isHoliday ? '공휴일' : '주말'} 투입 (클릭하여 해제)` : cellTooltip}
                 onClick={() => handleCellClick(cellData.staffingId, cellData.dateStr, true, cellData.badge)}
@@ -1809,10 +1820,11 @@ const DayRow = React.memo(function DayRow({
 
           if (cellData && cellData.isAvailable && !cellData.isSelected) {
             const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
+            const isWonAvail = cellData.badge.is_won === true;
             return (
               <td
                 key={`${p.id}-${d}-${si}`}
-                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'}`}
+                className={`text-center select-none transition-all ${isToggling ? 'opacity-50' : ''} ${(isHatCell || isHatActualCell) ? 'cursor-not-allowed' : 'cursor-pointer hover:brightness-95'} ${isWonAvail && isHoveredBadgeCell ? 'won-cell-hovered' : ''}`}
                 style={{
                   position: 'relative', zIndex: 0,
                   backgroundColor: isHatCell
