@@ -34,14 +34,9 @@ const WON_CELL_STYLE = `
     pointer-events: none;
   }
   .won-cell-hovered {
-    outline: 3px solid rgba(255,255,255,0.95) !important;
+    outline: 3px solid rgba(0,0,0,0.7) !important;
     outline-offset: -3px !important;
-    filter: brightness(1.15) saturate(1.3) !important;
-    animation: won-rainbow-shift 3s ease infinite, won-hovered-pulse 0.6s ease-in-out infinite alternate !important;
-  }
-  @keyframes won-hovered-pulse {
-    0%   { box-shadow: 0 0 0 3px rgba(255,255,255,0.8), 0 0 12px 4px rgba(255,200,50,0.9) !important; }
-    100% { box-shadow: 0 0 0 3px rgba(255,255,255,0.5), 0 0 20px 8px rgba(255,100,200,0.9) !important; }
+    filter: brightness(0.88) !important;
   }
 `;
 if (typeof document !== 'undefined' && !document.getElementById('won-cell-style')) {
@@ -1657,7 +1652,7 @@ const DayRow = React.memo(function DayRow({
                               className="h-3 w-3 flex-shrink-0"
                             />
                             <button
-                              className={`flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0 ${isBadgeWon ? 'won-cell' : ''}`}
+                              className={`flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer hover:brightness-90 transition-all whitespace-nowrap flex-1 text-left min-w-0 ${isBadgeWon ? 'won-cell' : ''} ${isBadgeWon && hoveredBadgePhaseId === badge.phaseId ? 'won-cell-hovered' : ''}`}
                               style={isBadgeWon ? {
                                 borderLeft: '3px solid rgba(255,255,255,0.6)',
                               } : {
