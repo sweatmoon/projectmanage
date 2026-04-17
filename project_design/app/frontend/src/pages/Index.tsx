@@ -303,7 +303,7 @@ export default function IndexPage() {
 
   const fetchPhases = useCallback(async () => {
     try {
-      const res = await client.entities.phases.query({ query: {}, limit: 500 });
+      const res = await client.entities.phases.query({ query: {}, limit: 100000 });
       setPhases(res?.data?.items || []);
     } catch (err) {
       console.error('Failed to fetch phases:', err);
@@ -312,7 +312,7 @@ export default function IndexPage() {
 
   const fetchStaffing = useCallback(async () => {
     try {
-      const res = await client.entities.staffing.query({ query: {}, limit: 2000, sort: 'id' });
+      const res = await client.entities.staffing.query({ query: {}, limit: 100000, sort: 'id' });
       setStaffing(res?.data?.items || []);
     } catch (err) {
       console.error('Failed to fetch staffing:', err);

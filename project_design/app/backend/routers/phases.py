@@ -56,7 +56,7 @@ class PhasesBatchDeleteRequest(BaseModel):
 @router.get("", response_model=PhasesListResponse)
 async def query_phasess(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = PhasesService(db)
@@ -67,7 +67,7 @@ async def query_phasess(
 @router.get("/all", response_model=PhasesListResponse)
 async def query_phasess_all(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = PhasesService(db)

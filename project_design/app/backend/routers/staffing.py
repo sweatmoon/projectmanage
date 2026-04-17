@@ -91,7 +91,7 @@ class StaffingBatchDeleteRequest(BaseModel):
 @router.get("", response_model=StaffingListResponse)
 async def query_staffings(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = StaffingService(db)
@@ -102,7 +102,7 @@ async def query_staffings(
 @router.get("/all", response_model=StaffingListResponse)
 async def query_staffings_all(
     query: str = Query(None), sort: str = Query(None),
-    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=2000),
+    skip: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100000),
     fields: str = Query(None), db: AsyncSession = Depends(get_db),
 ):
     service = StaffingService(db)
