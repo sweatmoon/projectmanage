@@ -3737,25 +3737,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span>📌 주간별 사업</span>
-                        {/* 인력 표시 범위 토글: 이번달/전체 */}
-                        <div className="flex items-center rounded overflow-hidden border border-slate-300 text-[8px]">
-                          <button
-                            type="button"
-                            onClick={() => { setShowAllPeople(false); setFrozenPeopleOrder(null); }}
-                            className={`px-1.5 py-0.5 transition-colors ${!showAllPeople ? 'bg-blue-500 text-white font-bold' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                            title="이번 달 배정 인력만 표시 (빠름)"
-                          >
-                            이번달
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { setShowAllPeople(true); setFrozenPeopleOrder(null); }}
-                            className={`px-1.5 py-0.5 transition-colors ${showAllPeople ? 'bg-slate-600 text-white font-bold' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                            title="전체 인력 표시 (느림)"
-                          >
-                            전체
-                          </button>
-                        </div>
                         {/* 한 화면 표시 인원 수 선택 (체크 시 무시) */}
                         {checkedProjectIds.size === 0 && (
                           <div className="flex items-center rounded overflow-hidden border border-slate-300 text-[8px]">
