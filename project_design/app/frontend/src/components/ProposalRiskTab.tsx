@@ -786,8 +786,13 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   const hasChanges = Object.values(personReplacements).some(v => v !== undefined)
     || Object.keys(phaseShifts).length > 0;
 
+  // 날짜 오류 있는 단계 (시작일 > 종료일) — 시뮬레이션 차단 조건
+  const hasInvalidDates = Object.values(phaseShifts).some(
+    s => s.start_date && s.end_date && s.start_date > s.end_date
+  );
+
   useEffect(() => {
-    if (!hasChanges) {
+    if (!hasChanges || hasInvalidDates) {
       setSimResult(null);
       return;
     }
@@ -822,6 +827,8 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
   }, []);
 
   const handlePhaseShift = useCallback((phaseId: string, start: string, end: string) => {
+    // 시작일 > 종료일이면 저장하지 않음 (두 값이 모두 입력된 경우만 체크)
+    if (start && end && start > end) return;
     setPhaseShifts(prev => ({ ...prev, [phaseId]: { start_date: start, end_date: end } }));
   }, []);
 
@@ -1106,34 +1113,57 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                   const shiftDays = isChanged
                     ? Math.round((new Date(phaseShifts[String(ph.phase_id)].start_date).getTime() - new Date(ph.start_date).getTime()) / 86400000)
                     : 0;
+                  const isDateInvalid = !!(curStart && curEnd && curStart > curEnd);
                   return (
-                    <div key={ph.phase_id}
-                      className={`flex items-center gap-2 px-3 py-2 transition-colors ${isChanged ? 'bg-orange-50 border-l-2 border-l-orange-400' : 'hover:bg-gray-50/50'}`}>
-                      <span className={`text-[10px] font-medium w-24 flex-shrink-0 truncate ${isChanged ? 'text-orange-700' : 'text-gray-700'}`} title={ph.phase_name}>
+                    <div key={ph.phase_id} className="flex flex-col">
+                    <div
+                      className={`flex items-center gap-2 px-3 py-2 transition-colors ${isDateInvalid ? 'bg-red-50 border-l-2 border-l-red-400' : isChanged ? 'bg-orange-50 border-l-2 border-l-orange-400' : 'hover:bg-gray-50/50'}`}>
+                      <span className={`text-[10px] font-medium w-24 flex-shrink-0 truncate ${isDateInvalid ? 'text-red-700' : isChanged ? 'text-orange-700' : 'text-gray-700'}`} title={ph.phase_name}>
                         {ph.phase_name}
                       </span>
                       <div className="flex items-center gap-1 flex-1 min-w-0">
                         <input type="date" value={curStart}
-                          onChange={e => handlePhaseShift(String(ph.phase_id), e.target.value, curEnd)}
-                          className={`text-[10px] border rounded px-1.5 py-1 flex-1 min-w-0 ${isChanged ? 'border-orange-300 bg-orange-50 text-orange-800 font-medium' : 'border-gray-200 text-gray-600'}`}
+                          onChange={e => {
+                            const newStart = e.target.value;
+                            if (newStart && curEnd && newStart > curEnd) {
+                              // 임시로 상태 업데이트 없이 경고만 표시하기 위해 직접 세팅
+                              setPhaseShifts(prev => ({ ...prev, [String(ph.phase_id)]: { start_date: newStart, end_date: curEnd } }));
+                            } else {
+                              handlePhaseShift(String(ph.phase_id), newStart, curEnd);
+                            }
+                          }}
+                          className={`text-[10px] border rounded px-1.5 py-1 flex-1 min-w-0 ${isDateInvalid ? 'border-red-400 bg-red-50 text-red-800 font-medium' : isChanged ? 'border-orange-300 bg-orange-50 text-orange-800 font-medium' : 'border-gray-200 text-gray-600'}`}
                         />
                         <span className="text-[10px] text-gray-300 flex-shrink-0">~</span>
                         <input type="date" value={curEnd}
-                          onChange={e => handlePhaseShift(String(ph.phase_id), curStart, e.target.value)}
-                          className={`text-[10px] border rounded px-1.5 py-1 flex-1 min-w-0 ${isChanged ? 'border-orange-300 bg-orange-50 text-orange-800 font-medium' : 'border-gray-200 text-gray-600'}`}
+                          onChange={e => {
+                            const newEnd = e.target.value;
+                            if (curStart && newEnd && curStart > newEnd) {
+                              setPhaseShifts(prev => ({ ...prev, [String(ph.phase_id)]: { start_date: curStart, end_date: newEnd } }));
+                            } else {
+                              handlePhaseShift(String(ph.phase_id), curStart, newEnd);
+                            }
+                          }}
+                          className={`text-[10px] border rounded px-1.5 py-1 flex-1 min-w-0 ${isDateInvalid ? 'border-red-400 bg-red-50 text-red-800 font-medium' : isChanged ? 'border-orange-300 bg-orange-50 text-orange-800 font-medium' : 'border-gray-200 text-gray-600'}`}
                         />
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        {isChanged && (
+                        {isChanged && !isDateInvalid && (
                           <span className={`text-[10px] font-bold ${shiftDays >= 0 ? 'text-orange-600' : 'text-blue-500'}`}>
                             {shiftDays >= 0 ? `+${shiftDays}일` : `${shiftDays}일`}
                           </span>
                         )}
-                        {isChanged
+                        {(isChanged || isDateInvalid)
                           ? <button onClick={() => handlePhaseReset(String(ph.phase_id))} className="text-gray-400 hover:text-red-500 p-0.5" title="원복"><RotateCcw className="h-3 w-3" /></button>
                           : <span className="w-4" />
                         }
                       </div>
+                    </div>
+                    {isDateInvalid && (
+                      <div className="px-3 pb-1.5 flex items-center gap-1 text-[10px] text-red-500 font-medium">
+                        <span>⚠️ 종료일이 시작일보다 빠릅니다. 시뮬레이션에 반영되지 않습니다.</span>
+                      </div>
+                    )}
                     </div>
                   );
                 })}
@@ -2497,8 +2527,9 @@ function SimulationPanel({ projectId }: { projectId: number }) {
               <div className="flex gap-2 pt-2 border-t border-gray-100">
                 <Button
                   onClick={runSimulateV2}
-                  disabled={simV2Loading || (Object.keys(personReplacements).length === 0 && Object.keys(phaseShifts).length === 0)}
+                  disabled={simV2Loading || hasInvalidDates || (Object.keys(personReplacements).length === 0 && Object.keys(phaseShifts).length === 0)}
                   className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+                  title={hasInvalidDates ? '날짜 오류가 있는 단계가 있습니다. 종료일을 확인해주세요.' : undefined}
                 >
                   {simV2Loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
                   시뮬레이션 실행
