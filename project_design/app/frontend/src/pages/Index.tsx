@@ -192,9 +192,13 @@ export default function IndexPage() {
     try {
       const p = new URLSearchParams(window.location.search).get('tab');
       const saved = p || localStorage.getItem('activeTab') || 'home';
-      // writer 역할은 허용된 탭만 접근 가능 (proposal-risk 전용)
+      // writer/viewer 역할은 허용된 탭만 접근 가능 (proposal-risk 전용)
       // 허용되지 않은 탭이 저장되어 있으면 proposal-risk로 강제 이동
       if (isWriter && !writerAllowedTabs.includes(saved)) {
+        return 'proposal-risk';
+      }
+      // viewer는 home 탭 대신 proposal-risk로
+      if (isViewer && saved === 'home') {
         return 'proposal-risk';
       }
       return saved;
@@ -576,19 +580,19 @@ export default function IndexPage() {
     <div className="min-h-screen bg-slate-50">
       <Header />
 
-      {/* Landing Page - writer는 홈 대신 proposal-risk로 바로 이동 */}
-      {activeTab === 'home' && !isWriter && (
+      {/* Landing Page - writer/viewer는 홈 대신 proposal-risk로 바로 이동 */}
+      {activeTab === 'home' && !isWriter && !isViewer && (
         <LandingPage onNavigate={handleTabChange} stats={landingStats} />
       )}
 
       {/* Main Content */}
-      {(activeTab !== 'home' || isWriter) && (
+      {(activeTab !== 'home' || isWriter || isViewer) && (
       <main className={`mx-auto px-2 sm:px-4 py-3 sm:py-6 ${
         (activeTab === 'schedule' || activeTab === 'gantt') && wideMode
           ? 'max-w-full'
           : 'max-w-7xl'
       }`}>
-        <Tabs value={isWriter && activeTab === 'home' ? 'proposal-risk' : activeTab} onValueChange={handleTabChange}>
+        <Tabs value={(isWriter || isViewer) && activeTab === 'home' ? 'proposal-risk' : activeTab} onValueChange={handleTabChange}>
           {/* 탭 네비게이션 + 액션 버튼 */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 sm:mb-4">
             {/* 탭 목록: 모바일에서 가로 스크롤 */}
