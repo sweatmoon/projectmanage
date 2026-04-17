@@ -2129,54 +2129,69 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     return map;
   }, [localStaffing]);
 
+  // 월별 일정만 조회 — year/month 바뀔 때마다 실행
   const fetchCalendarEntries = useCallback(async () => {
-    // person 미배정 staffing도 포함 — DB에 entry가 있을 수 있음
     const relevantStaffingIds = localStaffing.map((s) => s.id);
 
     if (relevantStaffingIds.length === 0) {
       setEntryMap(new Map());
-      setTotalMdCount(new Map());
       return;
     }
 
     setLoadingEntries(true);
     try {
-      // 월별 entry + 전체 기간 카운트를 병렬 조회
-      const [monthRes, totalRes] = await Promise.all([
-        client.apiCall.invoke({
-          url: '/api/v1/calendar/month',
-          method: 'POST',
-          data: { year, month, staffing_ids: relevantStaffingIds },
-        }),
-        client.apiCall.invoke({
-          url: '/api/v1/calendar/staffing-total-count',
-          method: 'POST',
-          data: { staffing_ids: relevantStaffingIds },
-        }),
-      ]);
+      const monthRes = await client.apiCall.invoke({
+        url: '/api/v1/calendar/month',
+        method: 'POST',
+        data: { year, month, staffing_ids: relevantStaffingIds },
+      });
 
       const entries: CalendarEntry[] = monthRes?.entries || [];
       const newMap = new Map<string, CalendarEntry>();
       entries.forEach((e) => newMap.set(`${e.staffing_id}_${e.entry_date}`, e));
       setEntryMap(newMap);
-
-      // 전체 기간 카운트 Map<staffingId, count>
-      const counts: Record<string, number> = totalRes?.counts || {};
-      const countMap = new Map<number, number>();
-      Object.entries(counts).forEach(([sid, cnt]) => countMap.set(Number(sid), cnt as number));
-      setTotalMdCount(countMap);
     } catch (err) {
       console.error('Failed to fetch calendar entries:', err);
       setEntryMap(new Map());
-      setTotalMdCount(new Map());
     } finally {
       setLoadingEntries(false);
     }
   }, [year, month, localStaffing]);
 
+  // 전체 기간 누적 MD 카운트 조회 — staffing 구성(인원·사업)이 바뀔 때만 실행
+  // 월 이동 시에는 재조회하지 않음
+  const fetchTotalMdCount = useCallback(async () => {
+    const relevantStaffingIds = localStaffing.map((s) => s.id);
+
+    if (relevantStaffingIds.length === 0) {
+      setTotalMdCount(new Map());
+      return;
+    }
+
+    try {
+      const totalRes = await client.apiCall.invoke({
+        url: '/api/v1/calendar/staffing-total-count',
+        method: 'POST',
+        data: { staffing_ids: relevantStaffingIds },
+      });
+
+      const counts: Record<string, number> = totalRes?.counts || {};
+      const countMap = new Map<number, number>();
+      Object.entries(counts).forEach(([sid, cnt]) => countMap.set(Number(sid), cnt as number));
+      setTotalMdCount(countMap);
+    } catch (err) {
+      console.error('Failed to fetch total MD count:', err);
+      setTotalMdCount(new Map());
+    }
+  }, [localStaffing]);
+
   useEffect(() => {
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
+
+  useEffect(() => {
+    fetchTotalMdCount();
+  }, [fetchTotalMdCount]);
 
 
 
@@ -3065,8 +3080,9 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const data = res as { total_deleted: number; total_created: number; extended_phases?: number; message: string };
       const extMsg = data.extended_phases ? `, 단계 종료일 ${data.extended_phases}개 연장` : '';
       toast.success(`재생성 완료: ${data.total_deleted}개 삭제 → ${data.total_created}개 생성${extMsg}`);
-      // 현재 월 데이터 새로고침
+      // 현재 월 데이터 + 전체 기간 카운트 새로고침
       await fetchCalendarEntries();
+      await fetchTotalMdCount();
     } catch (e) {
       toast.error('캘린더 재생성 실패');
     } finally {
