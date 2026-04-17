@@ -1634,8 +1634,8 @@ const DayRow = React.memo(function DayRow({
                               }}
                               onClick={() => handleBadgeClick(badge)}
                               onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
-                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                              onMouseEnter={() => handleHoverPhase(badge.phaseId)}
+                              onMouseLeave={() => handleHoverPhase(null)}
                               title={`${badge.label} (${badge.status})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
                             >
                               <span className="truncate flex-1">{badge.label}</span>
@@ -1682,8 +1682,8 @@ const DayRow = React.memo(function DayRow({
                               }}
                               onClick={() => handleBadgeClick(badge)}
                               onContextMenu={(e) => handleBadgeContextMenu(e, badge)}
-                              onMouseEnter={() => setHoveredBadgePhaseId(badge.phaseId)}
-                              onMouseLeave={() => setHoveredBadgePhaseId(null)}
+                              onMouseEnter={() => handleHoverPhase(badge.phaseId)}
+                              onMouseLeave={() => handleHoverPhase(null)}
                               title={`${badge.label} (${badge.status}${isBadgeWon ? ' 👑수주완료' : ''})\n기간: ${badge.startDate || '?'} ~ ${badge.endDate || '?'}\n좌클릭: 수정 | 우클릭: 단계별 일정`}
                             >
                               <span className="truncate flex-1">{badge.label}</span>
