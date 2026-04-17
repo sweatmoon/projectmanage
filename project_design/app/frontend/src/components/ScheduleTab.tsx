@@ -1523,10 +1523,11 @@ interface DayRowProps {
   allPeople: UnifiedPerson[];
   personSubCols: Map<number | string, number>;
   cellDataCache: Map<string, {
-    staffingId: number; badge: PhaseBadgeInfo; isSelected: boolean;
+    staffingId: number; badge: PhaseBadgeInfo;
     isAvailable: boolean; isHoliday: boolean; md: number;
     dateStr: string; entryKey: string; isHatItem: boolean; hatForPersonName?: string;
   } | null>;
+  entryMap: Map<string, CalendarEntry>;
   togglingCell: string | null;
   focusedPersonId: number | string | null;
   checkedProjectPeople: Set<number | string>;
@@ -1561,7 +1562,7 @@ const DayRow = React.memo(function DayRow({
   stickyLeftForDow, dateColW, dowColW, checkedProjectIds,
   handleCellClick, handleSubColContextMenu, toggleProjectCheck,
   handleBadgeClick, handleBadgeContextMenu, setHoveredBadgePhaseId,
-  handleWeekLabelClick,
+  handleWeekLabelClick, entryMap,
 }: DayRowProps) {
   const ds = formatDateStr(year, month, d);
   const dow = getDayOfWeek(year, month, d);
@@ -1764,7 +1765,7 @@ const DayRow = React.memo(function DayRow({
               ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${hatRecord!.actual_person_name}이(가) 대신 투입 중\n(모자 해제 후 수정 가능)${changeTooltipSuffix}`
               : isHatActualCell
                 ? `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}\n🎩 ${cellData!.hatForPersonName || '공식인력'} 대신 투입 중\n(일정 수정 불가)${changeTooltipSuffix}`
-                : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${changeTooltipSuffix}${cellData?.isSelected ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
+                : `${tooltipInfo.label}\n팀: ${tooltipInfo.team}\n분야: ${tooltipInfo.field}${changeTooltipSuffix}${!!entryMap.get(cellData!.entryKey)?.status ? '\n✅ 선택됨 - 클릭하여 해제' : '\n클릭하여 선택'}`
             : undefined;
 
           const focusBg = isHoveredBadgeCell
@@ -1784,7 +1785,8 @@ const DayRow = React.memo(function DayRow({
             borderBottom: isTd ? '1px solid #60a5fa' : '1px solid #e5e7eb',
           };
 
-          if (cellData && cellData.isSelected) {
+          const isSelected = !!entryMap.get(cellData?.entryKey ?? '')?.status;
+          if (cellData && isSelected) {
             const isNonWorkSelected = !cellData.isAvailable;
             const isLockedCell = isHatCell || isHatActualCell;
             const isWonCell = cellData.badge.is_won === true && !isNonWorkSelected;
@@ -1832,7 +1834,7 @@ const DayRow = React.memo(function DayRow({
             );
           }
 
-          if (cellData && cellData.isAvailable && !cellData.isSelected) {
+          if (cellData && cellData.isAvailable && !isSelected) {
             const dashedBorder = isHoveredBadgeCell ? 'solid' : 'dashed';
             const isWonAvail = cellData.badge.is_won === true;
             return (
@@ -1913,6 +1915,7 @@ const DayRow = React.memo(function DayRow({
   if (prev.checkedProjectPeople !== next.checkedProjectPeople) return false;
   if (prev.checkedProjectIds !== next.checkedProjectIds) return false;
   if (prev.cellDataCache !== next.cellDataCache) return false;
+  if (prev.entryMap !== next.entryMap) return false;
   if (prev.hatMap !== next.hatMap) return false;
   if (prev.changeMap !== next.changeMap) return false;
   if (prev.badgeColW !== next.badgeColW || prev.stickyLeftForDate !== next.stickyLeftForDate) return false;
@@ -2562,6 +2565,19 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
   }, [allPeople, checkedProjectIds, frozenPeopleOrder]);
 
+  // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
+  // entryMap에서만 의존하므로 personStaffings와 분리해 슬롯 재계산 방지
+  const staffingHasEntryThisMonth = useMemo(() => {
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const s = new Set<number>();
+    entryMap.forEach((entry) => {
+      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
+        s.add(entry.staffing_id);
+      }
+    });
+    return s;
+  }, [entryMap, year, month]);
+
   // Person staffings with badge (unified), sorted by project index ascending
   // Also assigns a fixed slotIndex to each item via interval graph coloring:
   //   - overlapping items get different slots
@@ -2571,15 +2587,6 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     const map = new Map<number | string, StaffingWithBadge[]>();
     const badgeByPhase = new Map<number, PhaseBadgeInfo>();
     phaseBadges.forEach((b) => badgeByPhase.set(b.phaseId, b));
-
-    // phase가 visiblePhases에 없어도 이 월에 entry가 있으면 badge를 직접 생성해 셀 표시
-    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const staffingHasEntryThisMonth = new Set<number>();
-    entryMap.forEach((entry) => {
-      if (entry.status && entry.entry_date.startsWith(yearMonth)) {
-        staffingHasEntryThisMonth.add(entry.staffing_id);
-      }
-    });
 
     for (const person of allPeople) {
       const items: StaffingWithBadge[] = [];
@@ -2712,7 +2719,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
     }
 
     return map;
-  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, entryMap, year, month, projectMap, projectColorMap, hatMap]);
+  }, [allPeople, localStaffing, phaseBadges, projectIndexMap, phaseMapLocal, staffingHasEntryThisMonth, year, month, projectMap, projectColorMap, hatMap]);
 
   // Compute sub-columns per person: = number of slots used (max simultaneous overlap)
   // Since each item has a fixed slotIndex, subCols = max(slotIndex)+1
@@ -2829,13 +2836,10 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       const isHatItem = !!(item as StaffingWithBadge & { isHatItem?: boolean }).isHatItem;
       const hatForPersonName = (item as StaffingWithBadge & { hatForPersonName?: string }).hatForPersonName;
       const entryKey = `${item.staffing.id}_${dateStr}`;
-      const entry = entryMap.get(entryKey);
-      const isSelected = !!entry?.status;
 
       return {
         staffingId: item.staffing.id,
         badge: item.badge,
-        isSelected,
         isAvailable: !isNonW,
         isHoliday: isHol,
         md: item.staffing.md || 0,
@@ -2855,7 +2859,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       }
     }
     return cache;
-  }, [allPeople, personStaffings, personSubCols, daysInMonth, year, month, entryMap, holidayVersion]);
+  }, [allPeople, personStaffings, personSubCols, daysInMonth, year, month, holidayVersion]);
 
   const getPersonDayCellData = useCallback(
     (personId: number | string, day: number, subColIdx: number) =>
@@ -3881,6 +3885,7 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
                         allPeople={allPeople}
                         personSubCols={personSubCols}
                         cellDataCache={cellDataCache}
+                        entryMap={entryMap}
                         togglingCell={togglingCell}
                         focusedPersonId={focusedPersonId}
                         checkedProjectPeople={checkedProjectPeople}
