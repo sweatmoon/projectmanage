@@ -1,10 +1,15 @@
 from core.database import Base
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Index, Integer, String
 
 
 class Staffing(Base):
     __tablename__ = "staffing"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        Index('ix_staffing_project_id', 'project_id'),
+        Index('ix_staffing_person_id', 'person_id'),
+        Index('ix_staffing_phase_id', 'phase_id'),
+        {"extend_existing": True},
+    )
 
     id               = Column(Integer, primary_key=True, index=True, autoincrement=True, nullable=False)
     project_id       = Column(Integer, nullable=False)
