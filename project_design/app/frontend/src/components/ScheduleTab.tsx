@@ -347,14 +347,16 @@ function isNonWork(year: number, month: number, day: number): boolean {
 function phaseOverlapsMonth(ph: Phase, year: number, month: number): boolean {
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 0);
-  const start = ph.start_date ? new Date(ph.start_date) : new Date(2000, 0, 1);
-  const end = ph.end_date ? new Date(ph.end_date) : new Date(2099, 11, 31);
+  // 빈 문자열("")도 falsy 처리 — new Date("") = Invalid Date 방지
+  const start = ph.start_date?.trim() ? new Date(ph.start_date) : new Date(2000, 0, 1);
+  const end = ph.end_date?.trim() ? new Date(ph.end_date) : new Date(2099, 11, 31);
   return start <= monthEnd && end >= monthStart;
 }
 
 function dayInRange(dateStr: string, startDate?: string, endDate?: string): boolean {
-  const s = startDate || '2000-01-01';
-  const e = endDate || '2099-12-31';
+  // 빈 문자열("")도 falsy 처리 — Invalid Date 방지
+  const s = startDate?.trim() || '2000-01-01';
+  const e = endDate?.trim() || '2099-12-31';
   return dateStr >= s && dateStr <= e;
 }
 
@@ -2593,23 +2595,28 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
           : (s.person_id === person.id);
         if (!matches) continue;
         let badge = badgeByPhase.get(s.phase_id);
-        // Phantom badge: phase가 visiblePhases에 없어도 이 월에 선택된 entry가 있으면 표시
-        if (!badge && staffingHasEntryThisMonth.has(s.id)) {
+        // Phantom badge: phase가 visiblePhases에 없어도
+        //   1) 이 월에 선택된 entry가 있거나
+        //   2) phase 기간이 이 월과 겹치면 (deleted phase 등으로 visiblePhases에서 누락된 경우 보완)
+        if (!badge) {
           const ph = phaseMapLocal.get(s.phase_id);
-          const proj = projectMap.get(s.project_id);
-          const projName = proj?.project_name || '미정';
-          const status = proj?.status === '제안' ? 'P' : 'A';
-          badge = {
-            phaseId: s.phase_id,
-            projectId: s.project_id,
-            projectName: projName,
-            phaseName: ph?.phase_name || '',
-            label: `${projName}_${ph?.phase_name || ''}`,
-            color: projectColorMap.get(s.project_id) || PROJECT_COLORS[0],
-            status,
-            startDate: ph?.start_date,
-            endDate: ph?.end_date,
-          } as PhaseBadgeInfo;
+          const phaseInMonth = ph ? phaseOverlapsMonth(ph, year, month) : false;
+          if (staffingHasEntryThisMonth.has(s.id) || phaseInMonth) {
+            const proj = projectMap.get(s.project_id);
+            const projName = proj?.project_name || '미정';
+            const status = proj?.status === '제안' ? 'P' : 'A';
+            badge = {
+              phaseId: s.phase_id,
+              projectId: s.project_id,
+              projectName: projName,
+              phaseName: ph?.phase_name || '',
+              label: `${projName}_${ph?.phase_name || ''}`,
+              color: projectColorMap.get(s.project_id) || PROJECT_COLORS[0],
+              status,
+              startDate: ph?.start_date,
+              endDate: ph?.end_date,
+            } as PhaseBadgeInfo;
+          }
         }
         if (badge) {
           items.push({ staffing: s, badge });
@@ -2682,11 +2689,27 @@ export default function ScheduleTab({ projects, phases, staffing, people, onRefr
       if (!hatRecord.actual_person_id) continue;
       const officialStaffing = localStaffing.find((s) => s.id === staffingId);
       if (!officialStaffing) continue;
-      const badge = (() => {
-        const b = new Map<number, PhaseBadgeInfo>();
-        phaseBadges.forEach((pb) => b.set(pb.phaseId, pb));
-        return b.get(officialStaffing.phase_id);
-      })();
+      // badge: phaseBadges에서 먼저 찾고, 없으면 phase 기간이 이달에 겹칠 경우 직접 생성
+      let badge: PhaseBadgeInfo | undefined = badgeByPhase.get(officialStaffing.phase_id);
+      if (!badge) {
+        const ph = phaseMapLocal.get(officialStaffing.phase_id);
+        if (ph && phaseOverlapsMonth(ph, year, month)) {
+          const proj = projectMap.get(officialStaffing.project_id);
+          const projName = proj?.project_name || '미정';
+          const status = proj?.status === '제안' ? 'P' : 'A';
+          badge = {
+            phaseId: officialStaffing.phase_id,
+            projectId: officialStaffing.project_id,
+            projectName: projName,
+            phaseName: ph.phase_name || '',
+            label: `${projName}_${ph.phase_name || ''}`,
+            color: projectColorMap.get(officialStaffing.project_id) || PROJECT_COLORS[0],
+            status,
+            startDate: ph.start_date,
+            endDate: ph.end_date,
+          } as PhaseBadgeInfo;
+        }
+      }
       if (!badge) continue;
       const actualPerson = allPeople.find((p) => p.id === hatRecord.actual_person_id);
       if (!actualPerson) continue;
