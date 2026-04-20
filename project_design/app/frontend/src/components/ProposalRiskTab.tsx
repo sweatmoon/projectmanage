@@ -30,6 +30,7 @@ interface ConflictItem {
   other_project_id: number;
   other_project_name: string;
   other_project_status: string;
+  other_organization: string;
   type_label: 'A' | 'P';
   other_phase_name: string;
   other_phase_start: string;
@@ -51,6 +52,7 @@ interface PhaseOtherProject {
   other_project_id: number;
   other_project_name: string;
   other_project_status: string;
+  other_organization: string;
   other_phase_name: string;
   other_phase_start: string;
   other_phase_end: string;
@@ -387,8 +389,9 @@ function MyFieldCell({ field, subField }: { field: string; subField: string }) {
 }
 
 // ── 인력 1명의 충돌 행 ────────────────────────────────────────────────────────
-function PersonConflictRow({ person, checked, onCheck, simMode }: {
+function PersonConflictRow({ person, myOrganization, checked, onCheck, simMode }: {
   person: PersonSchedule;
+  myOrganization?: string;
   checked?: boolean;
   onCheck?: (key: string, checked: boolean) => void;
   simMode?: boolean;
@@ -427,7 +430,7 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
         <td className="px-3 py-2">
           <MyFieldCell field={person.my_field} subField={person.my_sub_field} />
         </td>
-        <td className="px-3 py-2 text-center" colSpan={4}>
+        <td className="px-3 py-2 text-center" colSpan={5}>
           <span className="text-xs text-emerald-500 flex items-center justify-center gap-1">
             <CheckCircle2 className="h-3 w-3" />중복 없음
           </span>
@@ -473,6 +476,7 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
         <td className="px-3 py-2" onClick={() => setExpanded(v => !v)}>
           <MyFieldCell field={person.my_field} subField={person.my_sub_field} />
         </td>
+        <td className="px-3 py-2" onClick={() => setExpanded(v => !v)} />
         <td className="px-3 py-2 text-center" onClick={() => setExpanded(v => !v)}>
           <span className="text-xs font-bold text-red-600">{person.total_overlap_days}일</span>
         </td>
@@ -487,11 +491,15 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
         </td>
       </tr>
 
-      {expanded && person.conflicts.map((c, idx) => (
+      {expanded && person.conflicts.map((c, idx) => {
+        const orgMatch = myOrganization && c.other_organization && myOrganization === c.other_organization;
+        return (
         <tr
           key={idx}
           className={`border-b border-gray-50 ${
-            c.other_field_highlight
+            orgMatch
+              ? 'bg-amber-50/70'
+              : c.other_field_highlight
               ? 'bg-rose-50/60'
               : idx % 2 === 0 ? 'bg-gray-50/30' : 'bg-white'
           }`}
@@ -517,12 +525,25 @@ function PersonConflictRow({ person, checked, onCheck, simMode }: {
             </div>
           </td>
           <td className="px-3 py-2 text-center">
+            {c.other_organization ? (
+              <span className={`text-[10px] font-medium truncate max-w-[80px] inline-block ${
+                orgMatch ? 'text-amber-700 font-bold' : 'text-gray-500'
+              }`} title={c.other_organization}>
+                {orgMatch && <span className="mr-0.5">⚑</span>}
+                {c.other_organization}
+              </span>
+            ) : (
+              <span className="text-[10px] text-gray-300">–</span>
+            )}
+          </td>
+          <td className="px-3 py-2 text-center">
             <span className="text-xs font-semibold text-red-600">{c.overlap_days}일</span>
             <div className="text-[10px] text-gray-400">{c.overlap_start}~{c.overlap_end}</div>
           </td>
           <td className="px-3 py-2" colSpan={3} />
         </tr>
-      ))}
+        );
+      })}
     </>
   );
 }
@@ -1237,6 +1258,7 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                     <IntegratedPersonRow
                       key={rowKey}
                       person={person}
+                      myOrganization={scheduleData?.organization}
                       allPeople={allPeople}
                       replaceValue={personReplacements[rowKey]}
                       onReplaceChange={(_, v) => handlePersonChange(rowKey, v)}
@@ -1390,11 +1412,13 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
 // ── 통합 패널의 인력 행 ───────────────────────────────────────────────────────
 function IntegratedPersonRow({
   person,
+  myOrganization,
   allPeople,
   replaceValue,
   onReplaceChange,
 }: {
   person: PersonSchedule;
+  myOrganization?: string;
   allPeople: AllPerson[];
   replaceValue: number | null | undefined;
   onReplaceChange: (key: string, v: number | null | undefined) => void;
@@ -1492,12 +1516,16 @@ function IntegratedPersonRow({
           </tr>
 
           {/* 이 단계와 겹치는 타사업 목록 */}
-          {ph.other_projects.map((op, opIdx) => (
+          {ph.other_projects.map((op, opIdx) => {
+            const orgMatch = myOrganization && op.other_organization && myOrganization === op.other_organization;
+            return (
             <tr
               key={opIdx}
-              className={`border-b border-gray-50/80 ${op.other_field_highlight ? 'bg-rose-50/50' : 'bg-white/80'}`}
+              className={`border-b border-gray-50/80 ${
+                orgMatch ? 'bg-amber-50/70' : op.other_field_highlight ? 'bg-rose-50/50' : 'bg-white/80'
+              }`}
             >
-              <td colSpan={2} className="pl-14 pr-3 py-1">
+              <td className="pl-14 pr-3 py-1">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <TypeBadge type={op.type_label} />
                   <span
@@ -1526,11 +1554,24 @@ function IntegratedPersonRow({
                 </div>
               </td>
               <td className="px-2 py-1 text-center">
+                {op.other_organization ? (
+                  <span className={`text-[9px] font-medium truncate max-w-[70px] inline-block ${
+                    orgMatch ? 'text-amber-700 font-bold' : 'text-gray-500'
+                  }`} title={op.other_organization}>
+                    {orgMatch && <span className="mr-0.5">⚑</span>}
+                    {op.other_organization}
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-gray-300">–</span>
+                )}
+              </td>
+              <td className="px-2 py-1 text-center">
                 <span className="text-[10px] font-semibold text-red-600">{op.overlap_days}일</span>
               </td>
               <td colSpan={3} />
             </tr>
-          ))}
+            );
+          })}
         </React.Fragment>
       ))}
     </>
@@ -1658,6 +1699,7 @@ function SchedulePanel({ projectId, projectName, onBack }: {
                   인력 <span className="text-[10px] font-normal text-gray-400">(배치 순서)</span>
                 </th>
                 <th className="text-left px-3 py-2.5 font-semibold">본사업 분야</th>
+                <th className="text-center px-3 py-2.5 font-semibold">기관명</th>
                 <th className="text-center px-3 py-2.5 font-semibold">중복일수</th>
                 <th className="text-center px-3 py-2.5 font-semibold">충돌건수</th>
                 <th className="w-8" />
@@ -1668,6 +1710,7 @@ function SchedulePanel({ projectId, projectName, onBack }: {
                 <PersonConflictRow
                   key={person.person_key}
                   person={person}
+                  myOrganization={data.organization}
                   isFirst={idx === 0}
                 />
               ))}
