@@ -509,15 +509,23 @@ function PersonConflictRow({ person, myOrganization, checked, onCheck, simMode }
           <td className="pl-8 pr-3 py-2" colSpan={2}>
             <div className="flex items-center gap-1.5">
               <TypeBadge type={c.type_label} />
-              <span className="text-xs text-slate-700 font-medium truncate max-w-[180px]" title={c.other_project_name}>
+              <span className="relative group/tip text-xs text-slate-700 font-medium truncate max-w-[180px] cursor-default">
                 {c.other_project_name}
+                <span className="pointer-events-none absolute bottom-full left-0 mb-1 hidden group-hover/tip:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                  {c.other_project_name}
+                </span>
               </span>
               {c.other_field_highlight && (
                 <span className="text-[10px] text-rose-600 font-bold flex-shrink-0">⚠</span>
               )}
             </div>
             <div className="flex items-center gap-1.5 mt-1 pl-6 flex-wrap">
-              <span className="text-[10px] text-gray-500">{c.other_phase_name}</span>
+              <span className="relative group/phasetip text-[10px] text-gray-500 cursor-default">
+                {c.other_phase_name}
+                <span className="pointer-events-none absolute bottom-full left-0 mb-1 hidden group-hover/phasetip:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                  {c.other_phase_name}
+                </span>
+              </span>
               <span className="text-[10px] text-gray-400">{c.other_phase_start}~{c.other_phase_end}</span>
               <FieldBadge field={c.other_field} highlight={c.other_field_highlight} />
             </div>
@@ -527,11 +535,14 @@ function PersonConflictRow({ person, myOrganization, checked, onCheck, simMode }
           </td>
           <td className="px-3 py-2 text-center">
             {c.other_organization ? (
-              <span className={`text-[10px] font-medium truncate max-w-[80px] inline-block ${
+              <span className={`relative group/orgtip text-[10px] font-medium truncate max-w-[80px] inline-block cursor-default ${
                 orgMatch ? 'text-amber-700 font-bold' : 'text-gray-500'
-              }`} title={c.other_organization}>
+              }`}>
                 {orgMatch && <span className="mr-0.5">⚑</span>}
                 {c.other_organization}
+                <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/orgtip:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                  {c.other_organization}
+                </span>
               </span>
             ) : (
               <span className="text-[10px] text-gray-300">–</span>
@@ -1530,18 +1541,25 @@ function IntegratedPersonRow({
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <TypeBadge type={op.type_label} />
                   <span
-                    className="text-[10px] text-slate-700 font-medium"
-                    title={op.other_project_name}
+                    className="relative group/tip2 text-[10px] text-slate-700 font-medium cursor-default"
                     style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}
                   >
                     {op.other_project_name}
+                    <span className="pointer-events-none absolute bottom-full left-0 mb-1 hidden group-hover/tip2:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                      {op.other_project_name}
+                    </span>
                   </span>
                   {op.other_field_highlight && (
                     <span className="text-[9px] bg-rose-100 text-rose-600 px-1 rounded font-bold">⚠ 동일분야</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-[9px] text-gray-400 mt-0.5 pl-1 flex-wrap">
-                  <span className="truncate max-w-[100px]">{op.other_phase_name}</span>
+                  <span className="relative group/phasetip2 truncate max-w-[100px] cursor-default">
+                    {op.other_phase_name}
+                    <span className="pointer-events-none absolute bottom-full left-0 mb-1 hidden group-hover/phasetip2:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                      {op.other_phase_name}
+                    </span>
+                  </span>
                   <span className="text-gray-300">|</span>
                   <span className="text-blue-400 whitespace-nowrap">{op.overlap_start} ~ {op.overlap_end}</span>
                   {op.other_field && (
@@ -1556,11 +1574,14 @@ function IntegratedPersonRow({
               </td>
               <td className="px-2 py-1 text-center">
                 {op.other_organization ? (
-                  <span className={`text-[9px] font-medium truncate max-w-[70px] inline-block ${
+                  <span className={`relative group/orgtip2 text-[9px] font-medium truncate max-w-[70px] inline-block cursor-default ${
                     orgMatch ? 'text-amber-700 font-bold' : 'text-gray-500'
-                  }`} title={op.other_organization}>
+                  }`}>
                     {orgMatch && <span className="mr-0.5">⚑</span>}
                     {op.other_organization}
+                    <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/orgtip2:block z-50 whitespace-nowrap bg-gray-800 text-white text-[10px] rounded px-2 py-1 shadow-lg">
+                      {op.other_organization}
+                    </span>
                   </span>
                 ) : (
                   <span className="text-[9px] text-gray-300">–</span>
