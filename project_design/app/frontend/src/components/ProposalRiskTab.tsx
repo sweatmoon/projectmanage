@@ -209,6 +209,7 @@ interface AllPerson {
 
 interface AllPeopleResult {
   project_id: number;
+  organization: string;
   assigned: PersonSchedule[];
   all_people: AllPerson[];
   project_start: string | null;
@@ -1258,7 +1259,7 @@ function IntegratedSimPanel({ projectId }: { projectId: number }) {
                     <IntegratedPersonRow
                       key={rowKey}
                       person={person}
-                      myOrganization={scheduleData?.organization}
+                      myOrganization={allPeopleData?.organization}
                       allPeople={allPeople}
                       replaceValue={personReplacements[rowKey]}
                       onReplaceChange={(_, v) => handlePersonChange(rowKey, v)}

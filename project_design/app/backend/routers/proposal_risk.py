@@ -1323,6 +1323,7 @@ async def get_all_people_for_project(
 
     return {
         "project_id": project_id,
+        "organization": target.organization or "",
         "assigned": schedule_data,
         "all_people": all_people_list,
         "project_start": str(t_start) if t_start else None,
