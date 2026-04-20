@@ -162,10 +162,11 @@ async def _unlink_deleted_person(db: AsyncSession, person_id: int, person_name: 
     return unlinked
 
 
-async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
+async def _remap_staffing_by_names(db: AsyncSession, names: list[str], deleted_person_ids: list[int] | None = None) -> int:
     """주어진 이름 목록과 일치하는 staffing / staffing_hat의 person_id를 자동 연결/재매핑.
     - person_id=None 인 미매핑 staffing → person_id 연결
     - person_id가 있어도 person_name_text 기준 올바른 People를 가리키지 않으면 재매핑
+    - deleted_person_ids 지정 시: person_name_text=NULL이어도 구계정 person_id → 신계정으로 직접 교체
     - StaffingHat(actual_person_id)도 동일하게 처리
     """
     if not names:
@@ -178,7 +179,7 @@ async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
     except ImportError:
         has_hat = False
 
-    # 1) People 테이블에서 해당 이름들 일괄 조회
+    # 1) People 테이블에서 해당 이름들 일괄 조회 (활성 계정만)
     people_stmt = select(People).where(
         and_(People.person_name.in_(names), People.deleted_at.is_(None))
     )
@@ -191,7 +192,52 @@ async def _remap_staffing_by_names(db: AsyncSession, names: list[str]) -> int:
 
     remapped = 0
 
-    # 2) Staffing 재매핑: person_name_text가 names 중 하나인 모든 행 (삭제되지 않은 것)
+    # 2-a) 구계정 person_id → 신계정 직접 교체
+    #      person_name_text=NULL인 채로 구계정 id를 가리키는 staffing도 처리
+    if deleted_person_ids:
+        # 삭제된 person_id별로 동일 이름의 신계정 id 매핑 구성
+        deleted_people_stmt = select(People).where(People.id.in_(deleted_person_ids))
+        deleted_people_result = await db.execute(deleted_people_stmt)
+        active_by_deleted_id: dict[int, People] = {}
+        for dp in deleted_people_result.scalars().all():
+            active = people_by_name.get(dp.person_name.strip())
+            if active:
+                active_by_deleted_id[dp.id] = active
+
+        if active_by_deleted_id:
+            old_ids = list(active_by_deleted_id.keys())
+            direct_stmt = select(Staffing).where(
+                and_(
+                    Staffing.person_id.in_(old_ids),
+                    Staffing.deleted_at.is_(None),
+                )
+            )
+            direct_result = await db.execute(direct_stmt)
+            for s in direct_result.scalars().all():
+                new_person = active_by_deleted_id.get(s.person_id)
+                if new_person:
+                    if not s.person_name_text:
+                        s.person_name_text = new_person.person_name
+                    s.person_id = new_person.id
+                    remapped += 1
+
+            if has_hat:
+                direct_hat_stmt = select(StaffingHat).where(
+                    and_(
+                        StaffingHat.actual_person_id.in_(old_ids),
+                        StaffingHat.deleted_at.is_(None),
+                    )
+                )
+                direct_hat_result = await db.execute(direct_hat_stmt)
+                for h in direct_hat_result.scalars().all():
+                    new_person = active_by_deleted_id.get(h.actual_person_id)
+                    if new_person:
+                        if not h.actual_person_name:
+                            h.actual_person_name = new_person.person_name
+                        h.actual_person_id = new_person.id
+                        remapped += 1
+
+    # 2-b) Staffing 재매핑: person_name_text가 names 중 하나인 모든 행 (삭제되지 않은 것)
     stmt = select(Staffing).where(
         and_(
             Staffing.person_name_text.in_(names),
@@ -396,9 +442,13 @@ async def delete_peoples_batch(
 ):
     service = PeopleService(db)
     deleted_count = 0
+    deleted_names: list[str] = []
+    deleted_ids: list[int] = []
     for item_id in req.ids:
         obj = await service.get_by_id(item_id)
         if obj:
+            deleted_names.append(obj.person_name)
+            deleted_ids.append(obj.id)
             # staffing person_id 연결 해제 (삭제 전 이름 보존)
             await _unlink_deleted_person(db, obj.id, obj.person_name)
             soft_delete(obj)
@@ -408,6 +458,9 @@ async def delete_peoples_batch(
                 entity_id=item_id, before_obj=obj, request=request,
                 person_name=obj.person_name,
             )
+    # 동일 이름의 신계정으로 staffing 자동 재매핑
+    if deleted_names:
+        await _remap_staffing_by_names(db, deleted_names, deleted_person_ids=deleted_ids)
     await db.commit()
     return {"message": f"Deleted {deleted_count} people", "deleted_count": deleted_count}
 
@@ -420,14 +473,18 @@ async def delete_people(
     obj = await service.get_by_id(id)
     if not obj:
         raise HTTPException(status_code=404, detail="People not found")
+    person_name = obj.person_name
+    person_id = obj.id
     # staffing person_id 연결 해제 (삭제 전 이름 보존)
-    await _unlink_deleted_person(db, obj.id, obj.person_name)
+    await _unlink_deleted_person(db, person_id, person_name)
     soft_delete(obj)
     await write_audit_log(
         db, event_type=EventType.DELETE, entity_type=EntityType.PEOPLE,
         entity_id=id, before_obj=obj, request=request,
-        person_name=obj.person_name,
+        person_name=person_name,
     )
+    # 동일 이름의 신계정으로 staffing 자동 재매핑
+    await _remap_staffing_by_names(db, [person_name], deleted_person_ids=[person_id])
     await db.commit()
     return {"message": "People deleted", "id": id}
 
@@ -448,27 +505,32 @@ async def remap_all_staffing(
     """
     from models.people import People
 
-    # 1) 모든 활성 인력 수집 → person_id 연결/교정
-    all_people_stmt = select(People).where(People.deleted_at.is_(None))
-    all_people_result = await db.execute(all_people_stmt)
-    all_people_list = all_people_result.scalars().all()
-    all_names = [p.person_name for p in all_people_list if p.person_name]
-    active_ids = {p.id for p in all_people_list}
-
-    remapped = 0
-    if all_names:
-        remapped = await _remap_staffing_by_names(db, all_names)
-
-    # 2) 삭제된 인력을 가리키는 staffing 탐색 → person_id NULL 처리
+    # 1) 삭제된 인력을 가리키는 staffing → 신계정 재매핑 우선 시도 후 NULL 처리
     deleted_stmt = select(People).where(People.deleted_at.is_not(None))
     deleted_result = await db.execute(deleted_stmt)
     deleted_people = deleted_result.scalars().all()
 
+    deleted_names_all = [dp.person_name for dp in deleted_people if dp.person_name]
+    deleted_ids_all = [dp.id for dp in deleted_people]
+
+    remapped = 0
+    if deleted_names_all:
+        remapped = await _remap_staffing_by_names(db, deleted_names_all, deleted_person_ids=deleted_ids_all)
+
     unlinked = 0
     for dp in deleted_people:
-        # 아직 이 삭제된 인력을 가리키는 staffing이 있으면 해제
+        # 재매핑 후에도 남아있는 구계정 참조 → NULL 처리
         n = await _unlink_deleted_person(db, dp.id, dp.person_name)
         unlinked += n
+
+    # 2) 모든 활성 인력 수집 → person_id 연결/교정
+    all_people_stmt = select(People).where(People.deleted_at.is_(None))
+    all_people_result = await db.execute(all_people_stmt)
+    all_people_list = all_people_result.scalars().all()
+    all_names = [p.person_name for p in all_people_list if p.person_name]
+
+    if all_names:
+        remapped += await _remap_staffing_by_names(db, all_names)
 
     await db.commit()
 
