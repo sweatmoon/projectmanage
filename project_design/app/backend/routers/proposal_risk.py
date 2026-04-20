@@ -283,10 +283,9 @@ def _analyze_risks(
         # 이 인력의 대상 사업 내 phase 들
         my_phases_in_target = [e for e in all_entries
                                if e["project_id"] == target_project.id]
-        # 이 인력의 다른 사업 phase 들 (P↔P 중복은 감지하지 않음: A 기준 비교만)
+        # 이 인력의 다른 사업 phase 들 (A/P 모두 비교)
         other_phases = [e for e in all_entries
-                       if e["project_id"] != target_project.id
-                       and e["project_status"] != "제안"]
+                       if e["project_id"] != target_project.id]
 
         for t_ph in my_phases_in_target:
             for o_ph in other_phases:
@@ -427,10 +426,9 @@ def _analyze_risks(
         person_name = t_person_keys[person_key]
         all_entries = person_phase_index.get(person_key, [])
         my_phases = [e for e in all_entries if e["project_id"] == target_project.id]
-        # P↔P 중복은 감지하지 않음: A 기준 비교만
+        # A/P 모두 비교
         other_phases = [e for e in all_entries
-                       if e["project_id"] != target_project.id
-                       and e["project_status"] != "제안"]
+                       if e["project_id"] != target_project.id]
 
         for t_ph in my_phases:
             for o_ph in other_phases:
@@ -717,10 +715,9 @@ def _build_schedule_overlap(
         all_entries = person_phase_index.get(person_key, [])
 
         my_phases = [e for e in all_entries if e["project_id"] == target_project_id]
-        # P↔P 중복은 감지하지 않음: A 기준 비교만
+        # A/P 모두 비교
         other_phases = [e for e in all_entries
-                       if e["project_id"] != target_project_id
-                       and e["project_status"] != "제안"]
+                       if e["project_id"] != target_project_id]
 
         conflicts = []
         seen_conf = set()
