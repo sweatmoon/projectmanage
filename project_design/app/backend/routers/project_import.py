@@ -95,7 +95,8 @@ async def _import_phases_logic(
 ) -> dict:
     """Shared logic for importing phases from text."""
     # Get existing people for name matching (strip whitespace for robust matching)
-    people_stmt = select(People)
+    # deleted_at IS NULL: 삭제된 구계정이 동명 활성 계정을 덮어쓰는 버그 방지
+    people_stmt = select(People).where(People.deleted_at.is_(None))
     people_result = await db.execute(people_stmt)
     all_people = people_result.scalars().all()
     people_by_name = {p.person_name.strip(): p for p in all_people}
@@ -352,7 +353,8 @@ async def overwrite_phases_from_text(
         remap_result = await db.execute(remap_stmt)
         unmapped_staffing = remap_result.scalars().all()
 
-        people_stmt2 = select(People)
+        # deleted_at IS NULL: 삭제된 구계정으로 재매핑되는 버그 방지
+        people_stmt2 = select(People).where(People.deleted_at.is_(None))
         people_result2 = await db.execute(people_stmt2)
         all_people2 = people_result2.scalars().all()
         people_by_name2 = {p.person_name.strip(): p for p in all_people2}
